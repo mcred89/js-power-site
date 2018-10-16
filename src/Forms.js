@@ -8,46 +8,67 @@ export class MaxesForm extends Component {
             maxSquat: 0,
             maxPress: 0,
             maxDead: 0,
-            mainliftchoice: 'low'
+            mainliftchoice: 'low',
+            needsToFillOutForm: true
         };
 
-        this.handleInputChange = this.handleInputChange.bind(this);
+        this.handleChange = this.handleChange.bind(this);
         this.handleSubmit = this.handleSubmit.bind(this);
       }
 
-      handleInputChange(event) {
+      handleChange(event) {
         const target = event.target;
-        const value = target.value;
+        const value = target.value
         const name = target.name;
+    
         this.setState({
-            [name]: value
+          [name]: value
         });
       }
 
-      handleSubmit(event) {
-        alert(this.state.maxSquat + ' ' + this.state.maxPress + ' ' + this.state.maxDead + this.state.mainliftchoice);
+    handleSubmit(event) {
+        this.setState({
+            needsToFillOutForm: false
+        });
       }
     
 
     render() {
+        const needsToFillOutForm = this.state.needsToFillOutForm;
+
         return (
-            <form>
-                <div className="form-group">
-                    <label>Input Maxes</label>
-                    <input type="number" className="form-control" name="maxSquat" placeholder="Max Squat" />
-                    <input type="number" className="form-control" name="maxPress" placeholder="Max Press" />
-                    <input type="number" className="form-control" name="maxDead" placeholder="Max Deadlift" />
-                </div>
-                <div className="form-group">
-                    <label>Low Volume</label>
-                    <input type="radio" class="form-check-input" name="mainliftchoice" value="low" checked />
-                    <label>High Volume</label>
-                    <input type="radio" class="form-check-input" name="mainliftchoice" value="high" />
-                </div>
-                <div>
-                    <button type="submit" value="Submit" class="button btn btn-primary">Submit</button>
-                </div>
-            </form>
+            <div>
+                {needsToFillOutForm ? (
+                    <div>
+                        <form onSubmit={this.handleSubmit}>
+                            <div className="form-group">
+                                <label>Input Maxes</label>
+                                <input type="number" className="form-control" value={this.state.maxSquat} name="maxSquat" placeholder="Max Squat" onChange={this.handleChange}/>
+                                <input type="number" className="form-control" value={this.state.maxPress} name="maxPress" placeholder="Max Press" onChange={this.handleChange}/>
+                                <input type="number" className="form-control" value={this.state.maxDead} name="maxDead" placeholder="Max Deadlift" onChange={this.handleChange}/>
+                            </div>
+                            <div className="form-group">
+                                <label>Low Volume</label>
+                                <input type="radio" class="form-check-input" name="mainliftchoice" value="low" checked />
+                                <label>High Volume</label>
+                                <input type="radio" class="form-check-input" name="mainliftchoice" value="high" />
+                            </div>
+                            <div>
+                                <input type="submit" value="Submit" class="button btn btn-primary" />
+                            </div>
+                        </form>
+                    </div>
+                ) : (
+                    <div>
+                        <ul>
+                            <li>{this.state.maxSquat}</li>
+                            <li>{this.state.maxPress}</li>
+                            <li>{this.state.maxDead}</li>
+                        </ul>
+                        
+                    </div>
+                )}
+            </div>
         );
       }
     }
