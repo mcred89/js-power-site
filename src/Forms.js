@@ -31,10 +31,82 @@ export class MaxesForm extends Component {
             needsToFillOutForm: false
         });
       }
+
+    createRoutine = (percentages) => {
+        let routine = [];
+
+        for (let i = 0; i < 5; i++) {
+            let day = []
+
+            for (let j = 0; j < 4; j++) {
+                let mainLift;
+                let warmup;
+                let accessory;
+                let accessoryReps;
+                let mainLiftMax;
+                if (j === 0) {
+                    mainLift = 'Squat';
+                    mainLiftMax = this.state.maxSquat;
+                    warmup = 'Barbell Overhead Squat x 30';
+                    accessory = 'Zercher Squats';
+                    accessoryReps = '3x5'
+                } else if (j === 1) {
+                    mainLift = 'Press';
+                    mainLiftMax = this.state.maxPress;
+                    warmup = '50 LB KB Press x 15(each arm)';
+                    accessory = 'Curls';
+                    accessoryReps = '3x8'
+                } else {
+                    mainLift = 'Deadlift';
+                    mainLiftMax = this.state.maxDead;
+                    warmup = 'Barbell Overhead Squat x 30';
+                    accessory = 'Bent Over Row';
+                    accessoryReps = '3x5'
+                }
+                day.push(
+                    <li>
+                        {`${warmup}`}
+                    </li>
+                )
+                day.push(
+                    <li>
+                        {`${mainLift}: ${mainLiftMax * percentages[i]['percent']}lbs ${percentages[i]['reprange']}`}
+                    </li>
+                )
+                day.push(
+                    <li>
+                        {`${accessory}: ${mainLiftMax * .4}lbs ${accessoryReps}`}
+                    </li>
+                )
+            }
+
+            routine.push(<ul>{day}</ul>)
+        }
+
+        return routine;
+    }
     
 
     render() {
         const needsToFillOutForm = this.state.needsToFillOutForm;
+        let percentages;
+        if (this.state.mainliftchoice === 'low') {
+            percentages = {
+                0: {"percent": .65, "reprange": "4x6"},
+                1: {"percent": .7, "reprange": "4x5"},
+                2: {"percent": .75, "reprange": "4x4"},
+                3: {"percent": .8, "reprange": "4x3"},
+                4: {"percent": .85, "reprange": "4x2"}
+            }
+        } else {
+            percentages = {
+                0: {"percent": .55, "reprange": "5x10"},
+                1: {"percent": .6, "reprange": "5x9"},
+                2: {"percent": .65, "reprange": "5x8"},
+                3: {"percent": .7, "reprange": "5x7"},
+                4: {"percent": .75, "reprange": "5x6"}
+            }
+        };
 
         return (
             <div>
@@ -60,12 +132,9 @@ export class MaxesForm extends Component {
                     </div>
                 ) : (
                     <div>
-                        <ul>
-                            <li>{this.state.maxSquat}</li>
-                            <li>{this.state.maxPress}</li>
-                            <li>{this.state.maxDead}</li>
-                        </ul>
-                        
+                        <h1>Your Workout Program</h1>
+                        <hr />
+                        <ul>{this.createRoutine(percentages)}</ul>
                     </div>
                 )}
             </div>
