@@ -36,14 +36,17 @@ export class MaxesForm extends Component {
         let routine = [];
 
         for (let i = 0; i < 5; i++) {
-            let day = []
+            let week = i + 1
+            let weekArray = []
 
-            for (let j = 0; j < 4; j++) {
+            for (let j = 0; j < 3; j++) {
                 let mainLift;
                 let warmup;
                 let accessory;
                 let accessoryReps;
                 let mainLiftMax;
+                let day = j +1
+                let lifts = []
                 if (j === 0) {
                     mainLift = 'Squat';
                     mainLiftMax = this.state.maxSquat;
@@ -63,24 +66,27 @@ export class MaxesForm extends Component {
                     accessory = 'Bent Over Row';
                     accessoryReps = '3x5'
                 }
-                day.push(
+                lifts.push(
                     <li>
                         {`${warmup}`}
                     </li>
                 )
-                day.push(
+                lifts.push(
                     <li>
                         {`${mainLift}: ${mainLiftMax * percentages[i]['percent']}lbs ${percentages[i]['reprange']}`}
                     </li>
                 )
-                day.push(
-                    <li>
-                        {`${accessory}: ${mainLiftMax * .4}lbs ${accessoryReps}`}
-                    </li>
-                )
+                if ( j !== 0 ) {
+                    lifts.push(
+                        <li>
+                            {`${accessory}: ${mainLiftMax * .4}lbs ${accessoryReps}`}
+                        </li>
+                    )
+                }
+                weekArray.push(<div><h4>Day {day}</h4><ul>{lifts}</ul></div>)
             }
 
-            routine.push(<ul>{day}</ul>)
+            routine.push(<div><h3>Week {week}</h3>{weekArray}</div>)
         }
 
         return routine;
