@@ -121,15 +121,47 @@ export class MaxesForm extends Component {
                         <form onSubmit={this.handleSubmit}>
                             <div className="form-group">
                                 <label>Input Maxes</label>
-                                <input type="number" className="form-control" value={this.state.maxSquat} name="maxSquat" placeholder="Max Squat" onChange={this.handleChange}/>
-                                <input type="number" className="form-control" value={this.state.maxPress} name="maxPress" placeholder="Max Press" onChange={this.handleChange}/>
-                                <input type="number" className="form-control" value={this.state.maxDead} name="maxDead" placeholder="Max Deadlift" onChange={this.handleChange}/>
+                                <input 
+                                    type="number"
+                                    className="form-control"
+                                    value={this.state.maxSquat}
+                                    name="maxSquat"
+                                    placeholder="Max Squat"
+                                    onChange={this.handleChange}
+                                />
+                                <input 
+                                    type="number" 
+                                    className="form-control"
+                                    value={this.state.maxPress}
+                                    name="maxPress"
+                                    placeholder="Max Press"
+                                    onChange={this.handleChange}
+                                />
+                                <input
+                                    type="number"
+                                    className="form-control"
+                                    value={this.state.maxDead}
+                                    name="maxDead"
+                                    placeholder="Max Deadlift"
+                                    onChange={this.handleChange}
+                                />
                             </div>
                             <div className="form-group">
                                 <label>Low Volume</label>
-                                <input type="radio" class="form-check-input" name="mainliftchoice" value="low" onChange={this.handleChange}/>
+                                <input 
+                                    type="radio"
+                                    class="form-check-input" 
+                                    name="mainliftchoice" value="low" 
+                                    onChange={this.handleChange}
+                                />
                                 <label>High Volume</label>
-                                <input type="radio" class="form-check-input" name="mainliftchoice" value="high" onChange={this.handleChange}/>
+                                <input 
+                                    type="radio"
+                                    class="form-check-input"
+                                    name="mainliftchoice"
+                                    value="high"
+                                    onChange={this.handleChange}
+                                />
                             </div>
                             <div>
                                 <input type="submit" value="Submit" class="button btn btn-primary" />
