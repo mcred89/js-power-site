@@ -5,9 +5,9 @@ export class MaxesForm extends Component {
     constructor(props) {
         super(props);
         this.state = {
-            maxSquat: 0,
-            maxPress: 0,
-            maxDead: 0,
+            maxSquat: '',
+            maxPress: '',
+            maxDead: '',
             mainliftchoice: 'low',
             needsToFillOutForm: true,
             percentages: {
@@ -52,13 +52,13 @@ export class MaxesForm extends Component {
         return (
             <form onSubmit={this.handleSubmit}>
                 <div className="form-group">
-                    <label>Input Maxes</label>
+                    <h2>Input Maxes</h2>
                     <input 
                         type="number"
                         className="form-control"
                         value={this.state.maxSquat}
                         name="maxSquat"
-                        placeholder="Max Squat"
+                        placeholder="Squat"
                         onChange={this.handleChange}
                     />
                     <input 
@@ -66,7 +66,7 @@ export class MaxesForm extends Component {
                         className="form-control"
                         value={this.state.maxPress}
                         name="maxPress"
-                        placeholder="Max Press"
+                        placeholder="Press"
                         onChange={this.handleChange}
                     />
                     <input
@@ -74,29 +74,38 @@ export class MaxesForm extends Component {
                         className="form-control"
                         value={this.state.maxDead}
                         name="maxDead"
-                        placeholder="Max Deadlift"
+                        placeholder="Deadlift"
                         onChange={this.handleChange}
                     />
-                </div>
-                <div className="form-group">
-                    <label>Low Volume</label>
-                    <input 
-                        type="radio"
-                        class="form-check-input" 
-                        name="mainliftchoice" value="low" 
-                        onChange={this.handleChange}
-                    />
-                    <label>High Volume</label>
-                    <input 
-                        type="radio"
-                        class="form-check-input"
-                        name="mainliftchoice"
-                        value="high"
-                        onChange={this.handleChange}
-                    />
-                </div>
-                <div>
-                    <input type="submit" value="Submit" class="button btn btn-primary" />
+
+                    <h2>Volume</h2>
+                    <div class="btn-group btn-group-toggle" data-toggle="buttons">
+                    <label class="btn btn-secondary">
+                        Low
+                        <input 
+                            type="radio"
+                            className="optradio" 
+                            name="mainliftchoice"
+                            value="low" 
+                            onChange={this.handleChange}
+                            autocomplete="off"
+                        />
+                    </label>
+                    <label class="btn btn-secondary">
+                        High
+                        <input 
+                            type="radio"
+                            className="optradio"
+                            name="mainliftchoice"
+                            value="high"
+                            onChange={this.handleChange}
+                            autocomplete="off"
+                        />
+                    </label>
+                    </div>
+                    <div>
+                        <button type="submit" value="Submit" className="button btn btn-primary mt-3">Submit</button>
+                    </div>
                 </div>
             </form>       
         )
@@ -166,7 +175,7 @@ export class MaxesForm extends Component {
 
     get routine() {
         return(
-            <div>
+            <div className="text-white">
                 <h1>Your Workout Program</h1>
                 <hr />
                 <ul>{this.createRoutine()}</ul>
@@ -179,7 +188,11 @@ export class MaxesForm extends Component {
         return (
             <div>
                 {this.state.needsToFillOutForm ? (
-                    <div>{this.form}</div>
+                    <div>
+                        <div className="card mt-5">
+                            <div className="card-body">{this.form}</div>
+                        </div>
+                    </div>
                 ) : (
                     <div>{this.routine}</div>
                 )}
