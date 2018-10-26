@@ -1,6 +1,5 @@
 import React, { Component } from 'react';
 import { MaxesForm } from './MaxesForm'
-import './App.css';
 
 class App extends Component {
   render() {
