@@ -127,9 +127,9 @@ export class MaxesForm extends Component {
                             </div>
                             <div className="form-group">
                                 <label>Low Volume</label>
-                                <input type="radio" class="form-check-input" name="mainliftchoice" value="low" checked />
+                                <input type="radio" class="form-check-input" name="mainliftchoice" value="low" onChange={this.handleChange}/>
                                 <label>High Volume</label>
-                                <input type="radio" class="form-check-input" name="mainliftchoice" value="high" />
+                                <input type="radio" class="form-check-input" name="mainliftchoice" value="high" onChange={this.handleChange}/>
                             </div>
                             <div>
                                 <input type="submit" value="Submit" class="button btn btn-primary" />
