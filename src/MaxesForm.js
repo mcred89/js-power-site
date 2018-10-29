@@ -154,13 +154,13 @@ export class MaxesForm extends Component {
                 )
                 lifts.push(
                     <li>
-                        {`${mainLift}: ${mainLiftMax * percent}lbs ${reps}`}
+                        {`${mainLift}: ${Math.ceil(mainLiftMax * percent / 5) * 5}lbs ${reps}`}
                     </li>
                 )
                 if ( j !== 0 ) {
                     lifts.push(
                         <li>
-                            {`${accessory}: ${mainLiftMax * .4}lbs ${accessoryReps}`}
+                            {`${accessory}: ${Math.ceil(mainLiftMax * .4 / 5) * 5}lbs ${accessoryReps}`}
                         </li>
                     )
                 }
