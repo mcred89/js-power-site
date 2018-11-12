@@ -1,0 +1,89 @@
+service: themcilroy-static
+
+provider:
+  name: aws
+  stage: ${opt:stage,'dev'}
+  region: us-west-2
+  runtime: nodejs6.10
+
+custom:
+  siteName:
+    dev: dev.themcilroy.com
+    prod: themcilroy.com
+  acmARN: arn:aws:acm:us-east-1:824269988929:certificate/fdc01f6c-be49-40b3-afb7-707d085d1042
+  aliasDNSName: s3-website-us-west-2.amazonaws.com
+  s3Sync:
+    - bucketName: ${self:custom.siteName.${self:provider.stage}}
+      localDir: build
+
+resources:
+  Resources:
+    StaticSite:
+      Type: AWS::S3::Bucket
+      Properties:
+        AccessControl: PublicRead
+        BucketName: ${self:custom.siteName.${self:provider.stage}}
+        WebsiteConfiguration:
+          IndexDocument: index.html
+
+    StaticSiteS3BucketPolicy:
+      Type: AWS::S3::BucketPolicy
+      Properties:
+        Bucket:
+          Ref: StaticSite
+        PolicyDocument:
+          Statement:
+            - Sid: PublicReadGetObject
+              Effect: Allow
+              Principal: "*"
+              Action:
+              - s3:GetObject
+              Resource:
+                Fn::Join: [
+                  "", [
+                    "arn:aws:s3:::",
+                    {
+                      "Ref": "StaticSite"
+                    },
+                    "/*"
+                  ]
+                ]
+
+    DnsRecord:
+      Type: "AWS::Route53::RecordSet"
+      Properties:
+        AliasTarget:
+          DNSName:
+            Fn::GetAtt: SiteCloudFront.DomainName
+          # https://docs.aws.amazon.com/general/latest/gr/rande.html#cf_region
+          HostedZoneId: Z2FDTNDATAQYW2
+        HostedZoneName: ${self:custom.siteName.prod}.
+        Name:
+          Ref: StaticSite
+        Type: 'A'
+
+    SiteCloudFront:
+      Type: 'AWS::CloudFront::Distribution'
+      Properties:
+        DistributionConfig:
+          Aliases:
+            - Ref: StaticSite
+          Enabled: True
+          Origins:
+            - DomainName: ${self:custom.siteName.${self:provider.stage}}.${self:custom.aliasDNSName}
+              Id: origin
+              CustomOriginConfig:
+                OriginProtocolPolicy: http-only
+          DefaultCacheBehavior:
+            TargetOriginId: origin
+            DefaultTTL: 5
+            MaxTTL: 30
+            ForwardedValues:
+              QueryString: false
+            ViewerProtocolPolicy: redirect-to-https
+          ViewerCertificate:
+            AcmCertificateArn: ${self:custom.acmARN}
+            SslSupportMethod: sni-only
+
+plugins:
+  - serverless-s3-sync
