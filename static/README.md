@@ -15,7 +15,7 @@ And change these value in serverles.yaml:
 
 Note that the inital deploy of each stage takes a long time (15-20 minutes). This is CloudFront spin-up time.
 
-## Basic Usage
+## Basic NPM Usage
 
 ```bash
 npm start # starts dev server
@@ -28,9 +28,11 @@ npm test # start test runner
 ```bash
 # Dev
 # Creates dev.themcilroy.com
+npm run build
 serverless deploy -v --stage dev
 # Prod
 # Creates themcilroy.com
+npm run build
 serverless deploy -v --stage prod
 ```
 
