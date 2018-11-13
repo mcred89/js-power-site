@@ -9,6 +9,7 @@ If you're wanting to reuse this code, you need to:
 3. Set up your local AWS cli with your account creds.
 
 And change these value in serverles.yaml:
+
 4. The custom.siteNames should refelct your own domain names
 5. Update the acmARN to your resource ARN from step 2.
 6. [OPTIONAL] Update custom.aliasDNSName and provider.region to whatever AWS region you want.
