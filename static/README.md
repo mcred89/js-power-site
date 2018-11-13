@@ -8,7 +8,7 @@ If you're wanting to reuse this code, you need to:
 2. Set up ACM for your Route53 Domain. You can just make one cert with a '*'.DOMAIN additional domain.
 3. Set up your local AWS cli with your account creds.
 
-And change these value in serverles.yaml:
+And change the below values in serverles.yaml.
 
 1. The custom.siteNames should refelct your own domain names
 2. Update the acmARN to your resource ARN from step 2.
