@@ -137,7 +137,7 @@ export class MaxesForm extends Component {
                             name="mainliftchoice"
                             value="low" 
                             onChange={this.handleInputChange}
-                            autocomplete="off"
+                            autoComplete="off"
                             required
                         />
                     </label>
@@ -149,7 +149,7 @@ export class MaxesForm extends Component {
                             name="mainliftchoice"
                             value="high"
                             onChange={this.handleChange}
-                            autocomplete="off"
+                            autoComplete="off"
                             required
                         />
                     </label>
