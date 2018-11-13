@@ -25,27 +25,73 @@ export class MaxesForm extends Component {
                     3: {"percent": .7, "reprange": "5x7"},
                     4: {"percent": .75, "reprange": "5x6"}
                 }
-            }
+            },
+            errorMessage: ''
         };
 
-        this.handleChange = this.handleChange.bind(this);
+        this.handleInputChange = this.handleInputChange.bind(this);
         this.handleSubmit = this.handleSubmit.bind(this);
     }
 
-    handleChange(event) {
+    validate(name, value) {
+        const liftVars = ['maxSquat', 'maxPress', 'maxDead'];
+        if (liftVars.includes(name)) {
+            if (value <= 0 || value > 1001){
+                this.setState({errorMessage: 'Your maxes must be between 1 and 1000'});
+            } else if (this.liftsAreValid()){
+                this.clearError()
+            }
+        }
+    };
+
+    liftsAreValid() {
+        const liftVarValues = [this.state.maxSquat, this.state.maxPress, this.state.maxDead];
+        let i = 0;
+        for (i = 0; i < liftVarValues.length; i++) {
+            let value = liftVarValues[i]
+            if ( value > 0 && value < 1001 ) {
+                this.clearError()
+            } else if (value === '') {
+                this.clearError()
+            } else {
+                this.setState({errorMessage: 'Your maxes must be between 1 and 1000'});
+                return false       
+            }
+        }
+        return true
+    }
+
+    handleInputChange(event) {
         const target = event.target;
-        const value = target.value
+        const value = target.value;
         const name = target.name;
-    
-        this.setState({
-          [name]: value
-        });
+        this.setState({[name]: value}, this.validate(name, value));
     }
 
     handleSubmit() {
+        if ( this.liftsAreValid() ) {
+            this.setState({
+                needsToFillOutForm: false
+            });
+        }
+    }
+
+    clearError() {
         this.setState({
-            needsToFillOutForm: false
+            errorMessage: ''
         });
+    }
+
+    get error() {
+        if (this.state.errorMessage !== '') {
+            return (
+                <div className="alert alert-danger" role="alert">
+                    {this.state.errorMessage}
+                </div>
+            )
+        } else {
+            return (<div></div>)   
+        }
     }
 
     get form() {
@@ -59,7 +105,8 @@ export class MaxesForm extends Component {
                         value={this.state.maxSquat}
                         name="maxSquat"
                         placeholder="Squat"
-                        onChange={this.handleChange}
+                        onChange={this.handleInputChange}
+                        required
                     />
                     <input 
                         type="number" 
@@ -67,7 +114,8 @@ export class MaxesForm extends Component {
                         value={this.state.maxPress}
                         name="maxPress"
                         placeholder="Press"
-                        onChange={this.handleChange}
+                        onChange={this.handleInputChange}
+                        required
                     />
                     <input
                         type="number"
@@ -75,23 +123,25 @@ export class MaxesForm extends Component {
                         value={this.state.maxDead}
                         name="maxDead"
                         placeholder="Deadlift"
-                        onChange={this.handleChange}
+                        onChange={this.handleInputChange}
+                        required
                     />
 
                     <h2>Volume</h2>
-                    <div class="btn-group btn-group-toggle" data-toggle="buttons">
-                    <label class="btn btn-secondary">
+                    <div className="btn-group btn-group-toggle" data-toggle="buttons">
+                    <label className="btn btn-secondary">
                         Low
                         <input 
                             type="radio"
                             className="optradio" 
                             name="mainliftchoice"
                             value="low" 
-                            onChange={this.handleChange}
-                            autocomplete="off"
+                            onChange={this.handleInputChange}
+                            autoComplete="off"
+                            required
                         />
                     </label>
-                    <label class="btn btn-secondary">
+                    <label className="btn btn-secondary">
                         High
                         <input 
                             type="radio"
@@ -99,12 +149,13 @@ export class MaxesForm extends Component {
                             name="mainliftchoice"
                             value="high"
                             onChange={this.handleChange}
-                            autocomplete="off"
+                            autoComplete="off"
+                            required
                         />
                     </label>
                     </div>
                     <div>
-                        <button type="submit" value="Submit" className="button btn btn-primary mt-3">Submit</button>
+                        <button disabled={this.state.errorMessage} type="submit" value="Submit" className="button btn btn-primary mt-3">Submit</button>
                     </div>
                 </div>
             </form>       
@@ -182,7 +233,6 @@ export class MaxesForm extends Component {
             </div>
         )
     }
-    
 
     render() {
         return (
@@ -191,6 +241,7 @@ export class MaxesForm extends Component {
                     <div>
                         <div className="card mt-5">
                             <div className="card-body">{this.form}</div>
+                            <div className="card-footer">{this.error}</div>
                         </div>
                     </div>
                 ) : (
