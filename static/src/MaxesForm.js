@@ -36,10 +36,10 @@ export class MaxesForm extends Component {
         const target = event.target;
         const value = target.value;
         const name = target.name;
-        this.setState({[name]: value});
+        this.setState({[name]: value},()=>{return false;});
     }
 
-    handleSubmit(event) {
+    handleSubmit() {
         this.setState({
             needsToFillOutForm: false
         });
@@ -82,14 +82,15 @@ export class MaxesForm extends Component {
                     />
 
                     <h2>Volume</h2>
-                    <div className="btn-group btn-group-toggle" data-toggle="buttons">
+                    <div className="btn-group btn-group-toggle" data-toggle="buttons" onChange={this.handleChange}>
                     <label className="btn btn-secondary">
                         Low
                         <input 
                             type="radio"
-                            className="optradio" 
+                            className="optradio form-control" 
                             value="low"
-                            checked={this.state.mainliftchoice === 'low'}
+                            name="mainliftchoice"
+                            checked={this.state.mainliftchoice === "low"}
                             onChange={this.handleChange}
                             required
                         />
@@ -98,11 +99,11 @@ export class MaxesForm extends Component {
                         High
                         <input 
                             type="radio"
-                            className="optradio"
+                            className="optradio form-control"
                             value="high"
-                            checked={this.state.mainliftchoice === 'high'}
+                            name="mainliftchoice"
+                            checked={this.state.mainliftchoice === "high"}
                             onChange={this.handleChange}
-                            required
                         />
                     </label>
                     </div>
@@ -148,8 +149,9 @@ export class MaxesForm extends Component {
                     accessory = 'Bent Over Row';
                     accessoryReps = '3x5'
                 }
-                let percent = this.state.percentages[this.state.mainliftchoice][i]['percent'];
-                let reps = this.state.percentages[this.state.mainliftchoice][i]['reprange'];
+                let volume = this.state.mainliftchoice;
+                let percent = this.state.percentages[volume][i]['percent'];
+                let reps = this.state.percentages[volume][i]['reprange'];
                 lifts.push(
                     <li>
                         {`${warmup}`}
