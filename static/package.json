@@ -4,7 +4,7 @@
   "private": true,
   "dependencies": {
     "ajv": "^6.5.4",
-    "react": "^16.5.2",
+    "react": "^16.6.3",
     "react-dom": "^16.5.2",
     "react-scripts": "2.0.4",
     "serverless": "^1.32.0"
