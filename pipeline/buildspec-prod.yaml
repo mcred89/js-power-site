@@ -3,13 +3,14 @@ phases:
   install:
     commands:
       - npm install -g serverless
+      - cd static
+      - npm install
   pre_build:
     commands:
       - echo "pre_build"
   build:
     commands:
-      - cd static
-      - serverless deploy --stage dev
+      - npm run-script build
   post_build:
     commands:
-      - echo "post_build"
+      - serverless deploy --stage dev

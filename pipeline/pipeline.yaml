@@ -1,72 +1,79 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: AWS CodePipeline for js-power-site
 
+Parameters:
+  GitHubOAuthToken:
+    Type : 'AWS::SSM::Parameter::Value<String>'
+    Default: CodepipelineGitHubToken
+  GitHubUserName:
+    Type: String
+    Default: mcred89
+  GitRepo:
+    Type: String
+    Default: js-power-site
+  GitBranch:
+    Type: String
+    AllowedValues: 
+      - develop
+      - master
+  BuildSpec:
+    Type: String
+    AllowedValues: 
+      - buildspec-dev.yaml
+      - buildspec-prod.yaml
+
 Resources:
   Pipeline: 
     Type: AWS::CodePipeline::Pipeline
     Properties: 
       RoleArn: !Ref CodePipelineIAMRole
       Stages: 
-        - 
-          Name: Source
+        - Name: GitPull
           Actions: 
-            - 
-              Name: GitPull
+            - Name: GitPull
               ActionTypeId: 
                 Category: Source
-                Owner: AWS
+                Owner: ThirdParty
                 Version: 1
-                Provider: S3
+                Provider: GitHub
               OutputArtifacts: 
-                - 
-                  Name: SourceOutput
+                - Name: GitOutput
               Configuration: 
-                S3Bucket: 
-                  Ref: SourceS3Bucket
-                S3ObjectKey: 
-                  Ref: SourceS3ObjectKey
+                Owner: !Ref GitHubUserName
+                OAuthToken: !Ref GitHubOAuthToken
+                Repo: !Ref GitRepo
+                Branch: !Ref GitBranch
               RunOrder: 1
-        - 
-          Name: Beta
+        - Name: Build
           Actions: 
-            - 
-              Name: BetaAction
+            - Name: Build
               InputArtifacts: 
-                - 
-                  Name: SourceOutput
+                - Name: GitOutput
               ActionTypeId: 
-                Category: Deploy
+                Category: Build
                 Owner: AWS
                 Version: 1
-                Provider: CodeDeploy
+                Provider: CodeBuild
               Configuration: 
-                ApplicationName: 
-                  Ref: ApplicationName
-                DeploymentGroupName: 
-                  Ref: DeploymentGroupName
-              RunOrder: 1
-        - 
-          Name: Release
-          Actions: 
-            - 
-              Name: ReleaseAction
-              InputArtifacts: 
-                - 
-                  Name: SourceOutput
-              ActionTypeId: 
-                Category: Deploy
-                Owner: AWS
-                Version: 1
-                Provider: CodeDeploy
-              Configuration: 
-                ApplicationName: 
-                  Ref: ApplicationName
-                DeploymentGroupName: 
-                  Ref: DeploymentGroupName
-              RunOrder: 1
+                ProjectName: !Ref CodeBuildAndDeploy
       ArtifactStore: 
         Type: S3
         Location: !Ref ArtifactStore
+
+  CodeBuildAndDeploy:
+     Type: AWS::CodeBuild::Project
+    Properties:
+      ServiceRole: !Ref CodeBuildIAMRole
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/nodejs:10.1.0-1.5.0
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub 'pipeline/${BuildSpec}'
+      TimeoutInMinutes: 10
 
   ArtifactStore:
     Type: AWS::S3::Bucket
