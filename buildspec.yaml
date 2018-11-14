@@ -1,14 +1,17 @@
 version: 0.2
 phases:
- static_install:
-   commands:
-     - cd static
-     - npm install
- static_build:
-   commands:
-     - cd static
-     - npm run-script build
- static_deploy:
-   commands:
-     - cd static
-     - serverless deploy --stage prod
+  install:
+    commands:
+      - cd static
+      - npm install
+  pre_build:
+    commands:
+      - echo "pre_build"
+  build:
+    commands:
+      - cd static
+      - npm run-script build
+ post_build:
+    commands:
+      - cd static
+      - serverless deploy --stage prod
