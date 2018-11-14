@@ -9,7 +9,6 @@ phases:
       - echo "pre_build"
   build:
     commands:
-      - cd static
       - npm run-script build
  post_build:
     commands:
