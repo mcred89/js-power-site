@@ -12,5 +12,4 @@ phases:
       - npm run-script build
   post_build:
     commands:
-      - cd static
       - serverless deploy --stage prod
