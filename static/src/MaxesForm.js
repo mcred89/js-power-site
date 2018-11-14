@@ -25,8 +25,7 @@ export class MaxesForm extends Component {
                     3: {"percent": .7, "reprange": "5x7"},
                     4: {"percent": .75, "reprange": "5x6"}
                 }
-            },
-            errorMessage: ''
+            }
         };
 
         this.handleChange = this.handleChange.bind(this);
@@ -194,7 +193,6 @@ export class MaxesForm extends Component {
                     <div>
                         <div className="card mt-5">
                             <div className="card-body">{this.form}</div>
-                            <div className="card-footer">{this.error}</div>
                         </div>
                     </div>
                 ) : (
