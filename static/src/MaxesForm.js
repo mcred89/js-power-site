@@ -34,12 +34,9 @@ export class MaxesForm extends Component {
 
     handleChange(event) {
         const target = event.target;
-        const value = target.value
+        const value = target.value;
         const name = target.name;
-    
-        this.setState({
-          [name]: value
-        });
+        this.setState({[name]: value},()=>{return false;});
     }
 
     handleSubmit() {
@@ -60,6 +57,8 @@ export class MaxesForm extends Component {
                         name="maxSquat"
                         placeholder="Squat"
                         onChange={this.handleChange}
+                        required
+                        min="1" max="1000"
                     />
                     <input 
                         type="number" 
@@ -68,6 +67,8 @@ export class MaxesForm extends Component {
                         name="maxPress"
                         placeholder="Press"
                         onChange={this.handleChange}
+                        required
+                        min="1" max="1000"
                     />
                     <input
                         type="number"
@@ -76,35 +77,38 @@ export class MaxesForm extends Component {
                         name="maxDead"
                         placeholder="Deadlift"
                         onChange={this.handleChange}
+                        required
+                        min="1" max="1000"
                     />
 
                     <h2>Volume</h2>
-                    <div class="btn-group btn-group-toggle" data-toggle="buttons">
-                    <label class="btn btn-secondary">
+                    <div className="btn-group btn-group-toggle" data-toggle="buttons" onChange={this.handleChange}>
+                    <label className="btn btn-secondary">
                         Low
                         <input 
                             type="radio"
-                            className="optradio" 
+                            className="optradio form-control" 
+                            value="low"
                             name="mainliftchoice"
-                            value="low" 
+                            checked={this.state.mainliftchoice === "low"}
                             onChange={this.handleChange}
-                            autocomplete="off"
+                            required
                         />
                     </label>
-                    <label class="btn btn-secondary">
+                    <label className="btn btn-secondary">
                         High
                         <input 
                             type="radio"
-                            className="optradio"
-                            name="mainliftchoice"
+                            className="optradio form-control"
                             value="high"
+                            name="mainliftchoice"
+                            checked={this.state.mainliftchoice === "high"}
                             onChange={this.handleChange}
-                            autocomplete="off"
                         />
                     </label>
                     </div>
                     <div>
-                        <button type="submit" value="Submit" className="button btn btn-primary mt-3">Submit</button>
+                        <button type="submit" className="button btn btn-primary mt-3">Submit</button>
                     </div>
                 </div>
             </form>       
@@ -145,8 +149,9 @@ export class MaxesForm extends Component {
                     accessory = 'Bent Over Row';
                     accessoryReps = '3x5'
                 }
-                let percent = this.state.percentages[this.state.mainliftchoice][i]['percent'];
-                let reps = this.state.percentages[this.state.mainliftchoice][i]['reprange'];
+                let volume = this.state.mainliftchoice;
+                let percent = this.state.percentages[volume][i]['percent'];
+                let reps = this.state.percentages[volume][i]['reprange'];
                 lifts.push(
                     <li>
                         {`${warmup}`}
@@ -182,7 +187,6 @@ export class MaxesForm extends Component {
             </div>
         )
     }
-    
 
     render() {
         return (
