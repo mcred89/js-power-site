@@ -3,8 +3,8 @@ Description: AWS CodePipeline for js-power-site
 
 Parameters:
   GitHubOAuthToken:
-    Type : 'AWS::SSM::Parameter::Value<String>'
-    Default: CodepipelineGitHubToken
+    Type : String
+    Default: CodepipeGitHubToken
   GitHubUserName:
     Type: String
     Default: mcred89
@@ -26,7 +26,7 @@ Resources:
   Pipeline: 
     Type: AWS::CodePipeline::Pipeline
     Properties: 
-      RoleArn: !Ref CodePipelineIAMRole
+      RoleArn: !GetAtt CodePipelineIAMRole.Arn
       Stages: 
         - Name: GitPull
           Actions: 
@@ -40,7 +40,7 @@ Resources:
                 - Name: GitOutput
               Configuration: 
                 Owner: !Ref GitHubUserName
-                OAuthToken: !Ref GitHubOAuthToken
+                OAuthToken: !GetAtt SecretGetter.secret
                 Repo: !Ref GitRepo
                 Branch: !Ref GitBranch
               RunOrder: 1
@@ -61,7 +61,7 @@ Resources:
         Location: !Ref ArtifactStore
 
   CodeBuildAndDeploy:
-     Type: AWS::CodeBuild::Project
+    Type: AWS::CodeBuild::Project
     Properties:
       ServiceRole: !Ref CodeBuildIAMRole
       Artifacts:
@@ -78,7 +78,7 @@ Resources:
   ArtifactStore:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub '${AWS::StackName}-ArtifactBucket'
+      BucketName: !Sub '${AWS::StackName}-artifact-bucket'
       AccessControl: Private
 
   CodeBuildIAMRole:
@@ -92,7 +92,7 @@ Resources:
               Service: codebuild.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: CodeBuildIAMPolicy
+        - PolicyName: build
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -116,7 +116,7 @@ Resources:
               Service: codepipeline.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: CodePipelineIAMPolicy
+        - PolicyName: pipe
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
@@ -196,15 +196,6 @@ Resources:
                 Effect: Allow
               - Effect: Allow
                 Action:
-                  - devicefarm:ListProjects
-                  - devicefarm:ListDevicePools
-                  - devicefarm:GetRun
-                  - devicefarm:GetUpload
-                  - devicefarm:CreateUpload
-                  - devicefarm:ScheduleRun
-                Resource: "*"
-              - Effect: Allow
-                Action:
                   - servicecatalog:ListProvisioningArtifacts
                   - servicecatalog:CreateProvisioningArtifact
                   - servicecatalog:DescribeProvisioningArtifact
@@ -215,3 +206,70 @@ Resources:
                 Action:
                   - cloudformation:ValidateTemplate
                 Resource: "*"
+
+  SecretsIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: secrets
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Action:
+                  - s3:*
+                  - logs:*
+                  - secretsmanager:GetSecretValue
+                Resource: "*"
+                Effect: Allow
+
+  SecretsLambda:
+    Type: AWS::Lambda::Function
+    Properties: 
+      Handler: index.handler
+      Role: !GetAtt SecretsIAMRole.Arn
+      Environment:
+        Variables:
+          REGION: !Ref AWS::Region
+          SECRET_NAME: !Ref GitHubOAuthToken
+      Code: 
+        ZipFile: |
+          var AWS = require('aws-sdk');
+          var region = process.env.REGION;
+          var secretName = process.env.SECRET_NAME;
+          var secret;
+          var responseData;
+          var client = new AWS.SecretsManager({
+              region: region
+          });
+          var response = require('cfn-response');
+          exports.handler = function(event, context) {
+              if (event.RequestType == 'Delete') {
+                  response.send(event, context, response.SUCCESS);
+                  return;
+              }
+              client.getSecretValue({SecretId: secretName}, function(err, data) {
+                  if (err) {
+                      response.send(event, context, response.FAILED);
+                      throw err;
+                  } else {
+                      secret_dict = JSON.parse(data['SecretString']);
+                      secret = secret_dict[secretName]
+                      responseData = {'secret': secret}
+                      response.send(event, context, response.SUCCESS, responseData);
+                  }
+              });
+          }
+      Runtime: nodejs8.10
+      Timeout: 60
+
+  SecretGetter:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt SecretsLambda.Arn
