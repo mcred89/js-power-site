@@ -13,4 +13,4 @@ phases:
       - npm run-script build
   post_build:
     commands:
-      - serverless deploy --stage dev
+      - serverless deploy --stage prod
