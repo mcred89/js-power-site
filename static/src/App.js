@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import { MaxesForm } from './MaxesForm'
+import { MaxesForm } from './containers/MaxesForm'
 
 class App extends Component {
   render() {

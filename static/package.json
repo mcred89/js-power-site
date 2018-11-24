@@ -6,6 +6,7 @@
     "ajv": "^6.5.4",
     "react": "^16.6.3",
     "react-dom": "^16.5.2",
+    "react-radio-buttons": "^1.2.2",
     "react-scripts": "2.0.4",
     "serverless": "^1.32.0"
   },
@@ -25,6 +26,8 @@
     "not op_mini all"
   ],
   "devDependencies": {
+    "@types/react": "^16.7.7",
+    "@types/react-radio-group": "^3.0.2",
     "serverless-s3-sync": "^1.7.1"
   }
 }
