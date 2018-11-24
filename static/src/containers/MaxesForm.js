@@ -49,7 +49,6 @@ export class MaxesForm extends Component {
                                 min={1}
                                 max={1001} />
                             <NumberInput
-                                inputType={'number'}
                                 name={'maxPress'}
                                 controlFunc={this.handleChange}
                                 content={this.state.maxPress}
@@ -57,7 +56,6 @@ export class MaxesForm extends Component {
                                 min={1}
                                 max={1001} />
                             <NumberInput
-                                inputType={'number'}
                                 name={'maxDead'}
                                 controlFunc={this.handleChange}
                                 content={this.state.maxDead}
