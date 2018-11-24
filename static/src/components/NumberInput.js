@@ -19,7 +19,7 @@ const NumberInput = (props) => (
 NumberInput.propTypes = {
 	name: PropTypes.string.isRequired,
 	controlFunc: PropTypes.func.isRequired,
-	content: PropTypes.number.isRequired,
+	content: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
 	placeholder: PropTypes.string,
 	min: PropTypes.number,
 	max: PropTypes.number,
