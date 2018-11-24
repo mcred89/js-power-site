@@ -1,9 +1,9 @@
 import React, { Component } from 'react';
 import NumberInput from '../components/NumberInput';
 import RadioOrCheckGroup from '../components/RadioOrCheckGroup';
-import BMROutput from '../components/BMRCalculator'
+import TDEEOutput from '../components/TDEECalculator'
 
-export class BMR extends Component {
+export class TDEE extends Component {
     constructor(props) {
         super(props);
         this.state = {
@@ -38,10 +38,10 @@ export class BMR extends Component {
 
     render() {
         return (
-            <div>
-                <div className="card bg-dark text-white mt-5">
+            <div className="">
+                <div className="card bg-dark text-white m-5">
                     <form className="card-body form-group" onSubmit={this.handleSubmit}>
-                        <h2>BMR</h2>
+                        <h2>Metabolic Rates</h2>
                         <NumberInput
                             name={'weight'}
                             controlFunc={this.handleChange}
@@ -82,7 +82,7 @@ export class BMR extends Component {
                 </div>
                 {this.state.needsToFillOutForm ? (<div/>) : (
                         <div className="card">
-                            <BMROutput 
+                            <TDEEOutput 
                                 weight={this.state.weight}
                                 height={this.state.height}
                                 age={this.state.age}

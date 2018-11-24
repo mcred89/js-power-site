@@ -1,10 +1,10 @@
 import React, { Component } from 'react';
-import { BMR } from './BMR';
+import { TDEE } from './TDEE';
 
 export class BodyCalculators extends Component {
     render() {
         return (
-            <BMR />
+            <TDEE />
         )
     }
 }
