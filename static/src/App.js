@@ -7,19 +7,9 @@ class App extends Component {
       <div className="App container">
           <div className="row">
             <div className="col-4"></div>
-              <RoutineGenerator />
+              <MaxesForm />
             <div className="col-4"></div>
           </div>
-      </div>
-    );
-  }
-}
-
-class RoutineGenerator extends Component {
-  render() {
-    return (
-      <div>
-       <MaxesForm />
       </div>
     );
   }

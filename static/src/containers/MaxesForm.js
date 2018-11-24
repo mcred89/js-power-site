@@ -1,7 +1,7 @@
 import React, { Component } from 'react';
 import RadioOrCheckGroup from '../components/RadioOrCheckGroup';
 import NumberInput from '../components/NumberInput';
-import Routine from './Routine';
+import Routine from '../components/RoutineGenerator';
 
 export class MaxesForm extends Component {
 
