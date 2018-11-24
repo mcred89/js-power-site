@@ -5,8 +5,9 @@ const NumberInput = (props) => (
 	<div className="form-group">
 		<input
 			className="form-control"
-			name={props.name}
 			type='number'
+			required
+			name={props.name}
 			value={props.content}
 			onChange={props.controlFunc}
 			placeholder={props.placeholder} 

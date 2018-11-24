@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import { RadioGroup, RadioButton } from 'react-radio-buttons';
+import RadioOrCheckGroup from '../components/RadioOrCheckGroup';
 import NumberInput from '../components/NumberInput';
 import Routine from './Routine';
 
@@ -11,12 +11,12 @@ export class MaxesForm extends Component {
             maxSquat: '',
             maxPress: '',
             maxDead: '',
-            mainLiftChoice: 'Low',
+            mainLiftChoices: ['Low', 'High'],
+            mainLiftChoice: ['Low'],
             needsToFillOutForm: true
         };
 
         this.handleChange = this.handleChange.bind(this);
-        this.handleVolumeChoice = this.handleVolumeChoice.bind(this);
         this.handleSubmit = this.handleSubmit.bind(this);
     }
 
@@ -25,10 +25,6 @@ export class MaxesForm extends Component {
         const value = target.value;
         const name = target.name;
         this.setState({[name]: value});
-    }
-
-    handleVolumeChoice(value) {
-        this.setState({mainLiftChoice: value});
     }
 
     handleSubmit(event) {
@@ -68,14 +64,12 @@ export class MaxesForm extends Component {
                                 placeholder={'Dead'}
                                 min={1}
                                 max={1001} />
-                            <RadioGroup onChange={ this.handleVolumeChoice } horizontal>
-                              <RadioButton value="Low">
-                                Low
-                              </RadioButton>
-                              <RadioButton value="High">
-                                High
-                              </RadioButton>
-                            </RadioGroup>
+                            <RadioOrCheckGroup
+                                title={'Volume'}
+					            setName={'mainLiftChoice'}
+					            controlFunc={this.handleChange}
+					            type={'radio'}
+					            options={this.state.mainLiftChoices} />
                             <button
                                 type="submit"
                                 className="button btn btn-primary mt-3">Submit</button>
