@@ -28,7 +28,6 @@ export class MaxesForm extends Component {
     }
 
     handleSubmit(event) {
-        console.log('mainLiftChoice', this.state.mainLiftChoice)
         this.setState({
             needsToFillOutForm: false
         });
@@ -36,9 +35,10 @@ export class MaxesForm extends Component {
 
     render() {
         return (
-            <div>
+            <div className="row">
+            <div className="col-5"></div>
                 {this.state.needsToFillOutForm ? (
-                    <form className="form-group card mt-5" onSubmit={this.handleSubmit}>
+                    <form className="form-group card bg-dark text-white mt-5" onSubmit={this.handleSubmit}>
                         <div className="card-body">
                             <h2>Input Maxes</h2>
                             <NumberInput
@@ -80,7 +80,9 @@ export class MaxesForm extends Component {
                         maxDead={this.state.maxDead}
                         mainLiftChoice={this.state.mainLiftChoice} />
                 )}
+            <div className="col-3"></div>
             </div>
+           
         );
       }
     }

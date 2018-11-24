@@ -10,14 +10,10 @@ class App extends Component {
           <Router>
             <div>
               <NavBar />
-              <div className="row">
-                <div className="col-5"></div>
-                    <Switch>
-                      <Route exact path='/' component={MaxesForm} />
-                      <Route path='/calculators' component={BodyCalculators} />
-                    </Switch>
-                <div className="col-3"></div>
-              </div>
+              <Switch>
+                <Route exact path='/' component={MaxesForm} />
+                <Route path='/calculators' component={BodyCalculators} />
+              </Switch>
             </div>
           </Router>
       </div>

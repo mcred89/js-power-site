@@ -10,6 +10,7 @@ const RadioOrCheckGroup = (props) => (
 					<label key={option} className="btn btn-secondary">
 						<input
 							className="form-checkbox"
+							required
 							name={props.setName}
 							value={option}
 							type={props.type} /> {option}
