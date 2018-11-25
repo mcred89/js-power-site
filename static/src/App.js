@@ -2,7 +2,7 @@ import React, { Component } from 'react';
 import { MaxesForm } from './containers/MaxesForm';
 import { BodyCalc } from './containers/BodyCalculators';
 import { About } from './containers/About';
-import { BrowserRouter as Router, Route, Switch, Link } from 'react-router-dom';
+import { HashRouter as Router, Route, Switch, Link } from 'react-router-dom';
 
 class App extends Component {
   render() {
