@@ -43,7 +43,7 @@ export class BodyCalc extends Component {
             <div className="">
                 <div className="card bg-dark text-white m-5">
                     <form className="card-body form-group" onSubmit={this.handleSubmit}>
-                        <h2>Metabolic Rates</h2>
+                        <h2>Metabolic Calculator</h2>
                         <NumberInput
                             name={'weight'}
                             controlFunc={this.handleChange}
@@ -109,8 +109,6 @@ export class BodyCalc extends Component {
                  )}
                 </div>
             </div>
-                
-            
         )
     }
 }
