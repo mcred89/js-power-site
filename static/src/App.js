@@ -1,6 +1,6 @@
 import React, { Component } from 'react';
 import { MaxesForm } from './containers/MaxesForm';
-import { BodyCalculators } from './containers/BodyCalculators';
+import { BodyCalc } from './containers/BodyCalculators';
 import { BrowserRouter as Router, Route, Switch, Link } from 'react-router-dom';
 
 class App extends Component {
@@ -12,7 +12,7 @@ class App extends Component {
               <NavBar />
               <Switch>
                 <Route exact path='/' component={MaxesForm} />
-                <Route path='/calculators' component={BodyCalculators} />
+                <Route path='/calculators' component={BodyCalc} />
               </Switch>
             </div>
           </Router>

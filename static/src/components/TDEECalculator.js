@@ -32,9 +32,8 @@ const TDEECalculator = (props) => {
 
 const TDEEOutput = (props) => (
     <div>
-        <h3>BMR: {TDEECalculator(props)[0]}</h3>
         <h3>TDEE: {TDEECalculator(props)[1]}</h3>
-        <p>See 'About' page for more info.</p>
+        <h3>BMR: {TDEECalculator(props)[0]}</h3>
     </div>
 )
 
