@@ -79,10 +79,10 @@ export class About extends Component {
                 </p>
                 <ul>
                     <li>
-                       Don't stress about the Body Fat Percentage input. It's not factored into your TDEE anyway.
-                       Most people don't know where they fall anyway. The easiest way to get a quick guess is 
-                       to google image search "body fat". There's plenty of charts with pictures to help you guess.
-                       People severely underestimate their bodyfat. Bias on the high side.
+                       Don't stress about the Body Fat Percentage input. Most people don't know where they fall. 
+                       It's not factored into your TDEE anyway. The easiest way to get a quick guess is to google
+                       image search "body fat". There's plenty of charts with pictures to help you guess. People
+                       severely underestimate their bodyfat. Bias on the high side.
                     </li>
                     <li>
                         Here's the diet advice that's generally going to work for anyone: Eat your TDEE's worth 
