@@ -9,27 +9,7 @@ export class About extends Component {
                     I use this site to learn and play with new tech, but I also actually use
                     it to plan my workout routines and diets. Here I'll be noting how to use
                     the individual pieces of the site.
-
-                    Just to add some (whatever minor) credability to my incoming ramblings:
                 </p>
-                <ul>
-                    <li>
-                        I've been nerding out about lifting for 16 years.
-                    </li>
-                    <li>
-                        I have a horrible back that I've learned to work around. I herniated my
-                        first disk at 14 years old and had back surgery when I was 22. I haven't
-                        had any serious back pain for the last 7 years.
-                    </li>
-                    <li>
-                        The most recent numbers that I used in the calculator (11/24/2018) were
-                        375lb front squat, 315lb push press, 660lb deadlift.
-                    </li>
-                    <li>
-                        I will openly admit that I'm horrible at dieting. I know a good amount
-                        about it, but I'm personally bad at executing on it.
-                    </li>
-                </ul>
                 <hr/>
                 <h1>Lifting Routine Generator</h1>
                 <p>
