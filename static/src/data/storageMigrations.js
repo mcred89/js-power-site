@@ -1,4 +1,4 @@
-export const DATABASE_VERSION = 3;
+export const DATABASE_VERSION = 4;
 
 const effectiveMaxesFor = (inputs, cycleIndex = 0) => ({
   maxSquat: Number(inputs.maxSquat) + (Number(inputs.squatIncrement) || 0) * cycleIndex,
@@ -13,6 +13,20 @@ export const addEffectiveMaxSnapshots = routine => ({
     effectiveMaxes: workout.effectiveMaxes || effectiveMaxesFor(routine.inputs || {}, workout.cycleIndex),
   })) : routine.workouts,
 });
+
+export const addWorkoutSessions = routine => {
+  if (!Array.isArray(routine.workouts)) {
+    const { workouts, ...unchanged } = routine;
+    return workouts === undefined ? unchanged : routine;
+  }
+  return {
+    ...routine,
+    workouts: routine.workouts.map(workout => ({
+      ...workout,
+      session: Object.prototype.hasOwnProperty.call(workout, 'session') ? workout.session : null,
+    })),
+  };
+};
 
 const createRecordStore = (database, storeName) => {
   if (!database.objectStoreNames.contains(storeName)) {
@@ -49,6 +63,19 @@ export const databaseMigrations = {
       value: 3,
     });
   },
+  4: ({ transaction }) => {
+    const cursorRequest = transaction.objectStore('routines').openCursor();
+    cursorRequest.onsuccess = event => {
+      const cursor = event.target.result;
+      if (!cursor) return;
+      cursor.update(addWorkoutSessions(cursor.value));
+      cursor.continue();
+    };
+    transaction.objectStore('metadata').put({
+      key: 'dataSchemaVersion',
+      value: 4,
+    });
+  },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
@@ -61,7 +88,7 @@ export const runDatabaseMigrations = (database, transaction, oldVersion, newVers
   }
 };
 
-export const BACKUP_VERSION = 3;
+export const BACKUP_VERSION = 4;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -77,6 +104,14 @@ export const backupMigrations = {
     dataSchemaVersion: 3,
     routines: Array.isArray(backup.routines)
       ? backup.routines.map(addEffectiveMaxSnapshots)
+      : backup.routines,
+  }),
+  4: backup => ({
+    ...backup,
+    version: 4,
+    dataSchemaVersion: 4,
+    routines: Array.isArray(backup.routines)
+      ? backup.routines.map(addWorkoutSessions)
       : backup.routines,
   }),
 };

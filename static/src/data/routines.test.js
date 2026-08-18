@@ -1,10 +1,18 @@
 import {
+  adjustSessionSet,
+  completeSessionSet,
   correctMaxes,
   createRoutine,
   deleteFutureWorkout,
+  finishWorkoutSession,
+  parsePrescription,
+  reopenWorkoutSession,
   routineHistoryToCsv,
   routinePlanToCsv,
+  setSessionRpe,
   setWorkoutComplete,
+  startWorkoutSession,
+  undoLatestSessionSet,
   updateExercise,
   visibleExercise,
 } from './routines';
@@ -21,6 +29,12 @@ const inputs = {
 };
 
 describe('tracked routines', () => {
+  it('parses exact, ranged, and open prescriptions for set tracking', () => {
+    expect(parsePrescription('4 × 6')).toEqual({ setCount: 4, plannedReps: 6, actualReps: 6 });
+    expect(parsePrescription('3 × 5–20')).toEqual({ setCount: 3, plannedReps: '5–20', actualReps: 5 });
+    expect(parsePrescription('')).toEqual({ setCount: 1, plannedReps: '', actualReps: '' });
+  });
+
   it('turns a generated plan into an ordered workout queue', () => {
     const routine = createRoutine('profile-1', 'Test plan', inputs);
 
@@ -54,6 +68,79 @@ describe('tracked routines', () => {
     routine = correctMaxes(routine, { maxSquat: '600', maxPress: '225', maxDead: '600' });
 
     expect(visibleExercise(routine.workouts[0].exercises[0])).toMatchObject({ weight: '350', prescription: '3 × 5' });
+  });
+
+  it('starts a session and propagates adjustments through pending sets', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const workout = routine.workouts[0];
+    routine = startWorkoutSession(routine, workout.id, '2026-08-18T12:00:00.000Z');
+    const sessionExercise = routine.workouts[0].session.exercises[0];
+    routine = adjustSessionSet(routine, workout.id, sessionExercise.exerciseId, sessionExercise.sets[1].id, {
+      actualWeight: '315',
+      actualReps: '5',
+    });
+
+    const sets = routine.workouts[0].session.exercises[0].sets;
+    expect(sets.map(set => set.actualWeight)).toEqual([325, '315', '315', '315']);
+    expect(sets.map(set => set.actualReps)).toEqual([6, '5', '5', '5']);
+    expect(sets[1].plannedWeight).toBe(325);
+    expect(sets[1].plannedReps).toBe(6);
+  });
+
+  it('records stopwatch splits and does not propagate through completed sets', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const workout = routine.workouts[0];
+    routine = startWorkoutSession(routine, workout.id, '2026-08-18T12:00:00.000Z');
+    let exercise = routine.workouts[0].session.exercises[0];
+    routine = completeSessionSet(routine, workout.id, exercise.exerciseId, exercise.sets[0].id, '2026-08-18T12:01:05.000Z');
+    exercise = routine.workouts[0].session.exercises[0];
+    routine = adjustSessionSet(routine, workout.id, exercise.exerciseId, exercise.sets[1].id, { actualWeight: '300' });
+
+    const sets = routine.workouts[0].session.exercises[0].sets;
+    expect(sets[0]).toMatchObject({ status: 'completed', actualWeight: 325, splitSeconds: 65 });
+    expect(sets.slice(1).map(set => set.actualWeight)).toEqual(['300', '300', '300']);
+  });
+
+  it('undoes only the latest set and resumes a stopped stopwatch', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const workout = routine.workouts[0];
+    routine = startWorkoutSession(routine, workout.id, '2026-08-18T12:00:00.000Z');
+    routine.workouts[0].session.exercises = [routine.workouts[0].session.exercises[0]];
+    const exercise = routine.workouts[0].session.exercises[0];
+    exercise.sets.forEach((set, index) => {
+      routine = completeSessionSet(routine, workout.id, exercise.exerciseId, set.id, `2026-08-18T12:0${index + 1}:00.000Z`);
+    });
+    routine = undoLatestSessionSet(routine, workout.id, '2026-08-18T12:05:00.000Z');
+
+    const session = routine.workouts[0].session;
+    expect(session.exercises[0].sets.map(set => set.status)).toEqual(['completed', 'completed', 'completed', 'pending']);
+    expect(session.elapsedSeconds).toBe(180);
+    expect(session.runningSince).toBe('2026-08-18T12:05:00.000Z');
+  });
+
+  it('finishes early with skipped sets, stored RPE, and the last set split', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const workout = routine.workouts[0];
+    routine = startWorkoutSession(routine, workout.id, '2026-08-18T12:00:00.000Z');
+    const exercise = routine.workouts[0].session.exercises[0];
+    routine = completeSessionSet(routine, workout.id, exercise.exerciseId, exercise.sets[0].id, '2026-08-18T12:01:30.000Z');
+    routine = setSessionRpe(routine, workout.id, 8);
+    routine = finishWorkoutSession(routine, workout.id, '2026-08-18T12:03:00.000Z');
+
+    const finished = routine.workouts[0];
+    expect(finished.completedAt).toBe('2026-08-18T12:03:00.000Z');
+    expect(finished.session).toMatchObject({
+      status: 'completed',
+      elapsedSeconds: 90,
+      stoppedAt: '2026-08-18T12:01:30.000Z',
+      rpe: 8,
+    });
+    expect(finished.session.exercises[0].sets.map(set => set.status)).toEqual(['completed', 'skipped', 'skipped', 'skipped']);
+    expect(routineHistoryToCsv(routine)).toContain('"325","6","325","6","8","90","90"');
+
+    routine = reopenWorkoutSession(routine, workout.id, '2026-08-18T12:04:00.000Z');
+    expect(routine.workouts[0].completedAt).toBeNull();
+    expect(routine.workouts[0].session.exercises[0].sets[1].status).toBe('pending');
   });
 
   it('deletes an incomplete workout without completing later workouts', () => {

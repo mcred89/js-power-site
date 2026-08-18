@@ -8,8 +8,8 @@ describe('portable backups', () => {
     expect(parseBackup(exportBackup(profiles, routines))).toMatchObject({
       profiles,
       routines,
-      version: 3,
-      dataSchemaVersion: 3,
+      version: 4,
+      dataSchemaVersion: 4,
     });
   });
 
@@ -23,8 +23,8 @@ describe('portable backups', () => {
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
       ...oldBackup,
-      version: 3,
-      dataSchemaVersion: 3,
+      version: 4,
+      dataSchemaVersion: 4,
     });
     expect(oldBackup.version).toBe(1);
   });

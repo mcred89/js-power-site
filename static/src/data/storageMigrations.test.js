@@ -1,5 +1,6 @@
 import {
   addEffectiveMaxSnapshots,
+  addWorkoutSessions,
   databaseMigrations,
   runDatabaseMigrations,
 } from './storageMigrations';
@@ -28,26 +29,27 @@ const migrationDatabase = existingStores => {
 
 describe('IndexedDB migrations', () => {
   it('contains every migration through the current version', () => {
-    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3]);
+    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3, 4]);
   });
 
   it('creates all stores for a new installation', () => {
     const context = migrationDatabase([]);
-    runDatabaseMigrations(context.database, context.transaction, 0, 3);
+    runDatabaseMigrations(context.database, context.transaction, 0, 4);
 
     expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata']);
     expect(context.puts).toEqual([
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 2 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 3 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 4 } },
     ]);
   });
 
   it('upgrades version 1 through every later migration without recreating stores', () => {
     const context = migrationDatabase(['profiles', 'routines']);
-    runDatabaseMigrations(context.database, context.transaction, 1, 3);
+    runDatabaseMigrations(context.database, context.transaction, 1, 4);
 
     expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata']);
-    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3]);
+    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3, 4]);
   });
 
   it('adds max snapshots without changing the original routine', () => {
@@ -63,5 +65,16 @@ describe('IndexedDB migrations', () => {
       effectiveMaxes: { maxSquat: 420, maxPress: 200, maxDead: 500 },
     });
     expect(routine.workouts[0].effectiveMaxes).toBeUndefined();
+  });
+
+  it('adds nullable workout sessions without changing the original routine', () => {
+    const routine = { workouts: [{ id: 'w1', unknown: 'preserved' }] };
+
+    expect(addWorkoutSessions(routine).workouts[0]).toEqual({
+      id: 'w1',
+      unknown: 'preserved',
+      session: null,
+    });
+    expect(routine.workouts[0].session).toBeUndefined();
   });
 });

@@ -1,7 +1,7 @@
 const { expect, test } = require('./fixtures');
 const { createProfile, createRoutine, fillMaxes, selectVolume } = require('./helpers');
 
-test('PWA manages routines, exercise edits, completion, history, and max correction', async ({ page }) => {
+test('PWA tracks an autosaved workout session, history, and max correction', async ({ page }) => {
   await createProfile(page);
   await createRoutine(page);
 
@@ -12,12 +12,28 @@ test('PWA manages routines, exercise edits, completion, history, and max correct
   await firstExercise.getByLabel('Weight').fill('222');
   await page.getByRole('button', { name: 'Done editing' }).click();
   await expect(firstExercise.getByText('222 lb')).toBeVisible();
-  await page.getByRole('button', { name: 'Mark workout complete' }).click();
+  await page.getByRole('button', { name: 'Start workout' }).click();
+  await expect(page.getByLabel('Workout in progress')).toBeVisible();
+  await page.getByRole('button', { name: 'Increase weight (lb)' }).click();
+  await page.getByRole('button', { name: 'Decrease reps' }).click();
+  await page.getByRole('button', { name: 'Complete set' }).click();
+  await expect(page.getByText('1/4 sets')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText('Workout in progress')).toBeVisible();
+  await page.getByRole('button', { name: 'Resume workout' }).click();
+  await expect(page.getByText('1/4 sets')).toBeVisible();
+  await page.getByRole('button', { name: '8', exact: true }).click();
+  await page.getByRole('button', { name: 'Finish workout' }).click();
+  const finishDialog = page.getByRole('dialog');
+  await expect(finishDialog).toContainText('planned sets will be recorded as skipped');
+  await finishDialog.getByRole('button', { name: 'Finish workout' }).click();
   await expect(page.getByText('Workout complete.')).toBeVisible();
 
   await page.getByRole('button', { name: 'History' }).click();
   await page.locator('.workout-card').filter({ hasText: 'Squat' }).click();
-  await expect(page.getByText('222 lb')).toBeVisible();
+  await expect(page.getByText('227 lb × 5 reps')).toBeVisible();
+  await expect(page.locator('.history-summary')).toContainText('8');
   await page.getByRole('button', { name: 'Back' }).click();
 
   await page.getByRole('button', { name: 'Plans' }).click();
@@ -31,7 +47,7 @@ test('PWA manages routines, exercise edits, completion, history, and max correct
 
   await page.getByRole('button', { name: 'History' }).click();
   await page.locator('.workout-card').filter({ hasText: 'Squat' }).click();
-  await expect(page.getByText('222 lb')).toBeVisible();
+  await expect(page.getByText('227 lb × 5 reps')).toBeVisible();
   await page.getByRole('button', { name: 'Back' }).click();
   await page.getByRole('button', { name: 'Today' }).click();
   await page.locator('.workout-card').filter({ hasText: 'Squat' }).first().click();
@@ -42,10 +58,12 @@ test('PWA manages routines, exercise edits, completion, history, and max correct
   await page.locator('.workout-card').filter({ hasText: 'Squat' }).click();
   await page.getByRole('button', { name: 'Return to workout queue' }).click();
   await expect(page.getByText('Workout returned to your queue.')).toBeVisible();
+  await page.getByRole('button', { name: 'Leave' }).click();
+  await page.getByRole('button', { name: 'History' }).click();
   await expect(page.getByText('Completed workouts will appear here.')).toBeVisible();
 });
 
-test('PWA supports multiple profiles, routines, downloads, and collision-safe backup restore', async ({ page }, testInfo) => {
+test('PWA supports multiple profiles, routines, downloads, and backup import preview', async ({ page }, testInfo) => {
   await createProfile(page);
   await createRoutine(page, { name: 'Primary Plan', duration: '3 weeks' });
   await page.getByRole('button', { name: 'Plans' }).click();
@@ -69,9 +87,12 @@ test('PWA supports multiple profiles, routines, downloads, and collision-safe ba
   const backup = await backupDownload;
   const backupPath = testInfo.outputPath('backup.json');
   await backup.saveAs(backupPath);
-  await page.locator('input[type=file]').setInputFiles(backupPath);
-  await expect(page.getByText('Imported 1 profiles and 2 routines.')).toBeVisible();
-  await expect(page.getByLabel('Current profile').locator('option')).toHaveCount(2);
+  await page.locator('input[accept="application/json,.json"]').setInputFiles(backupPath);
+  const importDialog = page.getByRole('dialog', { name: 'Preview import' });
+  await expect(importDialog).toContainText('0 copied · 3 skipped · 0 merged');
+  await importDialog.getByRole('button', { name: 'Import backup' }).click();
+  await expect(page.getByText('Import complete: 0 copied, 0 merged, 3 skipped.')).toBeVisible();
+  await expect(page.getByLabel('Current profile').locator('option')).toHaveCount(1);
 
   await page.getByRole('button', { name: 'Add profile' }).click();
   await page.getByLabel('Name').fill('Second Athlete');
