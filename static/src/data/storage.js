@@ -46,6 +46,7 @@ const transaction = async (storeName, mode, action) => {
 };
 
 export const getAll = storeName => transaction(storeName, 'readonly', store => store.getAll());
+export const get = (storeName, id) => transaction(storeName, 'readonly', store => store.get(id));
 export const save = (storeName, value) => transaction(storeName, 'readwrite', store => store.put(value));
 export const remove = (storeName, id) => transaction(storeName, 'readwrite', store => store.delete(id));
 

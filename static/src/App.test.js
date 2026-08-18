@@ -1,6 +1,67 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import App, { ConfirmationModal, isInstalledApp, RoutineNameEditor } from './App';
+import App, { ConfirmationModal, initialProfileId, isInstalledApp, PlanSetup, RoutineNameEditor, WorkoutCard } from './App';
+
+describe('default profile selection', () => {
+  const profiles = [{ id: 'wife' }, { id: 'husband' }];
+
+  it('opens the saved default profile', () => {
+    expect(initialProfileId(profiles, 'husband')).toBe('husband');
+  });
+
+  it('falls back to the first profile when the saved default no longer exists', () => {
+    expect(initialProfileId(profiles, 'deleted')).toBe('wife');
+  });
+});
+
+it('shows every generator setting for a plan', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const routine = { inputs: {
+    maxSquat: '315',
+    maxPress: '185',
+    maxDead: '405',
+    mesoMode: true,
+    microCycles: [{ duration: '3 weeks', volume: 'High' }, { duration: '5 weeks', volume: 'Low' }],
+    squatIncrement: '10',
+    pressIncrement: '5',
+    deadliftIncrement: '15',
+    includeBackoffSets: true,
+    includeStrongmanDay: false,
+    squatEventEnabled: true,
+    squatEventMovement: "Farmer's carry",
+    squatEventSets: '4',
+    squatEventReps: '40',
+    pressEventEnabled: false,
+    deadliftEventEnabled: false,
+  } };
+
+  act(() => root.render(<PlanSetup routine={routine} />));
+
+  expect(div.textContent).toContain('315 lb');
+  expect(div.textContent).toContain('Cycle 1: 3 weeks, High volume');
+  expect(div.textContent).toContain('Deadlift increase15 lb');
+  expect(div.textContent).toContain('Back-off setsYes');
+  expect(div.textContent).toContain("Farmer's carry · 4 sets × 40 reps");
+  expect(div.textContent).toContain('Press dayNone');
+  act(() => root.unmount());
+});
+
+it('shows the completion date on a completed workout card', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+
+  act(() => root.render(<WorkoutCard workout={{
+    weekLabel: 'Week 1',
+    name: 'Squat',
+    completedAt: '2026-08-18T12:00:00.000Z',
+  }} onOpen={() => {}} />));
+
+  expect(div.textContent).toContain('Completed August 18, 2026');
+  act(() => root.unmount());
+});
 
 it('renders without crashing', () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;

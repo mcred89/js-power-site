@@ -15,6 +15,7 @@ import {
 } from './data/routines';
 import {
   exportBackup,
+  get,
   getAll,
   hasPersistentStorage,
   parseBackup,
@@ -36,6 +37,12 @@ const navItems = [
   ['history', 'History'],
   ['settings', 'Settings'],
 ];
+
+export const initialProfileId = (profiles, defaultProfileId) => (
+  profiles.some(profile => profile.id === defaultProfileId)
+    ? defaultProfileId
+    : profiles[0]?.id || null
+);
 
 const download = (contents, name, type = 'application/json') => {
   const blob = new Blob([contents], { type });
@@ -102,9 +109,15 @@ const WorkoutMaxes = ({ workout }) => workout.cycleLabel && workout.effectiveMax
   </small>
 ) : null;
 
-const WorkoutCard = ({ workout, onOpen }) => (
+export const formatCompletedDate = completedAt => new Intl.DateTimeFormat('en-US', {
+  month: 'long',
+  day: 'numeric',
+  year: 'numeric',
+}).format(new Date(completedAt));
+
+export const WorkoutCard = ({ workout, onOpen }) => (
   <button className="workout-card" type="button" onClick={onOpen}>
-    <span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong><WorkoutMaxes workout={workout} /></span>
+    <span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong>{workout.completedAt && <small>Completed {formatCompletedDate(workout.completedAt)}</small>}<WorkoutMaxes workout={workout} /></span>
     <span aria-hidden="true">→</span>
   </button>
 );
@@ -196,10 +209,64 @@ export const ConfirmationModal = ({ title, children, confirmLabel, onCancel, onC
   </div>
 );
 
+const setupValue = value => value === true ? 'Yes' : value === false ? 'No' : value || 'Not set';
+
+export const PlanSetup = ({ routine }) => {
+  const { inputs = {} } = routine;
+  const eventLifts = [['squat', 'Squat day'], ['press', 'Press day'], ['deadlift', 'Deadlift day']];
+
+  return (
+    <details className="settings-card plan-setup">
+      <summary>View plan setup</summary>
+      <div className="setup-section">
+        <h3>Starting maxes</h3>
+        <dl className="setup-grid">
+          <div><dt>Squat</dt><dd>{setupValue(inputs.maxSquat)} lb</dd></div>
+          <div><dt>Press</dt><dd>{setupValue(inputs.maxPress)} lb</dd></div>
+          <div><dt>Deadlift</dt><dd>{setupValue(inputs.maxDead)} lb</dd></div>
+        </dl>
+      </div>
+      <div className="setup-section">
+        <h3>Cycle structure</h3>
+        {inputs.mesoMode ? (
+          <>
+            <p>Mesocycle with {inputs.microCycles?.length || 0} microcycles</p>
+            <ol className="setup-cycles">
+              {(inputs.microCycles || []).map((cycle, index) => <li key={index}>Cycle {index + 1}: {setupValue(cycle.duration)}, {setupValue(cycle.volume)} volume</li>)}
+            </ol>
+            <dl className="setup-grid">
+              <div><dt>Squat increase</dt><dd>{setupValue(inputs.squatIncrement)} lb</dd></div>
+              <div><dt>Press increase</dt><dd>{setupValue(inputs.pressIncrement)} lb</dd></div>
+              <div><dt>Deadlift increase</dt><dd>{setupValue(inputs.deadliftIncrement)} lb</dd></div>
+            </dl>
+          </>
+        ) : <p>{setupValue(inputs.duration)} · {setupValue(inputs.mainLiftChoice)} volume</p>}
+      </div>
+      <div className="setup-section">
+        <h3>Options</h3>
+        <dl className="setup-grid">
+          <div><dt>Back-off sets</dt><dd>{setupValue(inputs.includeBackoffSets)}</dd></div>
+          <div><dt>Dedicated Strongman day</dt><dd>{setupValue(inputs.includeStrongmanDay)}</dd></div>
+        </dl>
+      </div>
+      <div className="setup-section">
+        <h3>Strongman events</h3>
+        <dl className="setup-events">
+          {eventLifts.map(([key, label]) => {
+            const enabled = inputs[`${key}EventEnabled`];
+            return <div key={key}><dt>{label}</dt><dd>{enabled ? `${setupValue(inputs[`${key}EventMovement`])} · ${setupValue(inputs[`${key}EventSets`])} sets × ${setupValue(inputs[`${key}EventReps`])} reps` : 'None'}</dd></div>;
+          })}
+        </dl>
+      </div>
+    </details>
+  );
+};
+
 const TrackerApp = () => {
   const [profiles, setProfiles] = useState([]);
   const [routines, setRoutines] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
+  const [defaultProfileId, setDefaultProfileId] = useState(null);
   const [selectedRoutineId, setSelectedRoutineId] = useState(null);
   const [view, setView] = useState('today');
   const [workoutId, setWorkoutId] = useState(null);
@@ -214,11 +281,12 @@ const TrackerApp = () => {
   const importRef = useRef();
 
   useEffect(() => {
-    Promise.all([getAll('profiles'), getAll('routines'), hasPersistentStorage()])
-      .then(([savedProfiles, savedRoutines, isPersistent]) => {
+    Promise.all([getAll('profiles'), getAll('routines'), hasPersistentStorage(), get('metadata', 'defaultProfileId')])
+      .then(([savedProfiles, savedRoutines, isPersistent, savedDefault]) => {
         setProfiles(savedProfiles);
         setRoutines(savedRoutines);
-        setSelectedProfileId(savedProfiles[0]?.id || null);
+        setDefaultProfileId(savedDefault?.value || null);
+        setSelectedProfileId(initialProfileId(savedProfiles, savedDefault?.value));
         setPersistent(isPersistent);
       })
       .catch(error => setMessage(error.message))
@@ -263,8 +331,13 @@ const TrackerApp = () => {
 
   const addProfile = async name => {
     const item = { id: makeId(), name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    await save('profiles', item);
+    const shouldMakeDefault = profiles.length === 0;
+    await Promise.all([
+      save('profiles', item),
+      shouldMakeDefault ? save('metadata', { key: 'defaultProfileId', value: item.id }) : Promise.resolve(),
+    ]);
     setProfiles(current => [...current, item]);
+    if (shouldMakeDefault) setDefaultProfileId(item.id);
     setSelectedProfileId(item.id);
     setAddingProfile(false);
     setView('today');
@@ -348,9 +421,19 @@ const TrackerApp = () => {
   const deleteProfile = async () => {
     if (!profile || !window.confirm(`Delete ${profile.name} and every routine stored for this profile?`)) return;
     const owned = routines.filter(item => item.profileId === profile.id);
-    await Promise.all([remove('profiles', profile.id), ...owned.map(item => remove('routines', item.id))]);
     const remaining = profiles.filter(item => item.id !== profile.id);
+    const nextDefaultProfileId = profile.id === defaultProfileId ? remaining[0]?.id || null : defaultProfileId;
+    await Promise.all([
+      remove('profiles', profile.id),
+      ...owned.map(item => remove('routines', item.id)),
+      profile.id === defaultProfileId
+        ? (nextDefaultProfileId
+          ? save('metadata', { key: 'defaultProfileId', value: nextDefaultProfileId })
+          : remove('metadata', 'defaultProfileId'))
+        : Promise.resolve(),
+    ]);
     setProfiles(remaining);
+    setDefaultProfileId(nextDefaultProfileId);
     setRoutines(current => current.filter(item => item.profileId !== profile.id));
     setSelectedProfileId(remaining[0]?.id || null);
     setView('today');
@@ -428,10 +511,11 @@ const TrackerApp = () => {
             ))}
           </section>
         ) : view === 'history' ? (
-          <section className="section-page"><p className="eyebrow">{routine?.name || profile.name}</p><h1>History</h1>{completed.length ? completed.map(item => <WorkoutCard workout={item} onOpen={() => showWorkout(item)} key={item.id} />) : <div className="empty-card"><p>Completed workouts will appear here.</p></div>}</section>
+          <section className="section-page"><p className="eyebrow">{routine?.name || profile.name}</p><h1>History</h1>{routine && <PlanSetup routine={routine} />}{completed.length ? completed.map(item => <WorkoutCard workout={item} onOpen={() => showWorkout(item)} key={item.id} />) : <div className="empty-card"><p>Completed workouts will appear here.</p></div>}</section>
         ) : (
           <section className="section-page settings-page">
             <p className="eyebrow">This phone</p><h1>Settings & backup</h1>
+            <article className="settings-card"><h2>Default profile</h2><p>Choose the profile that opens automatically when you launch the app.</p><label className="form-field"><span className="field-label">Open with</span><select className="number-input" aria-label="Default profile" value={defaultProfileId || profiles[0].id} onChange={async event => { const id = event.target.value; await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }}>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label></article>
             <article className="settings-card"><h2>Offline storage</h2><p>{persistent ? 'Persistent storage is enabled.' : 'Ask Chrome to protect this app from automatic storage cleanup.'}</p>{!persistent && <button className="secondary-button" type="button" onClick={async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }}>Request persistent storage</button>}</article>
             <article className="settings-card"><h2>CSV downloads</h2><p>{routine ? `Download the active plan, ${routine.name}, or its completed workout history. Exercise edits and completed-workout snapshots are included.` : 'Create a routine before downloading plan or history data.'}</p><div className="button-row"><button className="secondary-button" type="button" disabled={!routine} onClick={() => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8')}>Download plan CSV</button><button className="secondary-button" type="button" disabled={!completed.length} onClick={() => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8')}>Download history CSV</button></div></article>
             <article className="settings-card"><h2>Backup and transfer</h2><p>Export a JSON backup before clearing browser data or moving plans to another phone.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /></div></article>
