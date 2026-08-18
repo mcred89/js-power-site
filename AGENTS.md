@@ -54,12 +54,15 @@ Run application commands from `static/`:
 - `npm test` launches the Create React App/Jest test watcher.
 - `CI=true npm test -- --watchAll=false` runs the test suite once, as expected in CI.
 - `npm run build` creates an optimized production bundle in `static/build/`.
-- `npm run deploy:dry-run` runs tests and a production build, verifies the
-  existing AWS target, and previews S3 changes without uploading or
-  invalidating anything.
+- `npm run playwright:install` installs the Chromium binary used by browser smoke tests.
+- `npm run test:smoke` serves the production build and tests both the normal website and standalone PWA modes.
+- `npm run deploy:dry-run` runs tests, a production build, and both local
+  Playwright smoke projects before it previews S3 changes; it never uploads or
+  invalidates anything.
 - `npm run deploy` runs tests and a production build, syncs `static/build/` to
   the existing production S3 bucket, removes stale site objects, applies
-  no-cache metadata to `index.html`, and creates a CloudFront invalidation.
+  no-cache metadata to `index.html`, creates and waits for a CloudFront
+  invalidation, and runs Playwright smoke tests against production.
 
 The deployment implementation is `static/scripts/deploy.sh`. It currently
 targets the existing production site at `themcilroy.com`; there is no active dev
@@ -69,6 +72,11 @@ or change S3, CloudFront, Route 53, or ACM configuration. After deployment, the
 site can be installed from Android Chrome using **Install app** or **Add to Home
 screen**. Verify that `manifest.json`, the app icons, and `service-worker.js` are
 present in the production build whenever install or offline behavior changes.
+The deploy is not complete until its production Playwright suite passes. If it
+fails after upload, inspect `static/test-results/` and `static/playwright-report/`,
+fix the application or test, add regression coverage when appropriate, rerun
+the dry-run, and redeploy. Continue this loop until the live calculator and PWA
+projects both pass; do not downgrade a production failure to a warning.
 
 ## Coding Style & Naming Conventions
 

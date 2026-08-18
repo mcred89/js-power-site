@@ -29,6 +29,9 @@ CI=true npm test -- --watchAll=false
 echo 'Building the production site...'
 npm run build
 
+echo 'Running browser smoke tests against the production build...'
+npm run test:smoke
+
 sync_args=(
   build/
   "s3://${site_bucket}/"
@@ -60,4 +63,12 @@ invalidation_id="$(aws cloudfront create-invalidation \
   --query 'Invalidation.Id' \
   --output text)"
 
-echo "Deployment complete. CloudFront invalidation: ${invalidation_id}"
+echo "Waiting for CloudFront invalidation ${invalidation_id}..."
+aws cloudfront wait invalidation-completed \
+  --distribution-id "${cloudfront_distribution_id}" \
+  --id "${invalidation_id}"
+
+echo 'Running browser smoke tests against production...'
+npm run test:smoke:production
+
+echo "Deployment and production smoke tests complete. CloudFront invalidation: ${invalidation_id}"

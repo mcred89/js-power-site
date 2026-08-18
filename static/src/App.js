@@ -210,7 +210,13 @@ const TrackerApp = () => {
 
   useEffect(() => {
     const handleUpdate = event => setUpdateRegistration(event.detail);
-    const reload = () => window.location.reload();
+    const shouldReloadForUpdate = Boolean(navigator.serviceWorker?.controller);
+    let reloading = false;
+    const reload = () => {
+      if (!shouldReloadForUpdate || reloading) return;
+      reloading = true;
+      window.location.reload();
+    };
     window.addEventListener('app-update-available', handleUpdate);
     navigator.serviceWorker?.addEventListener('controllerchange', reload);
     return () => {

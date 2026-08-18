@@ -22,6 +22,8 @@ Note that the inital deploy of each stage takes a long time (15-20 minutes). Thi
 npm start # starts dev server
 npm run build # bundle for production
 npm test # start test runner
+npm run playwright:install # install the locked Chromium browser once
+npm run test:smoke # test the production build in desktop and PWA modes
 ```
 
 ## Deployment
@@ -30,7 +32,8 @@ npm test # start test runner
 # Preview the files that would change without uploading anything
 npm run deploy:dry-run
 
-# Test, build, sync to the existing production bucket, and invalidate CloudFront
+# Test, build, run local browser smoke tests, deploy, wait for CloudFront,
+# and run the same browser smoke tests against production
 npm run deploy
 ```
 
@@ -41,6 +44,19 @@ S3, Route 53, CloudFront, ACM, or CloudFormation resources.
 
 `serverless.yml` is retained as the definition of the existing infrastructure,
 but routine site deployments no longer invoke Serverless or CloudFormation.
+
+Playwright smoke tests cover the calculator in desktop Chromium and the workout
+tracker in an Android-sized standalone Chromium context. The PWA tests use real
+IndexedDB, service-worker caching, downloads, reloads, and offline mode; only
+the browser's installed-display signal is simulated because Playwright does not
+provide a stable API for Chrome's native installation prompt.
+
+If production smoke tests fail, deployment exits unsuccessfully and retains
+screenshots, video, and traces in `test-results/` plus an HTML report in
+`playwright-report/`. Diagnose the failure, add or refine regression coverage,
+fix the issue, run `npm run deploy:dry-run`, and redeploy until both local and
+production smoke tests pass. Do not treat an uploaded release as complete while
+the production smoke suite is failing.
 
 ## Project was initialized with these steps
 

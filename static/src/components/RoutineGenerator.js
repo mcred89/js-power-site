@@ -179,7 +179,7 @@ const downloadRoutine = (contents, type, extension) => {
 };
 
 const Routine = props => {
-  const [markdownCopied, setMarkdownCopied] = useState(false);
+  const [markdownCopyStatus, setMarkdownCopyStatus] = useState('idle');
   const cyclePlans = buildRoutinePlan(props);
   const weekCount = cyclePlans.reduce((total, cycle) => total + cycle.weeks.length, 0);
   const sessionCount = cyclePlans.reduce((total, cycle) => (
@@ -187,8 +187,11 @@ const Routine = props => {
   ), 0);
   const copyMarkdown = () => {
     navigator.clipboard.writeText(routineToMarkdown(props)).then(() => {
-      setMarkdownCopied(true);
-      window.setTimeout(() => setMarkdownCopied(false), 2000);
+      setMarkdownCopyStatus('copied');
+      window.setTimeout(() => setMarkdownCopyStatus('idle'), 2000);
+    }).catch(() => {
+      setMarkdownCopyStatus('failed');
+      window.setTimeout(() => setMarkdownCopyStatus('idle'), 2000);
     });
   };
 
@@ -201,7 +204,7 @@ const Routine = props => {
         </div>
         <div className="program-actions">
           <button className="secondary-button" type="button" onClick={() => downloadRoutine(routineToCsv(props), 'text/csv;charset=utf-8', 'csv')}>Export CSV</button>
-          <button className="secondary-button" type="button" onClick={copyMarkdown}>{markdownCopied ? 'Copied!' : 'Copy Markdown'}</button>
+          <button className="secondary-button" type="button" onClick={copyMarkdown}>{markdownCopyStatus === 'copied' ? 'Copied!' : markdownCopyStatus === 'failed' ? 'Copy failed' : 'Copy Markdown'}</button>
           <button className="secondary-button" type="button" onClick={props.onReset}>← Edit your plan</button>
         </div>
       </div>

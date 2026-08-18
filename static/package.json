@@ -14,6 +14,10 @@
     "build": "react-scripts build",
     "deploy": "bash scripts/deploy.sh",
     "deploy:dry-run": "bash scripts/deploy.sh --dry-run",
+    "playwright:install": "playwright install chromium",
+    "smoke:serve": "node scripts/smoke-server.js",
+    "test:smoke": "playwright test",
+    "test:smoke:production": "SMOKE_BASE_URL=https://themcilroy.com playwright test",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
@@ -27,6 +31,7 @@
     "not op_mini all"
   ],
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/react": "^16.7.7",
     "@types/react-radio-group": "^3.0.2"
   }
