@@ -90,8 +90,6 @@ export const canShareTransfer = transfer => {
 
 export const shareTransfer = transfer => navigator.share({
   files: [createTransferFile(transfer)],
-  title: 'McIlroy Method transfer',
-  text: 'Open this encrypted transfer in the McIlroy Method app.',
 });
 
 export const sharedTransferContents = contents => {

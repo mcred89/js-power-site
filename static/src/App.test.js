@@ -48,9 +48,9 @@ describe('native transfer sharing', () => {
     expect(canShareTransfer(transfer)).toBe(true);
     await shareTransfer(transfer);
 
-    expect(navigator.share).toHaveBeenCalledWith(expect.objectContaining({
+    expect(navigator.share).toHaveBeenCalledWith({
       files: [expect.objectContaining({ name: 'routine.txt' })],
-    }));
+    });
   });
 
   it('offers file download when native file sharing is unavailable', () => {
