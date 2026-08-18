@@ -26,6 +26,14 @@ All profile, routine, exercise, and completion data is stored locally in
 IndexedDB. There is no account or automatic synchronization. Changes to the
 stored shape must include a versioned IndexedDB migration and backup-format
 compatibility handling. Do not silently overwrite local records during import.
+The migration framework lives in `static/src/data/storageMigrations.js`. For
+every persisted-shape change, increment `DATABASE_VERSION`, add each intervening
+ordered `databaseMigrations` step, and retain old steps so installations can
+upgrade across multiple releases. Increment `BACKUP_VERSION` when exported JSON
+changes and add a pure `backupMigrations` step for every older supported format;
+never mutate the parsed backup or discard unknown user records. Add migration
+tests covering both a new database and upgrades from prior versions before
+shipping the change.
 The service worker provides offline application-shell caching, while
 `manifest.json` and the 192px/512px icons provide Android installation metadata.
 

@@ -1,6 +1,11 @@
+import {
+  BACKUP_VERSION,
+  DATABASE_VERSION,
+  migrateBackup,
+  runDatabaseMigrations,
+} from './storageMigrations';
+
 const DATABASE_NAME = 'mcilroy-method';
-const DATABASE_VERSION = 1;
-const STORES = ['profiles', 'routines'];
 
 const openDatabase = () => new Promise((resolve, reject) => {
   if (!window.indexedDB) {
@@ -9,12 +14,8 @@ const openDatabase = () => new Promise((resolve, reject) => {
   }
 
   const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-  request.onupgradeneeded = () => {
-    STORES.forEach(store => {
-      if (!request.result.objectStoreNames.contains(store)) {
-        request.result.createObjectStore(store, { keyPath: 'id' });
-      }
-    });
+  request.onupgradeneeded = event => {
+    runDatabaseMigrations(request.result, request.transaction, event.oldVersion, event.newVersion);
   };
   request.onsuccess = () => resolve(request.result);
   request.onerror = () => reject(request.error);
@@ -50,15 +51,16 @@ export const remove = (storeName, id) => transaction(storeName, 'readwrite', sto
 
 export const exportBackup = (profiles, routines) => JSON.stringify({
   format: 'mcilroy-method-backup',
-  version: 1,
+  version: BACKUP_VERSION,
+  dataSchemaVersion: DATABASE_VERSION,
   exportedAt: new Date().toISOString(),
   profiles,
   routines,
 }, null, 2);
 
 export const parseBackup = contents => {
-  const backup = JSON.parse(contents);
-  if (backup.format !== 'mcilroy-method-backup' || backup.version !== 1 ||
+  const backup = migrateBackup(JSON.parse(contents));
+  if (backup.format !== 'mcilroy-method-backup' ||
       !Array.isArray(backup.profiles) || !Array.isArray(backup.routines)) {
     throw new Error('This is not a supported McIlroy Method backup.');
   }

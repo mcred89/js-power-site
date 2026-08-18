@@ -15,6 +15,48 @@ export const visibleExercise = exercise => ({
   prescription: exercise.overrides.prescription ?? exercise.generated.prescription,
 });
 
+const escapeCsv = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+const workoutsToCsv = (routine, workouts) => {
+  const rows = [[
+    'Routine',
+    'Microcycle',
+    'Week',
+    'Workout',
+    'Session',
+    'Movement',
+    'Weight (lb)',
+    'Prescription',
+    'Status',
+    'Completed at',
+  ]];
+
+  workouts.forEach(workout => workout.exercises.forEach(exercise => {
+    const shown = visibleExercise(exercise);
+    rows.push([
+      routine.name,
+      workout.cycleLabel,
+      workout.weekLabel,
+      workout.sequence,
+      workout.name,
+      shown.movement,
+      shown.weight,
+      shown.prescription,
+      workout.completedAt ? 'Completed' : 'Planned',
+      workout.completedAt,
+    ]);
+  }));
+
+  return rows.map(row => row.map(escapeCsv).join(',')).join('\n');
+};
+
+export const routinePlanToCsv = routine => workoutsToCsv(routine, routine.workouts);
+
+export const routineHistoryToCsv = routine => workoutsToCsv(
+  routine,
+  routine.workouts.filter(workout => workout.completedAt),
+);
+
 export const createRoutine = (profileId, name, inputs) => {
   let sequence = 0;
   const workouts = [];
@@ -31,6 +73,7 @@ export const createRoutine = (profileId, name, inputs) => {
           weekIndex,
           weekLabel: `Week ${weekIndex + 1}`,
           name: day.name,
+          effectiveMaxes: { ...cycle.effectiveMaxes },
           completedAt: null,
           exercises: day.exercises.map(exercise => ({
             id: makeId(),
@@ -112,6 +155,7 @@ export const correctMaxes = (routine, maxes) => {
       const generatedWorkout = regenerated.workouts[workoutIndex];
       return {
         ...workout,
+        effectiveMaxes: { ...generatedWorkout.effectiveMaxes },
         exercises: generatedWorkout.exercises.map((exercise, exerciseIndex) => ({
           ...exercise,
           id: workout.exercises[exerciseIndex]?.id || exercise.id,
@@ -129,4 +173,3 @@ export const cloneImportedRecord = record => ({
   createdAt: now(),
   updatedAt: now(),
 });
-

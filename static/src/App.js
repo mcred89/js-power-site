@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { HashRouter as Router, Link, Route, Routes } from 'react-router-dom';
 import { MaxesForm } from './containers/MaxesForm';
 import {
   clearExerciseOverrides,
   cloneImportedRecord,
   correctMaxes,
   createRoutine,
+  routineHistoryToCsv,
+  routinePlanToCsv,
   setWorkoutComplete,
   updateExercise,
   visibleExercise,
@@ -42,6 +45,10 @@ const download = (contents, name, type = 'application/json') => {
   link.click();
   URL.revokeObjectURL(url);
 };
+
+const safeFilename = value => value.toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-|-$/g, '') || 'routine';
 
 const ProfileForm = ({ onSave, title = 'Who is training?' }) => {
   const [name, setName] = useState('');
@@ -88,9 +95,15 @@ const WorkoutExercises = ({ routine, workout, editable, onChange }) => (
   </div>
 );
 
+const WorkoutMaxes = ({ workout }) => workout.cycleLabel && workout.effectiveMaxes ? (
+  <small className="workout-maxes">
+    Maxes: Squat {workout.effectiveMaxes.maxSquat} · Press {workout.effectiveMaxes.maxPress} · Deadlift {workout.effectiveMaxes.maxDead} lb
+  </small>
+) : null;
+
 const WorkoutCard = ({ workout, onOpen }) => (
   <button className="workout-card" type="button" onClick={onOpen}>
-    <span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong></span>
+    <span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong><WorkoutMaxes workout={workout} /></span>
     <span aria-hidden="true">→</span>
   </button>
 );
@@ -136,7 +149,38 @@ const RoutineBuilder = ({ profile, count, onCreate, onCancel }) => {
   );
 };
 
-const App = () => {
+export const RoutineNameEditor = ({ routine, onSave }) => {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(routine.name);
+
+  const cancel = () => {
+    setName(routine.name);
+    setEditing(false);
+  };
+
+  if (!editing) return <button className="text-button" type="button" onClick={() => setEditing(true)}>Rename</button>;
+
+  return (
+    <form className="routine-name-editor" onSubmit={event => {
+      event.preventDefault();
+      const nextName = name.trim();
+      if (!nextName) return;
+      onSave(nextName);
+      setEditing(false);
+    }}>
+      <label className="form-field">
+        <span className="field-label">Routine name</span>
+        <input aria-label="Routine name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus />
+      </label>
+      <div className="button-row">
+        <button className="secondary-button" type="submit">Save name</button>
+        <button className="text-button" type="button" onClick={cancel}>Cancel</button>
+      </div>
+    </form>
+  );
+};
+
+const TrackerApp = () => {
   const [profiles, setProfiles] = useState([]);
   const [routines, setRoutines] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
@@ -226,6 +270,11 @@ const App = () => {
     setSelectedRoutineId(item.id);
   };
 
+  const renameRoutine = async (item, name) => {
+    await saveRoutine({ ...item, name, updatedAt: new Date().toISOString() });
+    flash('Routine renamed.');
+  };
+
   const completeWorkout = async (target, complete = true) => {
     const updated = setWorkoutComplete(routine, target.id, complete);
     await saveRoutine(updated);
@@ -310,6 +359,7 @@ const App = () => {
             <button className="text-button" type="button" onClick={() => { setWorkoutId(null); setEditingWorkout(false); }}>← Back</button>
             <p className="eyebrow">{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</p>
             <div className="detail-heading"><h1>{workout.name}</h1>{!workout.completedAt && <button className="secondary-button" type="button" onClick={() => setEditingWorkout(!editingWorkout)}>{editingWorkout ? 'Done editing' : 'Edit exercises'}</button>}</div>
+            <WorkoutMaxes workout={workout} />
             <WorkoutExercises routine={routine} workout={workout} editable={editingWorkout} onChange={editExercise} />
             {workout.completedAt
               ? <button className="secondary-button full-button" type="button" onClick={() => completeWorkout(workout, false)}>Return to workout queue</button>
@@ -326,6 +376,7 @@ const App = () => {
                 <div className="next-workout">
                   <p>{pending[0].cycleLabel && <>{pending[0].cycleLabel} · </>}{pending[0].weekLabel}</p>
                   <h2>{pending[0].name}</h2>
+                  <WorkoutMaxes workout={pending[0]} />
                   <WorkoutExercises routine={routine} workout={pending[0]} editable={false} />
                   <button className="primary-button" type="button" onClick={() => showWorkout(pending[0])}>Open workout</button>
                 </div>
@@ -339,6 +390,7 @@ const App = () => {
             {!profileRoutines.length ? <p>No routines yet.</p> : profileRoutines.map(item => (
               <article className={`plan-card ${item.id === routine?.id ? 'active' : ''}`} key={item.id}>
                 <button className="plan-select" type="button" onClick={() => selectRoutine(item)}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><span>{item.id === routine?.id ? 'Active' : 'Use plan'}</span></button>
+                <div className="plan-actions"><RoutineNameEditor routine={item} onSave={name => renameRoutine(item, name)} /></div>
                 {item.id === routine?.id && <MaxCorrection routine={item} onCorrect={maxes => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }} />}
               </article>
             ))}
@@ -349,6 +401,7 @@ const App = () => {
           <section className="section-page settings-page">
             <p className="eyebrow">This phone</p><h1>Settings & backup</h1>
             <article className="settings-card"><h2>Offline storage</h2><p>{persistent ? 'Persistent storage is enabled.' : 'Ask Chrome to protect this app from automatic storage cleanup.'}</p>{!persistent && <button className="secondary-button" type="button" onClick={async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }}>Request persistent storage</button>}</article>
+            <article className="settings-card"><h2>CSV downloads</h2><p>{routine ? `Download the active plan, ${routine.name}, or its completed workout history. Exercise edits and completed-workout snapshots are included.` : 'Create a routine before downloading plan or history data.'}</p><div className="button-row"><button className="secondary-button" type="button" disabled={!routine} onClick={() => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8')}>Download plan CSV</button><button className="secondary-button" type="button" disabled={!completed.length} onClick={() => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8')}>Download history CSV</button></div></article>
             <article className="settings-card"><h2>Backup and transfer</h2><p>Export a JSON backup before clearing browser data or moving plans to another phone.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /></div></article>
             <article className="settings-card danger-card"><h2>Delete profile</h2><p>Deletes {profile.name} and every routine belonging to this profile from this phone.</p><button className="danger-button" type="button" onClick={deleteProfile}>Delete {profile.name}</button></article>
           </section>
@@ -359,5 +412,34 @@ const App = () => {
     </div>
   );
 };
+
+export const isInstalledApp = () => (
+  (typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches) ||
+  (typeof navigator !== 'undefined' && navigator.standalone === true)
+);
+
+const CalculatorWebsite = () => (
+  <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+    <div className="site-shell">
+      <header className="site-header">
+        <nav className="nav-wrap" aria-label="Main navigation">
+          <Link className="brand" to="/">
+            <span className="brand-mark">TM</span>
+            <span>The McIlroy Method</span>
+          </Link>
+        </nav>
+      </header>
+      <main className="site-main">
+        <Routes>
+          <Route path="/" element={<MaxesForm />} />
+          <Route path="*" element={<MaxesForm />} />
+        </Routes>
+      </main>
+      <footer className="site-footer">Built for steady progress, one session at a time.</footer>
+    </div>
+  </Router>
+);
+
+const App = () => isInstalledApp() ? <TrackerApp /> : <CalculatorWebsite />;
 
 export default App;

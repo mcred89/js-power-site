@@ -138,6 +138,7 @@ body { min-width:320px; }
 .update-banner button { border:0; color:#fff; background:transparent; cursor:pointer; font-weight:800; text-decoration:underline; }
 .next-workout > p { margin:0 0 7px; color:var(--accent); font-size:13px; font-weight:750; }
 .next-workout > h2 { font:500 36px Georgia,serif; }
+.workout-maxes { display:block; margin-top:7px; color:var(--muted); font-size:12px; font-weight:500; line-height:1.5; }
 .exercise-list { display:grid; gap:0; margin:24px 0; }
 .exercise-row { min-height:64px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:13px 0; border-top:1px solid var(--line); }
 .exercise-row:first-child { border-top:0; }
@@ -174,6 +175,10 @@ body { min-width:320px; }
 .plan-select > span:first-child { display:grid; gap:5px; }
 .plan-select small { color:var(--muted); }
 .plan-select > span:last-child { color:var(--accent); font-size:12px; font-weight:800; }
+.plan-actions { padding:0 20px 14px; }
+.routine-name-editor { display:grid; gap:12px; padding:16px 0 6px; border-top:1px solid var(--line); }
+.routine-name-editor .number-input { max-width:420px; }
+.routine-name-editor .secondary-button { min-height:42px; }
 .max-correction { padding:20px; border-top:1px solid var(--line); background:#fbfcfb; }
 .max-correction .secondary-button { margin-top:16px; }
 .settings-page { display:grid; gap:16px; }
