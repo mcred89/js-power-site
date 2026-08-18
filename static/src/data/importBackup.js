@@ -48,16 +48,19 @@ const planStore = (importedRecords, localRecords, type) => {
   });
 };
 
-export const createImportPlan = (backup, profiles, routines) => ({
+export const createImportPlan = (backup, profiles, routines, templates = []) => ({
   profiles: planStore(backup.profiles, profiles, 'profile'),
   routines: planStore(backup.routines, routines, 'routine'),
+  templates: planStore(backup.templates || [], templates, 'template'),
 });
 
-export const importPlanSummary = plan => [...plan.profiles, ...plan.routines].reduce((summary, item) => ({
+const planItems = plan => [...plan.profiles, ...plan.routines, ...(plan.templates || [])];
+
+export const importPlanSummary = plan => planItems(plan).reduce((summary, item) => ({
   ...summary,
   [item.action]: summary[item.action] + 1,
 }), { copy: 0, skip: 0, merge: 0 });
 
-export const recordsToSave = plan => [...plan.profiles, ...plan.routines]
+export const recordsToSave = plan => planItems(plan)
   .filter(item => item.action !== 'skip')
   .map(item => item.result);

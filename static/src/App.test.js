@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import App, { ConfirmationModal, initialProfileId, isInstalledApp, PlanSetup, RoutineNameEditor, WorkoutCard } from './App';
+import App, { canShareTransfer, ConfirmationModal, createTransferFile, initialProfileId, isInstalledApp, PlanSetup, RoutineCopyDialog, RoutineNameEditor, shareTransfer, TransferCreator, WorkoutCard } from './App';
 
 describe('default profile selection', () => {
   const profiles = [{ id: 'wife' }, { id: 'husband' }];
@@ -11,6 +11,52 @@ describe('default profile selection', () => {
 
   it('falls back to the first profile when the saved default no longer exists', () => {
     expect(initialProfileId(profiles, 'deleted')).toBe('wife');
+  });
+});
+
+describe('native transfer sharing', () => {
+  const transfer = {
+    contents: '{"encrypted":true}',
+    filename: 'routine.mcilroy-transfer',
+    key: 'correct-key',
+    expiresAt: '2026-08-18T18:00:00.000Z',
+  };
+
+  afterEach(() => {
+    delete navigator.share;
+    delete navigator.canShare;
+  });
+
+  it('creates a named transfer file for the phone share sheet', () => {
+    const file = createTransferFile(transfer);
+
+    expect(file.name).toBe('routine.mcilroy-transfer');
+    expect(file.type).toBe('application/json');
+  });
+
+  it('shares the encrypted file and its key through the native share sheet', async () => {
+    navigator.canShare = jest.fn().mockReturnValue(true);
+    navigator.share = jest.fn().mockResolvedValue(undefined);
+
+    expect(canShareTransfer(transfer)).toBe(true);
+    await shareTransfer(transfer);
+
+    expect(navigator.share).toHaveBeenCalledWith(expect.objectContaining({
+      files: [expect.objectContaining({ name: 'routine.mcilroy-transfer' })],
+      text: expect.stringContaining('correct-key'),
+    }));
+  });
+
+  it('offers file download when native file sharing is unavailable', () => {
+    global.IS_REACT_ACT_ENVIRONMENT = true;
+    const div = document.createElement('div');
+    const root = createRoot(div);
+
+    act(() => root.render(<TransferCreator transfer={transfer} onClose={() => {}} onShare={() => {}} />));
+
+    expect(div.textContent).toContain('Download file instead');
+    expect(div.textContent).not.toContain('Share with nearby phone');
+    act(() => root.unmount());
   });
 });
 
@@ -132,5 +178,39 @@ it('confirms or cancels a destructive action in a modal', () => {
 
   expect(onCancel).toHaveBeenCalledTimes(1);
   expect(onConfirm).toHaveBeenCalledTimes(1);
+  act(() => root.unmount());
+});
+
+it('trims a copied routine name and selects its destination profile', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const onConfirm = jest.fn();
+  act(() => root.render(
+    <RoutineCopyDialog
+      title="Copy Meet prep"
+      eyebrow="Copy routine"
+      defaultName="Meet prep copy"
+      profiles={[{ id: 'p1', name: 'Alex' }, { id: 'p2', name: 'Sam' }]}
+      selectedProfileId="p1"
+      confirmLabel="Copy routine"
+      onCancel={() => {}}
+      onConfirm={onConfirm}
+    />,
+  ));
+
+  const nameInput = div.querySelector('input');
+  const profileSelect = div.querySelector('select');
+  act(() => {
+    const inputSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    inputSetter.call(nameInput, '  Shared plan  ');
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+    const selectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+    selectSetter.call(profileSelect, 'p2');
+    profileSelect.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  act(() => div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+
+  expect(onConfirm).toHaveBeenCalledWith('p2', 'Shared plan');
   act(() => root.unmount());
 });

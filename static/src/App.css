@@ -211,6 +211,13 @@ body { min-width:320px; }
 .plan-select small { color:var(--muted); }
 .plan-select > span:last-child { color:var(--accent); font-size:12px; font-weight:800; }
 .plan-actions { padding:0 20px 14px; }
+.template-library { display:grid; gap:14px; margin-top:38px; padding-top:30px; border-top:1px solid var(--line); }
+.template-library > div > h2 { margin:4px 0 8px; }
+.template-library > div > p:last-child { color:var(--muted); }
+.template-card { display:grid; gap:14px; padding:18px 20px; border:1px solid var(--line); border-radius:13px; background:var(--paper); }
+.template-card > .button-row { align-items:center; }
+.template-card .routine-name-editor { width:100%; }
+.danger-text { color:#9d3f2c; }
 .routine-name-editor { display:grid; gap:12px; padding:16px 0 6px; border-top:1px solid var(--line); }
 .routine-name-editor .number-input { max-width:420px; }
 .routine-name-editor .secondary-button { min-height:42px; }

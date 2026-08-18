@@ -50,19 +50,21 @@ export const get = (storeName, id) => transaction(storeName, 'readonly', store =
 export const save = (storeName, value) => transaction(storeName, 'readwrite', store => store.put(value));
 export const remove = (storeName, id) => transaction(storeName, 'readwrite', store => store.delete(id));
 
-export const exportBackup = (profiles, routines) => JSON.stringify({
+export const exportBackup = (profiles, routines, templates = []) => JSON.stringify({
   format: 'mcilroy-method-backup',
   version: BACKUP_VERSION,
   dataSchemaVersion: DATABASE_VERSION,
   exportedAt: new Date().toISOString(),
   profiles,
   routines,
+  templates,
 }, null, 2);
 
 export const parseBackup = contents => {
   const backup = migrateBackup(JSON.parse(contents));
   if (backup.format !== 'mcilroy-method-backup' ||
-      !Array.isArray(backup.profiles) || !Array.isArray(backup.routines)) {
+      !Array.isArray(backup.profiles) || !Array.isArray(backup.routines) ||
+      !Array.isArray(backup.templates)) {
     throw new Error('This is not a supported McIlroy Method backup.');
   }
   return backup;

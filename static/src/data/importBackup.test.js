@@ -10,6 +10,7 @@ describe('backup import planning', () => {
     const plan = createImportPlan({
       profiles: [{ ...localProfiles[0] }, { id: 'p2', name: 'Sam' }],
       routines: [],
+      templates: [],
     }, localProfiles, localRoutines);
 
     expect(plan.profiles.map(item => [item.status, item.action])).toEqual([
@@ -23,6 +24,7 @@ describe('backup import planning', () => {
     const plan = createImportPlan({
       profiles: [{ name: 'Alex', localOnly: true, id: 'p1' }],
       routines: [],
+      templates: [],
     }, localProfiles, localRoutines);
 
     expect(plan.profiles[0].action).toBe('skip');
@@ -37,6 +39,7 @@ describe('backup import planning', () => {
           { id: 'w2', sequence: 2, completedAt: null },
         ],
       }],
+      templates: [],
     }, localProfiles, localRoutines);
 
     expect(plan.profiles[0]).toMatchObject({ status: 'conflict', action: 'merge' });
@@ -47,5 +50,21 @@ describe('backup import planning', () => {
       { id: 'w2', sequence: 2, completedAt: null },
     ]);
     expect(recordsToSave(plan)).toHaveLength(2);
+  });
+
+  it('copies and merges reusable templates without overwriting local values', () => {
+    const localTemplates = [{ id: 't1', name: 'Local name', inputs: { maxSquat: '315' } }];
+    const plan = createImportPlan({ profiles: [], routines: [], templates: [
+      { id: 't1', name: 'Backup name', inputs: { maxSquat: '300' }, importedOnly: true },
+      { id: 't2', name: 'New template', inputs: {} },
+    ] }, [], [], localTemplates);
+
+    expect(plan.templates.map(item => [item.status, item.action])).toEqual([
+      ['conflict', 'merge'],
+      ['new', 'copy'],
+    ]);
+    expect(plan.templates[0].result).toEqual({
+      id: 't1', name: 'Local name', inputs: { maxSquat: '315' }, importedOnly: true,
+    });
   });
 });

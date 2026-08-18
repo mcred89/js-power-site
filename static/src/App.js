@@ -11,7 +11,10 @@ import {
   completeSessionSet,
   correctMaxes,
   createRoutine,
+  createRoutineFromTemplate,
+  createRoutineTemplate,
   deleteFutureWorkout,
+  duplicateRoutine,
   finishWorkoutSession,
   reopenWorkoutSession,
   routineHistoryToCsv,
@@ -67,6 +70,23 @@ const download = (contents, name, type = 'application/json') => {
   URL.revokeObjectURL(url);
 };
 
+export const createTransferFile = transfer => new File(
+  [transfer.contents],
+  transfer.filename,
+  { type: 'application/json' },
+);
+
+export const canShareTransfer = transfer => {
+  if (!navigator.share || !navigator.canShare) return false;
+  return navigator.canShare({ files: [createTransferFile(transfer)] });
+};
+
+export const shareTransfer = transfer => navigator.share({
+  files: [createTransferFile(transfer)],
+  title: 'McIlroy Method transfer',
+  text: `Open this encrypted transfer in McIlroy Method. Transfer key: ${transfer.key}`,
+});
+
 const safeFilename = value => value.toLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-|-$/g, '') || 'routine';
@@ -93,7 +113,7 @@ const ProfileForm = ({ onSave, title = 'Who is training?' }) => {
 
 export const ImportPreview = ({ plan, onCancel, onConfirm }) => {
   const summary = importPlanSummary(plan);
-  const sections = [['Profiles', plan.profiles], ['Routines', plan.routines]];
+  const sections = [['Profiles', plan.profiles], ['Routines', plan.routines], ['Templates', plan.templates || []]];
   return (
     <div className="modal-backdrop">
       <section className="confirmation-modal import-preview" role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
@@ -123,18 +143,24 @@ export const ImportPreview = ({ plan, onCancel, onConfirm }) => {
   );
 };
 
-const TransferCreator = ({ transfer, onClose }) => (
+export const TransferCreator = ({ transfer, onClose, onShare }) => {
+  const shareSupported = canShareTransfer(transfer);
+  return (
   <div className="modal-backdrop">
     <section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
       <p className="eyebrow">Encrypted transfer</p>
-      <h2 id="transfer-title">Send this key separately</h2>
-      <p>The package is encrypted and expires at {new Date(transfer.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. Share this key with the receiving device:</p>
+      <h2 id="transfer-title">Send to another phone</h2>
+      <p>{shareSupported ? 'Use your phone\'s share menu and choose Quick Share or another nearby option.' : 'Direct sharing is not supported by this browser. Download the file and share it from your phone\'s Files app.'}</p>
+      {shareSupported && <button className="primary-button full-button" type="button" onClick={onShare}>Share with nearby phone</button>}
+      <button className="secondary-button full-button" type="button" onClick={() => download(transfer.contents, transfer.filename)}>Download file instead</button>
+      <p>On the other phone, accept the file, choose <strong>Open transfer file</strong> in Settings, and enter this key. It expires at {new Date(transfer.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.</p>
       <output className="transfer-key" aria-label="Transfer key">{transfer.key}</output>
       <button className="secondary-button full-button" type="button" onClick={() => navigator.clipboard?.writeText(transfer.key)}>Copy key</button>
       <div className="button-row modal-actions"><button className="primary-button" type="button" onClick={onClose}>Done</button></div>
     </section>
   </div>
-);
+  );
+};
 
 const TransferUnlock = ({ file, onCancel, onUnlock }) => {
   const [key, setKey] = useState('');
@@ -189,6 +215,39 @@ const RoutineDestination = ({ transfer, profiles, onCancel, onConfirm }) => {
         <label className="form-field"><span className="field-label">Profile</span><select className="number-input" value={destination} onChange={event => setDestination(event.target.value)}>{profiles.map(item => <option value={item.id} key={item.id}>Add to {item.name}</option>)}<option value="new">Create a new profile</option></select></label>
         {destination === 'new' && <label className="form-field"><span className="field-label">New profile name</span><input className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label>}
         <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit">Preview import</button></div>
+      </form>
+    </div>
+  );
+};
+
+export const RoutineCopyDialog = ({ title, eyebrow, defaultName, profiles, selectedProfileId, confirmLabel, onCancel, onConfirm }) => {
+  const [destination, setDestination] = useState(selectedProfileId || profiles[0]?.id || '');
+  const [name, setName] = useState(defaultName);
+  const trimmedName = name.trim();
+  return (
+    <div className="modal-backdrop">
+      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="copy-routine-title" onSubmit={event => { event.preventDefault(); if (destination && trimmedName) onConfirm(destination, trimmedName); }}>
+        <p className="eyebrow">{eyebrow}</p>
+        <h2 id="copy-routine-title">{title}</h2>
+        <label className="form-field"><span className="field-label">Routine name</span><input aria-label="Routine name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label>
+        <label className="form-field"><span className="field-label">Profile</span><select aria-label="Destination profile" className="number-input" value={destination} onChange={event => setDestination(event.target.value)} required>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit" disabled={!destination || !trimmedName}>{confirmLabel}</button></div>
+      </form>
+    </div>
+  );
+};
+
+const SaveTemplateDialog = ({ routine, onCancel, onConfirm }) => {
+  const [name, setName] = useState(routine.name);
+  const trimmedName = name.trim();
+  return (
+    <div className="modal-backdrop">
+      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="save-template-title" onSubmit={event => { event.preventDefault(); if (trimmedName) onConfirm(trimmedName); }}>
+        <p className="eyebrow">Reusable template</p>
+        <h2 id="save-template-title">Save routine setup</h2>
+        <p>Templates keep the generator setup, not workout progress or exercise-level edits.</p>
+        <label className="form-field"><span className="field-label">Template name</span><input aria-label="Template name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label>
+        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit" disabled={!trimmedName}>Save template</button></div>
       </form>
     </div>
   );
@@ -279,7 +338,7 @@ const RoutineBuilder = ({ profile, count, onCreate, onCancel }) => {
   );
 };
 
-export const RoutineNameEditor = ({ routine, onSave }) => {
+export const RoutineNameEditor = ({ routine, onSave, label = 'Routine' }) => {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(routine.name);
 
@@ -299,8 +358,8 @@ export const RoutineNameEditor = ({ routine, onSave }) => {
       setEditing(false);
     }}>
       <label className="form-field">
-        <span className="field-label">Routine name</span>
-        <input aria-label="Routine name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus />
+        <span className="field-label">{label} name</span>
+        <input aria-label={`${label} name`} className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus />
       </label>
       <div className="button-row">
         <button className="secondary-button" type="submit">Save name</button>
@@ -381,6 +440,7 @@ export const PlanSetup = ({ routine }) => {
 const TrackerApp = () => {
   const [profiles, setProfiles] = useState([]);
   const [routines, setRoutines] = useState([]);
+  const [templates, setTemplates] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState(null);
   const [defaultProfileId, setDefaultProfileId] = useState(null);
   const [selectedRoutineId, setSelectedRoutineId] = useState(null);
@@ -401,6 +461,9 @@ const TrackerApp = () => {
   const [choosingRoutineTransfer, setChoosingRoutineTransfer] = useState(false);
   const [routineQr, setRoutineQr] = useState(null);
   const [receivedRoutine, setReceivedRoutine] = useState(null);
+  const [copyRequest, setCopyRequest] = useState(null);
+  const [templateSource, setTemplateSource] = useState(null);
+  const [templateToDelete, setTemplateToDelete] = useState(null);
   const importRef = useRef();
   const transferRef = useRef();
   const qrImageRef = useRef();
@@ -412,10 +475,11 @@ const TrackerApp = () => {
   }, [routines]);
 
   useEffect(() => {
-    Promise.all([getAll('profiles'), getAll('routines'), hasPersistentStorage(), get('metadata', 'defaultProfileId')])
-      .then(([savedProfiles, savedRoutines, isPersistent, savedDefault]) => {
+    Promise.all([getAll('profiles'), getAll('routines'), getAll('templates'), hasPersistentStorage(), get('metadata', 'defaultProfileId')])
+      .then(([savedProfiles, savedRoutines, savedTemplates, isPersistent, savedDefault]) => {
         setProfiles(savedProfiles);
         setRoutines(savedRoutines);
+        setTemplates(savedTemplates);
         setDefaultProfileId(savedDefault?.value || null);
         setSelectedProfileId(initialProfileId(savedProfiles, savedDefault?.value));
         setPersistent(isPersistent);
@@ -518,6 +582,56 @@ const TrackerApp = () => {
     flash('Routine renamed.');
   };
 
+  const addCopiedRoutine = async item => {
+    const destinationProfile = profiles.find(entry => entry.id === item.profileId);
+    if (!destinationProfile) return;
+    const updatedProfile = { ...destinationProfile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
+    await Promise.all([save('routines', item), save('profiles', updatedProfile)]);
+    setRoutines(current => [...current, item]);
+    setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
+    setSelectedProfileId(item.profileId);
+    setSelectedRoutineId(item.id);
+    setWorkoutId(null);
+    setView('plans');
+  };
+
+  const confirmRoutineCopy = async (destination, name) => {
+    const item = duplicateRoutine(copyRequest.item, destination, name);
+    await addCopiedRoutine(item);
+    setCopyRequest(null);
+    flash('Routine copied. The original is unchanged.');
+  };
+
+  const saveRoutineTemplate = async name => {
+    const item = createRoutineTemplate(templateSource, name);
+    await save('templates', item);
+    setTemplates(current => [...current, item]);
+    setTemplateSource(null);
+    flash('Template saved on this phone.');
+  };
+
+  const confirmTemplateUse = async (destination, name) => {
+    const item = createRoutineFromTemplate(copyRequest.item, destination, name);
+    await addCopiedRoutine(item);
+    setCopyRequest(null);
+    flash('Routine created from template.');
+  };
+
+  const renameTemplate = async (item, name) => {
+    const updated = { ...item, name, updatedAt: new Date().toISOString() };
+    await save('templates', updated);
+    setTemplates(current => current.map(entry => entry.id === item.id ? updated : entry));
+    flash('Template renamed.');
+  };
+
+  const deleteTemplate = async () => {
+    if (!templateToDelete) return;
+    await remove('templates', templateToDelete.id);
+    setTemplates(current => current.filter(item => item.id !== templateToDelete.id));
+    setTemplateToDelete(null);
+    flash('Template deleted.');
+  };
+
   const completeWorkout = async (target, complete = true) => {
     const updated = setWorkoutComplete(routine, target.id, complete);
     await saveRoutine(updated);
@@ -609,7 +723,7 @@ const TrackerApp = () => {
   const importBackupFile = async file => {
     try {
       const backup = parseBackup(await file.text());
-      setImportPlan(createImportPlan(backup, profiles, routines));
+      setImportPlan(createImportPlan(backup, profiles, routines, templates));
     } catch (error) {
       flash(error.message);
     }
@@ -617,9 +731,11 @@ const TrackerApp = () => {
 
   const makeTransfer = async () => {
     try {
-      const transfer = await createTransferPackage(exportBackup(profiles, routines));
-      download(transfer.contents, `mcilroy-method-transfer-${new Date().toISOString().slice(0, 10)}.mcilroy-transfer`);
-      setCreatedTransfer(transfer);
+      const transfer = await createTransferPackage(exportBackup(profiles, routines, templates));
+      setCreatedTransfer({
+        ...transfer,
+        filename: `mcilroy-method-transfer-${new Date().toISOString().slice(0, 10)}.mcilroy-transfer`,
+      });
     } catch (error) {
       flash(error.message);
     }
@@ -633,7 +749,7 @@ const TrackerApp = () => {
       if (payload.format === 'mcilroy-method-routine-transfer' && payload.version === 1 && payload.routine) {
         setReceivedRoutine(payload);
       } else {
-        setImportPlan(createImportPlan(parseBackup(plaintext), profiles, routines));
+        setImportPlan(createImportPlan(parseBackup(plaintext), profiles, routines, templates));
       }
     } catch (error) {
       flash(error.message);
@@ -652,9 +768,11 @@ const TrackerApp = () => {
       });
       const transfer = await createTransferPackage(payload, Date.now(), { compress: true });
       if (method === 'file') {
-        download(transfer.contents, `${safeFilename(selected.name)}-${new Date().toISOString().slice(0, 10)}.mcilroy-transfer`);
         setChoosingRoutineTransfer(false);
-        setCreatedTransfer(transfer);
+        setCreatedTransfer({
+          ...transfer,
+          filename: `${safeFilename(selected.name)}-${new Date().toISOString().slice(0, 10)}.mcilroy-transfer`,
+        });
         return;
       }
       const qrPayload = encodeQrTransfer(transfer);
@@ -665,6 +783,14 @@ const TrackerApp = () => {
       flash(error.message.includes('too big') || error.message.includes('capacity')
         ? 'This routine is too large for one QR code. Choose Encrypted file instead.'
         : error.message);
+    }
+  };
+
+  const sendTransfer = async () => {
+    try {
+      await shareTransfer(createdTransfer);
+    } catch (error) {
+      if (error.name !== 'AbortError') flash('The phone could not share this transfer. Download the file instead.');
     }
   };
 
@@ -694,21 +820,25 @@ const TrackerApp = () => {
     const incomingProfiles = destination === 'new' ? [{ id: profileId, name }] : [];
     const incomingRoutine = { ...receivedRoutine.routine, profileId };
     setReceivedRoutine(null);
-    setImportPlan(createImportPlan({ profiles: incomingProfiles, routines: [incomingRoutine] }, profiles, routines));
+    setImportPlan(createImportPlan({ profiles: incomingProfiles, routines: [incomingRoutine], templates: [] }, profiles, routines, templates));
   };
 
   const confirmImport = async () => {
     const profileChanges = importPlan.profiles.filter(item => item.action !== 'skip');
     const routineChanges = importPlan.routines.filter(item => item.action !== 'skip');
+    const templateChanges = importPlan.templates.filter(item => item.action !== 'skip');
     try {
       await Promise.all([
         ...profileChanges.map(item => save('profiles', item.result)),
         ...routineChanges.map(item => save('routines', item.result)),
+        ...templateChanges.map(item => save('templates', item.result)),
       ]);
       const profileResults = new Map(importPlan.profiles.map(item => [item.imported.id, item.result]));
       const routineResults = new Map(importPlan.routines.map(item => [item.imported.id, item.result]));
+      const templateResults = new Map(importPlan.templates.map(item => [item.imported.id, item.result]));
       setProfiles(current => [...current.filter(item => !profileResults.has(item.id)), ...profileResults.values()]);
       setRoutines(current => [...current.filter(item => !routineResults.has(item.id)), ...routineResults.values()]);
+      setTemplates(current => [...current.filter(item => !templateResults.has(item.id)), ...templateResults.values()]);
       const summary = importPlanSummary(importPlan);
       setImportPlan(null);
       flash(`Import complete: ${summary.copy} copied, ${summary.merge} merged, ${summary.skip} skipped.`);
@@ -817,10 +947,19 @@ const TrackerApp = () => {
             {!profileRoutines.length ? <p>No routines yet.</p> : profileRoutines.map(item => (
               <article className={`plan-card ${item.id === routine?.id ? 'active' : ''}`} key={item.id}>
                 <button className="plan-select" type="button" onClick={() => selectRoutine(item)}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><span>{item.id === routine?.id ? 'Active' : 'Use plan'}</span></button>
-                <div className="plan-actions"><RoutineNameEditor routine={item} onSave={name => renameRoutine(item, name)} /></div>
+                <div className="plan-actions"><div className="button-row"><RoutineNameEditor routine={item} onSave={name => renameRoutine(item, name)} /><button className="text-button" type="button" onClick={() => setCopyRequest({ type: 'routine', item })}>Copy</button><button className="text-button" type="button" onClick={() => setTemplateSource(item)}>Save as template</button></div></div>
                 {item.id === routine?.id && <MaxCorrection routine={item} onCorrect={maxes => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }} />}
               </article>
             ))}
+            <div className="template-library">
+              <div><p className="eyebrow">Reusable setups</p><h2>Templates</h2><p>Templates regenerate a fresh routine from saved generator settings.</p></div>
+              {!templates.length ? <p>No templates yet. Save one from a routine above.</p> : templates.map(item => (
+                <article className="template-card" key={item.id}>
+                  <strong>{item.name}</strong>
+                  <div className="button-row"><button className="primary-button small-primary" type="button" onClick={() => setCopyRequest({ type: 'template', item })}>Use template</button><RoutineNameEditor routine={item} label="Template" onSave={name => renameTemplate(item, name)} /><button className="text-button danger-text" type="button" onClick={() => setTemplateToDelete(item)}>Delete</button></div>
+                </article>
+              ))}
+            </div>
           </section>
         ) : view === 'history' ? (
           <section className="section-page"><p className="eyebrow">{routine?.name || profile.name}</p><h1>History</h1>{routine && <PlanSetup routine={routine} />}{completed.length ? completed.map(item => <WorkoutCard workout={item} onOpen={() => showWorkout(item)} key={item.id} />) : <div className="empty-card"><p>Completed workouts will appear here.</p></div>}</section>
@@ -832,7 +971,7 @@ const TrackerApp = () => {
             <article className="settings-card"><h2>Default profile</h2><p>Choose the profile that opens automatically when you launch the app.</p><label className="form-field"><span className="field-label">Open with</span><select className="number-input" aria-label="Default profile" value={defaultProfileId || profiles[0].id} onChange={async event => { const id = event.target.value; await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }}>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label></article>
             <article className="settings-card"><h2>Offline storage</h2><p>{persistent ? 'Persistent storage is enabled.' : 'Ask Chrome to protect this app from automatic storage cleanup.'}</p>{!persistent && <button className="secondary-button" type="button" onClick={async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }}>Request persistent storage</button>}</article>
             <article className="settings-card"><h2>CSV downloads</h2><p>{routine ? `Download the active plan, ${routine.name}, or its completed workout history. Exercise edits and completed-workout snapshots are included.` : 'Create a routine before downloading plan or history data.'}</p><div className="button-row"><button className="secondary-button" type="button" disabled={!routine} onClick={() => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8')}>Download plan CSV</button><button className="secondary-button" type="button" disabled={!completed.length} onClick={() => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8')}>Download history CSV</button></div></article>
-            <article className="settings-card"><h2>Backup and transfer</h2><p>Backups are unencrypted files for long-term recovery. Transfers are encrypted, expire after 30 minutes, and move all data or one selected routine without an account.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><button className="secondary-button" type="button" onClick={makeTransfer}>Move all data by file</button><button className="secondary-button" type="button" onClick={() => transferRef.current.click()}>Open transfer file</button><button className="secondary-button" type="button" disabled={!routines.length} onClick={() => setChoosingRoutineTransfer(true)}>Transfer one routine</button><button className="secondary-button" type="button" onClick={() => qrImageRef.current.click()}>Scan routine QR</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /><input ref={transferRef} className="hidden-input" type="file" accept=".mcilroy-transfer,application/json" onChange={event => { if (event.target.files[0]) setTransferFile(event.target.files[0]); event.target.value = ''; }} /><input ref={qrImageRef} className="hidden-input" type="file" accept="image/*" capture="environment" onChange={event => { if (event.target.files[0]) receiveRoutineQr(event.target.files[0]); event.target.value = ''; }} /></div></article>
+            <article className="settings-card"><h2>Backup and transfer</h2><p>Backups are unencrypted files for long-term recovery. Transfers are encrypted, expire after 30 minutes, and move all data or one selected routine without an account.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines, templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><button className="secondary-button" type="button" onClick={makeTransfer}>Move all data by file</button><button className="secondary-button" type="button" onClick={() => transferRef.current.click()}>Open transfer file</button><button className="secondary-button" type="button" disabled={!routines.length} onClick={() => setChoosingRoutineTransfer(true)}>Transfer one routine</button><button className="secondary-button" type="button" onClick={() => qrImageRef.current.click()}>Scan routine QR</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /><input ref={transferRef} className="hidden-input" type="file" accept=".mcilroy-transfer,application/json" onChange={event => { if (event.target.files[0]) setTransferFile(event.target.files[0]); event.target.value = ''; }} /><input ref={qrImageRef} className="hidden-input" type="file" accept="image/*" capture="environment" onChange={event => { if (event.target.files[0]) receiveRoutineQr(event.target.files[0]); event.target.value = ''; }} /></div></article>
             <article className="settings-card danger-card"><h2>Delete profile</h2><p>Deletes {profile.name} and every routine belonging to this profile from this phone.</p><button className="danger-button" type="button" onClick={deleteProfile}>Delete {profile.name}</button></article>
           </section>
         )}
@@ -841,11 +980,14 @@ const TrackerApp = () => {
       {workoutToDelete && <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={() => setWorkoutToDelete(null)} onConfirm={confirmDeleteWorkout}>This removes {workoutToDelete.weekLabel} · {workoutToDelete.name} from this routine. It will not be marked complete or appear in history.</ConfirmationModal>}
       {finishPrompt && <ConfirmationModal title="Finish this workout?" confirmLabel="Finish workout" onCancel={() => setFinishPrompt(null)} onConfirm={finishActiveWorkout}>{finishPrompt.pendingSets ? `${finishPrompt.pendingSets} planned set${finishPrompt.pendingSets === 1 ? '' : 's'} will be recorded as skipped. ` : ''}{finishPrompt.missingRpe ? 'The main-lift RPE is still blank.' : ''}</ConfirmationModal>}
       {importPlan && <ImportPreview plan={importPlan} onCancel={() => setImportPlan(null)} onConfirm={confirmImport} />}
-      {createdTransfer && <TransferCreator transfer={createdTransfer} onClose={() => setCreatedTransfer(null)} />}
+      {createdTransfer && <TransferCreator transfer={createdTransfer} onClose={() => setCreatedTransfer(null)} onShare={sendTransfer} />}
       {transferFile && <TransferUnlock file={transferFile} onCancel={() => setTransferFile(null)} onUnlock={unlockTransfer} />}
       {choosingRoutineTransfer && <RoutineTransferCreator routines={routines} onCancel={() => setChoosingRoutineTransfer(false)} onCreate={createRoutineTransfer} />}
       {routineQr && <RoutineQr transfer={routineQr} onClose={() => setRoutineQr(null)} />}
       {receivedRoutine && <RoutineDestination transfer={receivedRoutine} profiles={profiles} onCancel={() => setReceivedRoutine(null)} onConfirm={chooseRoutineDestination} />}
+      {copyRequest && <RoutineCopyDialog title={copyRequest.type === 'routine' ? `Copy ${copyRequest.item.name}` : `Use ${copyRequest.item.name}`} eyebrow={copyRequest.type === 'routine' ? 'Copy routine' : 'Create from template'} defaultName={copyRequest.type === 'routine' ? `${copyRequest.item.name} copy` : copyRequest.item.name} profiles={profiles} selectedProfileId={selectedProfileId} confirmLabel={copyRequest.type === 'routine' ? 'Copy routine' : 'Create routine'} onCancel={() => setCopyRequest(null)} onConfirm={copyRequest.type === 'routine' ? confirmRoutineCopy : confirmTemplateUse} />}
+      {templateSource && <SaveTemplateDialog routine={templateSource} onCancel={() => setTemplateSource(null)} onConfirm={saveRoutineTemplate} />}
+      {templateToDelete && <ConfirmationModal title="Delete template?" confirmLabel="Delete template" onCancel={() => setTemplateToDelete(null)} onConfirm={deleteTemplate}>Delete {templateToDelete.name}? Routines already created from it will not be affected.</ConfirmationModal>}
 
       {view !== 'builder' && !workout && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => setView(key)} key={key}>{label}</button>)}</nav>}
     </div>

@@ -3,7 +3,10 @@ import {
   completeSessionSet,
   correctMaxes,
   createRoutine,
+  createRoutineFromTemplate,
+  createRoutineTemplate,
   deleteFutureWorkout,
+  duplicateRoutine,
   finishWorkoutSession,
   parsePrescription,
   reopenWorkoutSession,
@@ -68,6 +71,46 @@ describe('tracked routines', () => {
     routine = correctMaxes(routine, { maxSquat: '600', maxPress: '225', maxDead: '600' });
 
     expect(visibleExercise(routine.workouts[0].exercises[0])).toMatchObject({ weight: '350', prescription: '3 × 5' });
+  });
+
+  it('duplicates the current plan without history or shared nested data', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const firstWorkout = routine.workouts[0];
+    const firstExercise = firstWorkout.exercises[0];
+    routine = updateExercise(routine, firstWorkout.id, firstExercise.id, { weight: '350' });
+    routine = setWorkoutComplete(routine, firstWorkout.id, true);
+    routine = deleteFutureWorkout(routine, routine.workouts[1].id);
+
+    const copy = duplicateRoutine(routine, 'profile-2', 'Copied plan');
+
+    expect(copy).toMatchObject({ profileId: 'profile-2', name: 'Copied plan', archived: false });
+    expect(copy.id).not.toBe(routine.id);
+    expect(copy.workouts).toHaveLength(routine.workouts.length);
+    expect(copy.workouts.every(workout => workout.completedAt === null && workout.session === null)).toBe(true);
+    expect(copy.workouts[0].id).not.toBe(routine.workouts[0].id);
+    expect(copy.workouts[0].exercises[0].id).not.toBe(routine.workouts[0].exercises[0].id);
+    expect(copy.workouts[0].exercises[0].overrides).toEqual({ weight: '350' });
+
+    const editedCopy = updateExercise(copy, copy.workouts[0].id, copy.workouts[0].exercises[0].id, { weight: '400' });
+    expect(visibleExercise(editedCopy.workouts[0].exercises[0]).weight).toBe('400');
+    expect(visibleExercise(routine.workouts[0].exercises[0]).weight).toBe('350');
+  });
+
+  it('stores only generator inputs in templates and regenerates a fresh routine', () => {
+    const routine = createRoutine('profile-1', 'Test plan', {
+      ...inputs,
+      mesoMode: true,
+      microCycles: [{ duration: '3 weeks', volume: 'High' }],
+    });
+    const template = createRoutineTemplate(routine, 'Reusable setup');
+    const generated = createRoutineFromTemplate(template, 'profile-2', 'Next plan');
+
+    expect(template).toMatchObject({ name: 'Reusable setup', inputs: routine.inputs });
+    expect(template.workouts).toBeUndefined();
+    expect(generated).toMatchObject({ profileId: 'profile-2', name: 'Next plan' });
+    expect(generated.workouts.every(workout => workout.completedAt === null && workout.session === null)).toBe(true);
+    generated.inputs.microCycles[0].volume = 'Low';
+    expect(template.inputs.microCycles[0].volume).toBe('High');
   });
 
   it('starts a session and propagates adjustments through pending sets', () => {

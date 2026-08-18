@@ -148,6 +148,59 @@ export const createRoutine = (profileId, name, inputs) => {
   };
 };
 
+export const duplicateRoutine = (routine, profileId, name) => {
+  const timestamp = now();
+  return {
+    ...routine,
+    id: makeId(),
+    profileId,
+    name,
+    inputs: {
+      ...routine.inputs,
+      microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
+    },
+    workouts: routine.workouts.map(workout => ({
+      ...workout,
+      id: makeId(),
+      completedAt: null,
+      session: null,
+      effectiveMaxes: workout.effectiveMaxes ? { ...workout.effectiveMaxes } : workout.effectiveMaxes,
+      exercises: workout.exercises.map(exercise => ({
+        ...exercise,
+        id: makeId(),
+        generated: { ...exercise.generated },
+        overrides: { ...exercise.overrides },
+      })),
+    })),
+    archived: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
+export const createRoutineTemplate = (routine, name) => {
+  const timestamp = now();
+  return {
+    id: makeId(),
+    name,
+    inputs: {
+      ...routine.inputs,
+      microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
+    },
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
+export const createRoutineFromTemplate = (template, profileId, name) => createRoutine(
+  profileId,
+  name,
+  {
+    ...template.inputs,
+    microCycles: template.inputs?.microCycles?.map(cycle => ({ ...cycle })),
+  },
+);
+
 export const setWorkoutComplete = (routine, workoutId, complete) => ({
   ...routine,
   updatedAt: now(),

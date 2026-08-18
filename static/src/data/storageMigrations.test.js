@@ -29,27 +29,36 @@ const migrationDatabase = existingStores => {
 
 describe('IndexedDB migrations', () => {
   it('contains every migration through the current version', () => {
-    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3, 4]);
+    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('creates all stores for a new installation', () => {
     const context = migrationDatabase([]);
-    runDatabaseMigrations(context.database, context.transaction, 0, 4);
+    runDatabaseMigrations(context.database, context.transaction, 0, 5);
 
-    expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata']);
+    expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
     expect(context.puts).toEqual([
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 2 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 3 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 4 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 5 } },
     ]);
   });
 
   it('upgrades version 1 through every later migration without recreating stores', () => {
     const context = migrationDatabase(['profiles', 'routines']);
-    runDatabaseMigrations(context.database, context.transaction, 1, 4);
+    runDatabaseMigrations(context.database, context.transaction, 1, 5);
 
-    expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata']);
-    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3, 4]);
+    expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
+    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3, 4, 5]);
+  });
+
+  it('adds templates when upgrading from version 4', () => {
+    const context = migrationDatabase(['profiles', 'routines', 'metadata']);
+    runDatabaseMigrations(context.database, context.transaction, 4, 5);
+
+    expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
+    expect(context.puts).toEqual([{ name: 'metadata', value: { key: 'dataSchemaVersion', value: 5 } }]);
   });
 
   it('adds max snapshots without changing the original routine', () => {

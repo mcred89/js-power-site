@@ -1,4 +1,4 @@
-export const DATABASE_VERSION = 4;
+export const DATABASE_VERSION = 5;
 
 const effectiveMaxesFor = (inputs, cycleIndex = 0) => ({
   maxSquat: Number(inputs.maxSquat) + (Number(inputs.squatIncrement) || 0) * cycleIndex,
@@ -76,6 +76,13 @@ export const databaseMigrations = {
       value: 4,
     });
   },
+  5: ({ database, transaction }) => {
+    createRecordStore(database, 'templates');
+    transaction.objectStore('metadata').put({
+      key: 'dataSchemaVersion',
+      value: 5,
+    });
+  },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
@@ -88,7 +95,7 @@ export const runDatabaseMigrations = (database, transaction, oldVersion, newVers
   }
 };
 
-export const BACKUP_VERSION = 4;
+export const BACKUP_VERSION = 5;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -113,6 +120,12 @@ export const backupMigrations = {
     routines: Array.isArray(backup.routines)
       ? backup.routines.map(addWorkoutSessions)
       : backup.routines,
+  }),
+  5: backup => ({
+    ...backup,
+    version: 5,
+    dataSchemaVersion: 5,
+    templates: Array.isArray(backup.templates) ? backup.templates : [],
   }),
 };
 
