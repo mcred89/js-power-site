@@ -1,6 +1,7 @@
 import React, { Component } from 'react';
 import RadioOrCheckGroup from '../components/RadioOrCheckGroup';
 import NumberInput from '../components/NumberInput';
+import Routine from '../components/RoutineGenerator';
 
 const eventLifts = [
   { key: 'squat', label: 'Squat' },
@@ -145,6 +146,10 @@ export class MaxesForm extends Component {
   }
 
   render() {
+    if (!this.state.needsToFillOutForm && !this.props.onCreate) {
+      return <Routine {...this.state} onReset={this.resetForm} />;
+    }
+
     return (
       <div className="page routine-form-page">
         <form className="panel" onSubmit={this.handleSubmit}>
