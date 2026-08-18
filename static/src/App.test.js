@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import App, { canShareTransfer, ConfirmationModal, createTransferFile, initialProfileId, isInstalledApp, PlanSetup, RoutineCopyDialog, RoutineNameEditor, shareTransfer, TransferCreator, WorkoutCard } from './App';
+import App, { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, isInstalledApp, PlanSetup, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, TransferCreator, WorkoutCard } from './App';
 
 describe('default profile selection', () => {
   const profiles = [{ id: 'wife' }, { id: 'husband' }];
@@ -17,7 +17,7 @@ describe('default profile selection', () => {
 describe('native transfer sharing', () => {
   const transfer = {
     contents: '{"encrypted":true}',
-    filename: 'routine.mcilroy-transfer',
+    filename: 'routine.txt',
     key: 'correct-key',
     expiresAt: '2026-08-18T18:00:00.000Z',
   };
@@ -30,11 +30,18 @@ describe('native transfer sharing', () => {
   it('creates a named transfer file for the phone share sheet', () => {
     const file = createTransferFile(transfer);
 
-    expect(file.name).toBe('routine.mcilroy-transfer');
-    expect(file.type).toBe('application/json');
+    expect(file.name).toBe('routine.txt');
+    expect(file.type).toBe('text/plain');
   });
 
-  it('shares the encrypted file and its key through the native share sheet', async () => {
+  it('puts the key inside the encrypted share envelope for automatic receiving', async () => {
+    const shared = sharedTransferContents(createSharedTransferContents(transfer));
+
+    expect(shared.key).toBe('correct-key');
+    expect(JSON.parse(shared.contents)).toEqual({ encrypted: true });
+  });
+
+  it('shares the encrypted JSON file through the native share sheet', async () => {
     navigator.canShare = jest.fn().mockReturnValue(true);
     navigator.share = jest.fn().mockResolvedValue(undefined);
 
@@ -42,8 +49,7 @@ describe('native transfer sharing', () => {
     await shareTransfer(transfer);
 
     expect(navigator.share).toHaveBeenCalledWith(expect.objectContaining({
-      files: [expect.objectContaining({ name: 'routine.mcilroy-transfer' })],
-      text: expect.stringContaining('correct-key'),
+      files: [expect.objectContaining({ name: 'routine.txt' })],
     }));
   });
 

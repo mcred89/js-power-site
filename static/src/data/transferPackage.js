@@ -3,7 +3,6 @@ import { deflate, inflate } from 'pako';
 export const TRANSFER_FORMAT = 'mcilroy-method-encrypted-transfer';
 export const TRANSFER_VERSION = 1;
 export const TRANSFER_LIFETIME_MS = 30 * 60 * 1000;
-export const QR_TRANSFER_PREFIX = 'MMT1:';
 
 const bytesToBase64 = bytes => {
   let binary = '';
@@ -85,40 +84,4 @@ export const openTransferPackage = async (contents, suppliedKey, currentTime = D
   } catch (error) {
     throw new Error('The transfer key is incorrect or the package has been changed.');
   }
-};
-
-export const encodeQrTransfer = transfer => {
-  const contents = JSON.parse(transfer.contents);
-  return [
-    QR_TRANSFER_PREFIX.slice(0, -1),
-    transfer.key,
-    Date.parse(contents.createdAt),
-    Date.parse(contents.expiresAt),
-    contents.iv,
-    contents.ciphertext,
-    contents.compression === 'deflate' ? 'z' : '-',
-  ].join(':');
-};
-
-export const decodeQrTransfer = value => {
-  if (!value.startsWith(QR_TRANSFER_PREFIX)) {
-    throw new Error('This QR code is not a McIlroy Method transfer.');
-  }
-  const [prefix, key, createdAt, expiresAt, iv, ciphertext, compression] = value.split(':');
-  if (prefix !== QR_TRANSFER_PREFIX.slice(0, -1) || !key || !createdAt || !expiresAt || !iv || !ciphertext) {
-    throw new Error('This QR code is not a McIlroy Method transfer.');
-  }
-  return {
-    key,
-    contents: JSON.stringify({
-      format: TRANSFER_FORMAT,
-      version: TRANSFER_VERSION,
-      createdAt: new Date(Number(createdAt)).toISOString(),
-      expiresAt: new Date(Number(expiresAt)).toISOString(),
-      algorithm: 'AES-GCM',
-      iv,
-      ...(compression === 'z' ? { compression: 'deflate' } : {}),
-      ciphertext,
-    }),
-  };
 };

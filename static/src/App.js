@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { HashRouter as Router, Link, Route, Routes } from 'react-router-dom';
-import QRCode from 'qrcode';
-import jsQR from 'jsqr';
 import { MaxesForm } from './containers/MaxesForm';
 import { ActiveWorkoutSession, WorkoutSessionHistory } from './components/WorkoutSession';
 import { ProgressDashboard } from './components/ProgressDashboard';
@@ -27,7 +25,7 @@ import {
   visibleExercise,
 } from './data/routines';
 import { createImportPlan, importPlanSummary } from './data/importBackup';
-import { createTransferPackage, decodeQrTransfer, encodeQrTransfer, openTransferPackage } from './data/transferPackage';
+import { createTransferPackage, openTransferPackage } from './data/transferPackage';
 import {
   exportBackup,
   get,
@@ -70,10 +68,19 @@ const download = (contents, name, type = 'application/json') => {
   URL.revokeObjectURL(url);
 };
 
+const SHARED_TRANSFER_FORMAT = 'mcilroy-method-shared-transfer';
+
+export const createSharedTransferContents = transfer => JSON.stringify({
+  format: SHARED_TRANSFER_FORMAT,
+  version: 1,
+  key: transfer.key,
+  package: JSON.parse(transfer.contents),
+});
+
 export const createTransferFile = transfer => new File(
-  [transfer.contents],
+  [createSharedTransferContents(transfer)],
   transfer.filename,
-  { type: 'application/json' },
+  { type: 'text/plain' },
 );
 
 export const canShareTransfer = transfer => {
@@ -84,8 +91,19 @@ export const canShareTransfer = transfer => {
 export const shareTransfer = transfer => navigator.share({
   files: [createTransferFile(transfer)],
   title: 'McIlroy Method transfer',
-  text: `Open this encrypted transfer in McIlroy Method. Transfer key: ${transfer.key}`,
+  text: 'Open this encrypted transfer in the McIlroy Method app.',
 });
+
+export const sharedTransferContents = contents => {
+  try {
+    const shared = JSON.parse(contents);
+    if (shared.format !== SHARED_TRANSFER_FORMAT || shared.version !== 1 ||
+        typeof shared.key !== 'string' || !shared.package) return null;
+    return { key: shared.key, contents: JSON.stringify(shared.package) };
+  } catch (error) {
+    return null;
+  }
+};
 
 const safeFilename = value => value.toLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -152,10 +170,8 @@ export const TransferCreator = ({ transfer, onClose, onShare }) => {
       <h2 id="transfer-title">Send to another phone</h2>
       <p>{shareSupported ? 'Use your phone\'s share menu and choose Quick Share or another nearby option.' : 'Direct sharing is not supported by this browser. Download the file and share it from your phone\'s Files app.'}</p>
       {shareSupported && <button className="primary-button full-button" type="button" onClick={onShare}>Share with nearby phone</button>}
-      <button className="secondary-button full-button" type="button" onClick={() => download(transfer.contents, transfer.filename)}>Download file instead</button>
-      <p>On the other phone, accept the file, choose <strong>Open transfer file</strong> in Settings, and enter this key. It expires at {new Date(transfer.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.</p>
-      <output className="transfer-key" aria-label="Transfer key">{transfer.key}</output>
-      <button className="secondary-button full-button" type="button" onClick={() => navigator.clipboard?.writeText(transfer.key)}>Copy key</button>
+      <button className="secondary-button full-button" type="button" onClick={() => download(createSharedTransferContents(transfer), transfer.filename, 'text/plain')}>Download file instead</button>
+      <p>On the other phone, accept the file and open it with McIlroy Method. The app will preview it automatically. It expires at {new Date(transfer.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.</p>
       <div className="button-row modal-actions"><button className="primary-button" type="button" onClick={onClose}>Done</button></div>
     </section>
   </div>
@@ -184,25 +200,13 @@ const RoutineTransferCreator = ({ routines, onCancel, onCreate }) => {
       <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="routine-transfer-title" onSubmit={event => event.preventDefault()}>
         <p className="eyebrow">Routine transfer</p>
         <h2 id="routine-transfer-title">Choose a routine</h2>
-        <p>A QR code includes one routine and its history. Very large histories may need the encrypted file option instead.</p>
+        <p>The encrypted routine and its history can be sent through your phone's share menu.</p>
         <label className="form-field"><span className="field-label">Routine</span><select className="number-input" value={routineId} onChange={event => setRoutineId(event.target.value)}>{routines.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-        <div className="button-row modal-actions"><button className="text-button" type="button" onClick={onCancel}>Cancel</button><button className="secondary-button" type="button" disabled={!routineId} onClick={() => onCreate(routineId, 'file')}>Encrypted file</button><button className="primary-button" type="button" disabled={!routineId} onClick={() => onCreate(routineId, 'qr')}>Generate QR</button></div>
+        <div className="button-row modal-actions"><button className="text-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="button" disabled={!routineId} onClick={() => onCreate(routineId)}>Create transfer</button></div>
       </form>
     </div>
   );
 };
-
-const RoutineQr = ({ transfer, onClose }) => (
-  <div className="modal-backdrop">
-    <section className="confirmation-modal routine-qr-modal" role="dialog" aria-modal="true" aria-labelledby="routine-qr-title">
-      <p className="eyebrow">Routine transfer</p>
-      <h2 id="routine-qr-title">Scan to receive {transfer.routineName}</h2>
-      <p>This encrypted QR expires at {new Date(transfer.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}. The receiving device can scan it from Settings.</p>
-      <img className="routine-qr" src={transfer.dataUrl} alt={`Encrypted transfer QR code for ${transfer.routineName}`} />
-      <div className="button-row modal-actions"><button className="primary-button" type="button" onClick={onClose}>Done</button></div>
-    </section>
-  </div>
-);
 
 const RoutineDestination = ({ transfer, profiles, onCancel, onConfirm }) => {
   const [destination, setDestination] = useState(profiles[0]?.id || 'new');
@@ -459,14 +463,13 @@ const TrackerApp = () => {
   const [createdTransfer, setCreatedTransfer] = useState(null);
   const [transferFile, setTransferFile] = useState(null);
   const [choosingRoutineTransfer, setChoosingRoutineTransfer] = useState(false);
-  const [routineQr, setRoutineQr] = useState(null);
   const [receivedRoutine, setReceivedRoutine] = useState(null);
   const [copyRequest, setCopyRequest] = useState(null);
   const [templateSource, setTemplateSource] = useState(null);
   const [templateToDelete, setTemplateToDelete] = useState(null);
   const importRef = useRef();
   const transferRef = useRef();
-  const qrImageRef = useRef();
+  const incomingTransferRef = useRef(false);
   const routinesRef = useRef([]);
   const routineSaveQueueRef = useRef(Promise.resolve());
 
@@ -734,16 +737,16 @@ const TrackerApp = () => {
       const transfer = await createTransferPackage(exportBackup(profiles, routines, templates));
       setCreatedTransfer({
         ...transfer,
-        filename: `mcilroy-method-transfer-${new Date().toISOString().slice(0, 10)}.mcilroy-transfer`,
+        filename: `mcilroy-method-transfer-${new Date().toISOString().slice(0, 10)}.txt`,
       });
     } catch (error) {
       flash(error.message);
     }
   };
 
-  const unlockTransfer = async key => {
+  const unlockTransferContents = async (contents, key) => {
     try {
-      const plaintext = await openTransferPackage(await transferFile.text(), key);
+      const plaintext = await openTransferPackage(contents, key);
       setTransferFile(null);
       const payload = JSON.parse(plaintext);
       if (payload.format === 'mcilroy-method-routine-transfer' && payload.version === 1 && payload.routine) {
@@ -756,7 +759,20 @@ const TrackerApp = () => {
     }
   };
 
-  const createRoutineTransfer = async (routineId, method) => {
+  const unlockTransfer = async key => unlockTransferContents(await transferFile.text(), key);
+
+  const receiveTransferFile = async file => {
+    try {
+      const contents = await file.text();
+      const shared = sharedTransferContents(contents);
+      if (shared) await unlockTransferContents(shared.contents, shared.key);
+      else setTransferFile(file);
+    } catch (error) {
+      flash(error.message);
+    }
+  };
+
+  const createRoutineTransfer = async routineId => {
     const selected = routines.find(item => item.id === routineId);
     if (!selected) return;
     try {
@@ -767,22 +783,13 @@ const TrackerApp = () => {
         routine: selected,
       });
       const transfer = await createTransferPackage(payload, Date.now(), { compress: true });
-      if (method === 'file') {
-        setChoosingRoutineTransfer(false);
-        setCreatedTransfer({
-          ...transfer,
-          filename: `${safeFilename(selected.name)}-${new Date().toISOString().slice(0, 10)}.mcilroy-transfer`,
-        });
-        return;
-      }
-      const qrPayload = encodeQrTransfer(transfer);
-      const dataUrl = await QRCode.toDataURL(qrPayload, { errorCorrectionLevel: 'L', margin: 2, width: 720 });
       setChoosingRoutineTransfer(false);
-      setRoutineQr({ ...transfer, dataUrl, routineName: selected.name });
+      setCreatedTransfer({
+        ...transfer,
+        filename: `${safeFilename(selected.name)}-${new Date().toISOString().slice(0, 10)}.txt`,
+      });
     } catch (error) {
-      flash(error.message.includes('too big') || error.message.includes('capacity')
-        ? 'This routine is too large for one QR code. Choose Encrypted file instead.'
-        : error.message);
+      flash(error.message);
     }
   };
 
@@ -794,26 +801,25 @@ const TrackerApp = () => {
     }
   };
 
-  const receiveRoutineQr = async file => {
-    try {
-      const bitmap = await createImageBitmap(file);
-      const canvas = document.createElement('canvas');
-      canvas.width = bitmap.width;
-      canvas.height = bitmap.height;
-      const context = canvas.getContext('2d');
-      context.drawImage(bitmap, 0, 0);
-      const code = jsQR(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height);
-      if (!code) throw new Error('No QR code was found in that image.');
-      const encoded = decodeQrTransfer(code.data);
-      const payload = JSON.parse(await openTransferPackage(encoded.contents, encoded.key));
-      if (payload.format !== 'mcilroy-method-routine-transfer' || payload.version !== 1 || !payload.routine) {
-        throw new Error('This QR code does not contain a supported routine transfer.');
-      }
-      setReceivedRoutine(payload);
-    } catch (error) {
-      flash(error.message);
-    }
-  };
+  useEffect(() => {
+    if (loading || incomingTransferRef.current ||
+        !new URLSearchParams(window.location.search).has('incoming-transfer')) return;
+    incomingTransferRef.current = true;
+    window.history.replaceState({}, '', '/');
+    fetch('/incoming-transfer')
+      .then(response => {
+        if (!response.ok) throw new Error('The shared transfer could not be opened.');
+        return response.json();
+      })
+      .then(shared => receiveTransferFile(new File(
+        [shared.contents],
+        shared.name || 'mcilroy-method-transfer.txt',
+        { type: 'text/plain' },
+      )))
+      .catch(error => flash(error.message));
+  // The share-target URL is consumed only once when the installed app launches.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   const chooseRoutineDestination = (destination, name) => {
     const profileId = destination === 'new' ? makeId() : destination;
@@ -971,7 +977,7 @@ const TrackerApp = () => {
             <article className="settings-card"><h2>Default profile</h2><p>Choose the profile that opens automatically when you launch the app.</p><label className="form-field"><span className="field-label">Open with</span><select className="number-input" aria-label="Default profile" value={defaultProfileId || profiles[0].id} onChange={async event => { const id = event.target.value; await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }}>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label></article>
             <article className="settings-card"><h2>Offline storage</h2><p>{persistent ? 'Persistent storage is enabled.' : 'Ask Chrome to protect this app from automatic storage cleanup.'}</p>{!persistent && <button className="secondary-button" type="button" onClick={async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }}>Request persistent storage</button>}</article>
             <article className="settings-card"><h2>CSV downloads</h2><p>{routine ? `Download the active plan, ${routine.name}, or its completed workout history. Exercise edits and completed-workout snapshots are included.` : 'Create a routine before downloading plan or history data.'}</p><div className="button-row"><button className="secondary-button" type="button" disabled={!routine} onClick={() => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8')}>Download plan CSV</button><button className="secondary-button" type="button" disabled={!completed.length} onClick={() => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8')}>Download history CSV</button></div></article>
-            <article className="settings-card"><h2>Backup and transfer</h2><p>Backups are unencrypted files for long-term recovery. Transfers are encrypted, expire after 30 minutes, and move all data or one selected routine without an account.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines, templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><button className="secondary-button" type="button" onClick={makeTransfer}>Move all data by file</button><button className="secondary-button" type="button" onClick={() => transferRef.current.click()}>Open transfer file</button><button className="secondary-button" type="button" disabled={!routines.length} onClick={() => setChoosingRoutineTransfer(true)}>Transfer one routine</button><button className="secondary-button" type="button" onClick={() => qrImageRef.current.click()}>Scan routine QR</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /><input ref={transferRef} className="hidden-input" type="file" accept=".mcilroy-transfer,application/json" onChange={event => { if (event.target.files[0]) setTransferFile(event.target.files[0]); event.target.value = ''; }} /><input ref={qrImageRef} className="hidden-input" type="file" accept="image/*" capture="environment" onChange={event => { if (event.target.files[0]) receiveRoutineQr(event.target.files[0]); event.target.value = ''; }} /></div></article>
+            <article className="settings-card"><h2>Backup and transfer</h2><p>Backups are unencrypted files for long-term recovery. Transfers are encrypted, expire after 30 minutes, and move all data or one selected routine without an account.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines, templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><button className="secondary-button" type="button" onClick={makeTransfer}>Move all data</button><button className="secondary-button" type="button" onClick={() => transferRef.current.click()}>Open received transfer</button><button className="secondary-button" type="button" disabled={!routines.length} onClick={() => setChoosingRoutineTransfer(true)}>Transfer one routine</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /><input ref={transferRef} className="hidden-input" type="file" accept="text/plain,.txt,application/json,.json,.mcilroy-transfer" onChange={event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }} /></div></article>
             <article className="settings-card danger-card"><h2>Delete profile</h2><p>Deletes {profile.name} and every routine belonging to this profile from this phone.</p><button className="danger-button" type="button" onClick={deleteProfile}>Delete {profile.name}</button></article>
           </section>
         )}
@@ -983,7 +989,6 @@ const TrackerApp = () => {
       {createdTransfer && <TransferCreator transfer={createdTransfer} onClose={() => setCreatedTransfer(null)} onShare={sendTransfer} />}
       {transferFile && <TransferUnlock file={transferFile} onCancel={() => setTransferFile(null)} onUnlock={unlockTransfer} />}
       {choosingRoutineTransfer && <RoutineTransferCreator routines={routines} onCancel={() => setChoosingRoutineTransfer(false)} onCreate={createRoutineTransfer} />}
-      {routineQr && <RoutineQr transfer={routineQr} onClose={() => setRoutineQr(null)} />}
       {receivedRoutine && <RoutineDestination transfer={receivedRoutine} profiles={profiles} onCancel={() => setReceivedRoutine(null)} onConfirm={chooseRoutineDestination} />}
       {copyRequest && <RoutineCopyDialog title={copyRequest.type === 'routine' ? `Copy ${copyRequest.item.name}` : `Use ${copyRequest.item.name}`} eyebrow={copyRequest.type === 'routine' ? 'Copy routine' : 'Create from template'} defaultName={copyRequest.type === 'routine' ? `${copyRequest.item.name} copy` : copyRequest.item.name} profiles={profiles} selectedProfileId={selectedProfileId} confirmLabel={copyRequest.type === 'routine' ? 'Copy routine' : 'Create routine'} onCancel={() => setCopyRequest(null)} onConfirm={copyRequest.type === 'routine' ? confirmRoutineCopy : confirmTemplateUse} />}
       {templateSource && <SaveTemplateDialog routine={templateSource} onCancel={() => setTemplateSource(null)} onConfirm={saveRoutineTemplate} />}

@@ -77,6 +77,7 @@ test('PWA supports multiple profiles, routines, downloads, and backup import pre
   await page.locator('.plan-card').filter({ hasText: 'Primary Plan' }).getByRole('button', { name: /Use plan/ }).click();
 
   await page.getByRole('button', { name: 'Settings' }).click();
+  await expect(page.getByRole('button', { name: /QR/i })).toHaveCount(0);
   const planDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download plan CSV' }).click();
   await expect((await planDownload).suggestedFilename()).toBe('primary-plan-plan.csv');
@@ -115,6 +116,11 @@ test('PWA persists data, has install metadata, and launches offline', async ({ p
   expect(metadata.status).toBe(200);
   expect(metadata.manifest.display).toBe('standalone');
   expect(metadata.manifest.start_url).toBe('/');
+  expect(metadata.manifest.share_target).toMatchObject({
+    action: '/receive-transfer',
+    method: 'POST',
+  });
+  expect(metadata.manifest.share_target.params.files[0].accept).toEqual(['text/plain', '.txt']);
   expect(metadata.iconStatuses).toEqual([200, 200]);
 
   await page.evaluate(async () => {
@@ -123,6 +129,14 @@ test('PWA persists data, has install metadata, and launches offline', async ({ p
       await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
     }
   });
+  const receivedShare = await page.evaluate(async () => {
+    const formData = new FormData();
+    formData.append('transfer', new File(['encrypted transfer'], 'routine.txt', { type: 'text/plain' }));
+    await fetch('/receive-transfer', { method: 'POST', body: formData });
+    const response = await fetch('/incoming-transfer');
+    return response.json();
+  });
+  expect(receivedShare).toEqual({ name: 'routine.txt', contents: 'encrypted transfer' });
   await page.reload();
   await expect(page.getByText('Offline Plan')).toBeVisible();
   await context.setOffline(true);

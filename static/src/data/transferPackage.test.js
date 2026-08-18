@@ -1,4 +1,4 @@
-import { createTransferPackage, decodeQrTransfer, encodeQrTransfer, openTransferPackage, TRANSFER_LIFETIME_MS } from './transferPackage';
+import { createTransferPackage, openTransferPackage, TRANSFER_LIFETIME_MS } from './transferPackage';
 
 describe('encrypted transfer packages', () => {
   const originalCrypto = global.crypto;
@@ -41,12 +41,4 @@ describe('encrypted transfer packages', () => {
     )).rejects.toThrow('expired');
   });
 
-  it('packs the encrypted package and key into a QR payload', async () => {
-    const transfer = await createTransferPackage('{"repeated":"aaaaaaaaaaaaaaaaaaaaaaaa"}', 1000, { compress: true });
-    const decoded = decodeQrTransfer(encodeQrTransfer(transfer));
-    expect(decoded.key).toBe(transfer.key);
-    expect(JSON.parse(decoded.contents)).toEqual(JSON.parse(transfer.contents));
-    await expect(openTransferPackage(transfer.contents, transfer.key, 2000))
-      .resolves.toBe('{"repeated":"aaaaaaaaaaaaaaaaaaaaaaaa"}');
-  });
 });
