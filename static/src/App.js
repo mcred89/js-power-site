@@ -6,6 +6,7 @@ import {
   cloneImportedRecord,
   correctMaxes,
   createRoutine,
+  deleteFutureWorkout,
   routineHistoryToCsv,
   routinePlanToCsv,
   setWorkoutComplete,
@@ -180,6 +181,21 @@ export const RoutineNameEditor = ({ routine, onSave }) => {
   );
 };
 
+export const ConfirmationModal = ({ title, children, confirmLabel, onCancel, onConfirm }) => (
+  <div className="modal-backdrop" role="presentation" onMouseDown={event => {
+    if (event.target === event.currentTarget) onCancel();
+  }}>
+    <section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
+      <h2 id="confirmation-title">{title}</h2>
+      <p>{children}</p>
+      <div className="button-row modal-actions">
+        <button className="secondary-button" type="button" onClick={onCancel}>Cancel</button>
+        <button className="danger-button" type="button" onClick={onConfirm} autoFocus>{confirmLabel}</button>
+      </div>
+    </section>
+  </div>
+);
+
 const TrackerApp = () => {
   const [profiles, setProfiles] = useState([]);
   const [routines, setRoutines] = useState([]);
@@ -194,6 +210,7 @@ const TrackerApp = () => {
   const [persistent, setPersistent] = useState(false);
   const [updateRegistration, setUpdateRegistration] = useState(null);
   const [showAllPending, setShowAllPending] = useState(false);
+  const [workoutToDelete, setWorkoutToDelete] = useState(null);
   const importRef = useRef();
 
   useEffect(() => {
@@ -289,6 +306,15 @@ const TrackerApp = () => {
     flash(complete ? 'Workout complete.' : 'Workout returned to your queue.');
   };
 
+  const confirmDeleteWorkout = async () => {
+    if (!workoutToDelete || workoutToDelete.completedAt) return;
+    await saveRoutine(deleteFutureWorkout(routine, workoutToDelete.id));
+    setWorkoutToDelete(null);
+    setWorkoutId(null);
+    setEditingWorkout(false);
+    flash('Future workout deleted.');
+  };
+
   const editExercise = async (exerciseId, values) => {
     const updated = values
       ? updateExercise(routine, workout.id, exerciseId, values)
@@ -369,7 +395,7 @@ const TrackerApp = () => {
             <WorkoutExercises routine={routine} workout={workout} editable={editingWorkout} onChange={editExercise} />
             {workout.completedAt
               ? <button className="secondary-button full-button" type="button" onClick={() => completeWorkout(workout, false)}>Return to workout queue</button>
-              : <button className="primary-button complete-button" type="button" onClick={() => completeWorkout(workout)}>Mark workout complete</button>}
+              : <div className="workout-actions"><button className="primary-button complete-button" type="button" onClick={() => completeWorkout(workout)}>Mark workout complete</button><button className="danger-button" type="button" onClick={() => setWorkoutToDelete(workout)}>Delete future workout</button></div>}
           </section>
         ) : view === 'today' ? (
           <section className="dashboard">
@@ -413,6 +439,8 @@ const TrackerApp = () => {
           </section>
         )}
       </main>
+
+      {workoutToDelete && <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={() => setWorkoutToDelete(null)} onConfirm={confirmDeleteWorkout}>This removes {workoutToDelete.weekLabel} · {workoutToDelete.name} from this routine. It will not be marked complete or appear in history.</ConfirmationModal>}
 
       {view !== 'builder' && !workout && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => setView(key)} key={key}>{label}</button>)}</nav>}
     </div>

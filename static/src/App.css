@@ -164,6 +164,13 @@ body { min-width:320px; }
 .detail-heading h1,.section-heading h1 { margin-bottom:0; }
 .workout-detail .exercise-list { margin-top:30px; padding:10px 24px; border:1px solid var(--line); border-radius:18px; background:var(--paper); }
 .complete-button { margin-top:24px; }
+.workout-actions { display:grid; gap:12px; margin-top:24px; }
+.workout-actions .complete-button { margin-top:0; }
+.modal-backdrop { position:fixed; z-index:60; inset:0; display:grid; place-items:center; padding:20px; background:rgba(28,35,31,.58); }
+.confirmation-modal { width:min(100%,440px); padding:26px; border-radius:16px; background:var(--paper); box-shadow:var(--shadow); }
+.confirmation-modal h2 { margin-bottom:10px; }
+.confirmation-modal p { color:var(--muted); line-height:1.6; }
+.modal-actions { justify-content:flex-end; margin-top:24px; }
 .full-button { width:100%; margin-top:24px; }
 .section-page > h1 { margin-bottom:34px; }
 .section-heading { margin-bottom:30px; }

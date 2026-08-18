@@ -108,6 +108,14 @@ export const setWorkoutComplete = (routine, workoutId, complete) => ({
   )),
 });
 
+export const deleteFutureWorkout = (routine, workoutId) => ({
+  ...routine,
+  updatedAt: now(),
+  workouts: routine.workouts.filter(workout => (
+    workout.id !== workoutId || workout.completedAt
+  )),
+});
+
 export const updateExercise = (routine, workoutId, exerciseId, values) => ({
   ...routine,
   updatedAt: now(),
@@ -148,11 +156,11 @@ export const correctMaxes = (routine, maxes) => {
     ...routine,
     inputs,
     updatedAt: now(),
-    workouts: routine.workouts.map((workout, workoutIndex) => {
-      if (workout.completedAt || !regenerated.workouts[workoutIndex]) {
+    workouts: routine.workouts.map(workout => {
+      const generatedWorkout = regenerated.workouts.find(item => item.sequence === workout.sequence);
+      if (workout.completedAt || !generatedWorkout) {
         return workout;
       }
-      const generatedWorkout = regenerated.workouts[workoutIndex];
       return {
         ...workout,
         effectiveMaxes: { ...generatedWorkout.effectiveMaxes },

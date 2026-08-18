@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import App, { isInstalledApp, RoutineNameEditor } from './App';
+import App, { ConfirmationModal, isInstalledApp, RoutineNameEditor } from './App';
 
 it('renders without crashing', () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,5 +48,28 @@ it('edits and trims a routine name', () => {
 
   expect(onSave).toHaveBeenCalledWith('New plan');
   expect(div.textContent).toContain('Rename');
+  act(() => root.unmount());
+});
+
+it('confirms or cancels a destructive action in a modal', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const onCancel = jest.fn();
+  const onConfirm = jest.fn();
+  act(() => root.render(
+    <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={onCancel} onConfirm={onConfirm}>
+      This workout will not appear in history.
+    </ConfirmationModal>,
+  ));
+
+  expect(div.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(div.textContent).toContain('This workout will not appear in history.');
+  const buttons = div.querySelectorAll('button');
+  act(() => buttons[0].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  act(() => buttons[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+  expect(onCancel).toHaveBeenCalledTimes(1);
+  expect(onConfirm).toHaveBeenCalledTimes(1);
   act(() => root.unmount());
 });

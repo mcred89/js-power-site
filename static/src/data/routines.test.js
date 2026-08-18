@@ -1,6 +1,7 @@
 import {
   correctMaxes,
   createRoutine,
+  deleteFutureWorkout,
   routineHistoryToCsv,
   routinePlanToCsv,
   setWorkoutComplete,
@@ -53,6 +54,34 @@ describe('tracked routines', () => {
     routine = correctMaxes(routine, { maxSquat: '600', maxPress: '225', maxDead: '600' });
 
     expect(visibleExercise(routine.workouts[0].exercises[0])).toMatchObject({ weight: '350', prescription: '3 × 5' });
+  });
+
+  it('deletes an incomplete workout without completing later workouts', () => {
+    const routine = createRoutine('profile-1', 'Test plan', inputs);
+    const deleted = routine.workouts[2];
+    const updated = deleteFutureWorkout(routine, deleted.id);
+
+    expect(updated.workouts).toHaveLength(14);
+    expect(updated.workouts.map(workout => workout.id)).not.toContain(deleted.id);
+    expect(updated.workouts.every(workout => workout.completedAt === null)).toBe(true);
+    expect(updated.workouts[2].sequence).toBe(4);
+  });
+
+  it('does not delete a completed workout', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    routine = setWorkoutComplete(routine, routine.workouts[0].id, true);
+
+    expect(deleteFutureWorkout(routine, routine.workouts[0].id).workouts).toHaveLength(15);
+  });
+
+  it('recalculates the matching generated workouts after one is deleted', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    routine = deleteFutureWorkout(routine, routine.workouts[1].id);
+    routine = correctMaxes(routine, { maxSquat: '600', maxPress: '300', maxDead: '600' });
+
+    expect(routine.workouts[1].sequence).toBe(3);
+    expect(routine.workouts[1].name).toBe('Deadlift');
+    expect(visibleExercise(routine.workouts[1].exercises[0]).movement).toBe('Deadlift');
   });
 
   it('exports the stored plan with exercise overrides and workout status', () => {
