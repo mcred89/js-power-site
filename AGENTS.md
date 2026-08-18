@@ -2,21 +2,32 @@
 
 ## Project Structure & Module Organization
 
-The application is a Create React App project in `static/`. It is a client-only
-strength-program generator and must remain deployable as an S3 static site; do
-not introduce a required application server or server-side runtime. UI entry
-points are `static/src/index.js` and `static/src/App.js`. Reusable controls and
-routine-generation code belong in `static/src/components/`; page-level and
-stateful form compositions belong in `static/src/containers/`. Tests live beside
-the code they cover, as shown by `static/src/App.test.js` and
-`static/src/components/RoutineGenerator.test.js`. Browser assets and metadata
-are in `static/public/`, and generated production output is in `static/build/`.
+The application is a Create React App project in `static/`. It is a client-only,
+installable strength-program generator and workout tracker and must remain
+deployable as an S3 static site; do not introduce a required application server
+or server-side runtime. UI entry points are `static/src/index.js` and
+`static/src/App.js`. Reusable controls and routine-generation code belong in
+`static/src/components/`; page-level and stateful form compositions belong in
+`static/src/containers/`. Persisted routine transformations and browser storage
+adapters belong in `static/src/data/`. Tests live beside the code they cover.
+Browser assets, PWA metadata, icons, and the offline service worker are in
+`static/public/`, and generated production output is in `static/build/`.
 
-The current UI has a single routine-building flow; the old About, body
-calculator, and navigation-tab views have been removed. The generator supports
-three- and five-week microcycles, optional mesocycle chaining, low- and
-high-volume plans, optional strongman work, low-volume back-off sets, and CSV
-download/Markdown copy exports.
+The current UI is a phone-first Progressive Web App with multiple local
+profiles, multiple routines per profile, an ordered workout queue, completion
+history, future exercise editing, future-only max correction, and JSON backup
+and restore. The generator supports three- and five-week microcycles, optional
+mesocycle chaining, low- and high-volume plans, optional strongman work,
+low-volume back-off sets, and CSV download/Markdown copy exports. Keep completed
+workout prescriptions as historical snapshots when changing maxes; recalculate
+only incomplete generated work and preserve explicit exercise overrides.
+
+All profile, routine, exercise, and completion data is stored locally in
+IndexedDB. There is no account or automatic synchronization. Changes to the
+stored shape must include a versioned IndexedDB migration and backup-format
+compatibility handling. Do not silently overwrite local records during import.
+The service worker provides offline application-shell caching, while
+`manifest.json` and the 192px/512px icons provide Android installation metadata.
 
 The existing AWS infrastructure is defined historically in
 `static/serverless.yml`: an S3 website bucket, CloudFront distribution, Route 53
@@ -46,7 +57,10 @@ The deployment implementation is `static/scripts/deploy.sh`. It currently
 targets the existing production site at `themcilroy.com`; there is no active dev
 bucket. Always run the dry-run first when deployment changes are uncertain.
 Routine deploys must update site contents only and must not invoke CloudFormation
-or change S3, CloudFront, Route 53, or ACM configuration.
+or change S3, CloudFront, Route 53, or ACM configuration. After deployment, the
+site can be installed from Android Chrome using **Install app** or **Add to Home
+screen**. Verify that `manifest.json`, the app icons, and `service-worker.js` are
+present in the production build whenever install or offline behavior changes.
 
 ## Coding Style & Naming Conventions
 
@@ -54,7 +68,14 @@ Follow the existing React and `react-app` ESLint conventions. Use semicolons, si
 
 ## Testing Guidelines
 
-Tests use Jest and React DOM utilities supplied by `react-scripts`. Add focused tests beside changed modules and describe observable behavior rather than implementation details. There is no configured coverage threshold; nevertheless, cover new calculations, input boundaries, routing behavior, and regression fixes. Run the non-watch CI command before opening a pull request.
+Tests use Jest and React DOM utilities supplied by `react-scripts`. Add focused
+tests beside changed modules and describe observable behavior rather than
+implementation details. There is no configured coverage threshold;
+nevertheless, cover generator calculations, completed-workout snapshots,
+future-only recalculation, manual override preservation, backup validation,
+input boundaries, and regression fixes. Run the non-watch CI command and a
+production build before opening a pull request. Exercise install, update, and
+offline behavior manually in Android Chrome when PWA assets or caching change.
 
 ## Commit & Pull Request Guidelines
 

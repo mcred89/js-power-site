@@ -1,7 +1,6 @@
 import React, { Component } from 'react';
 import RadioOrCheckGroup from '../components/RadioOrCheckGroup';
 import NumberInput from '../components/NumberInput';
-import Routine from '../components/RoutineGenerator';
 
 const eventLifts = [
   { key: 'squat', label: 'Squat' },
@@ -83,6 +82,10 @@ export class MaxesForm extends Component {
 
   handleSubmit(event) {
     event.preventDefault();
+    if (this.props.onCreate) {
+      this.props.onCreate(this.state);
+      return;
+    }
     this.setState({ needsToFillOutForm: false });
   }
 
@@ -142,10 +145,6 @@ export class MaxesForm extends Component {
   }
 
   render() {
-    if (!this.state.needsToFillOutForm) {
-      return <Routine {...this.state} onReset={this.resetForm} />;
-    }
-
     return (
       <div className="page routine-form-page">
         <form className="panel" onSubmit={this.handleSubmit}>
@@ -153,6 +152,7 @@ export class MaxesForm extends Component {
             <h2 className="panel-title">Build your routine</h2>
             <p className="panel-subtitle">Use pounds. Your maxes should reflect a recent, clean rep.</p>
           </div>
+          {this.props.onCancel && <button className="text-button form-cancel" type="button" onClick={this.props.onCancel}>← Cancel</button>}
           <div className="field-grid three-fields">
             <NumberInput name="maxSquat" label="Squat max" controlFunc={this.handleChange} content={this.state.maxSquat} placeholder="e.g. 315" min={1} max={1001} />
             <NumberInput name="maxPress" label="Press max" controlFunc={this.handleChange} content={this.state.maxPress} placeholder="e.g. 225" min={1} max={1001} />
