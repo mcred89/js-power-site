@@ -1,24 +1,23 @@
 import React, { Component } from 'react';
+import { HashRouter as Router, Route, Routes, Link } from 'react-router-dom';
 import { MaxesForm } from './containers/MaxesForm';
-import { BodyCalc } from './containers/BodyCalculators';
-import { About } from './containers/About';
-import { HashRouter as Router, Route, Switch, Link } from 'react-router-dom';
+import './App.css';
 
 class App extends Component {
   render() {
     return (
-      <div>
-          <Router>
-            <div>
-              <NavBar />
-              <Switch>
-                <Route exact path='/' component={MaxesForm} />
-                <Route exact path='/about' component={About} />
-                <Route path='/calculators' component={BodyCalc} />
-              </Switch>
-            </div>
-          </Router>
-      </div>
+      <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <div className="site-shell">
+          <NavBar />
+          <main className="site-main">
+            <Routes>
+              <Route path='/' element={<MaxesForm />} />
+              <Route path='*' element={<MaxesForm />} />
+            </Routes>
+          </main>
+          <footer className="site-footer">Built for steady progress, one session at a time.</footer>
+        </div>
+      </Router>
     );
   }
 }
@@ -26,23 +25,15 @@ class App extends Component {
 class NavBar extends Component {
   render() {
     return (
-      <div>
-      <nav className="navbar navbar-expand-lg navbar-dark  bg-dark">
-        <Link className="navbar-brand" to="/">TheMcIlroy</Link>
-        <ul className="navbar-nav">
-          <li className="nav-item">
-            <Link className="nav-link" to="/about">About</Link>
-          </li>
-          <li className="nav-item">
-            <Link className="nav-link" to="/">Routine</Link>
-          </li>
-          <li className="nav-item">
-            <Link className="nav-link" to="/calculators">Calculators</Link>
-          </li>
-        </ul>
-      </nav>
-    </div>
-    )
+      <header className="site-header">
+        <nav className="nav-wrap" aria-label="Main navigation">
+          <Link className="brand" to="/">
+            <span className="brand-mark">TM</span>
+            <span>The McIlroy Method</span>
+          </Link>
+        </nav>
+      </header>
+    );
   }
 }
 

@@ -4,15 +4,16 @@
   "private": true,
   "dependencies": {
     "ajv": "^6.5.4",
-    "react": "^16.6.3",
-    "react-dom": "^16.5.2",
-    "react-router-dom": "^4.3.1",
-    "react-scripts": "2.0.4",
-    "serverless": "^1.32.0"
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.1",
+    "react-scripts": "^5.0.1"
   },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "deploy": "bash scripts/deploy.sh",
+    "deploy:dry-run": "bash scripts/deploy.sh --dry-run",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
@@ -27,7 +28,6 @@
   ],
   "devDependencies": {
     "@types/react": "^16.7.7",
-    "@types/react-radio-group": "^3.0.2",
-    "serverless-s3-sync": "^1.7.1"
+    "@types/react-radio-group": "^3.0.2"
   }
 }

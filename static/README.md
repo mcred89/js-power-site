@@ -27,15 +27,20 @@ npm test # start test runner
 ## Deployment
 
 ```bash
-# Dev
-# Creates dev.themcilroy.com
-npm run build
-serverless deploy -v --stage dev
-# Prod
-# Creates themcilroy.com
-npm run build
-serverless deploy -v --stage prod
+# Preview the files that would change without uploading anything
+npm run deploy:dry-run
+
+# Test, build, sync to the existing production bucket, and invalidate CloudFront
+npm run deploy
 ```
+
+Deployment uses the AWS CLI's normal credential chain. No credentials are read
+from or written to this repository. The deploy script targets the existing
+`themcilroy.com` bucket and CloudFront distribution; it does not create or update
+S3, Route 53, CloudFront, ACM, or CloudFormation resources.
+
+`serverless.yml` is retained as the definition of the existing infrastructure,
+but routine site deployments no longer invoke Serverless or CloudFormation.
 
 ## Project was initialized with these steps
 
