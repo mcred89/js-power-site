@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { HashRouter as Router, Link, Route, Routes } from 'react-router-dom';
 import { MaxesForm } from './containers/MaxesForm';
-import { ActiveWorkoutSession, WorkoutSessionHistory } from './components/WorkoutSession';
+import { ActiveWorkoutSession, WorkoutSessionHistory, WorkoutSummary } from './components/WorkoutSession';
 import { ProgressDashboard } from './components/ProgressDashboard';
 import {
   adjustSessionSet,
+  archiveRoutine,
   clearExerciseOverrides,
   completeSessionSet,
   correctMaxes,
@@ -16,10 +17,14 @@ import {
   reopenWorkoutSession,
   routineHistoryToCsv,
   routinePlanToCsv,
+  restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
   startWorkoutSession,
-  undoLatestSessionSet,
+  skipRemainingSessionExercise,
+  skipSessionSet,
+  substituteSessionExercise,
+  undoLatestSessionAction,
   updateExercise,
   visibleExercise,
 } from './data/routines';
@@ -453,7 +458,18 @@ export const PlanSetup = ({ routine }) => {
   );
 };
 
-const TrackerApp = () => {
+const AppearanceControl = ({ appearance, onChange }) => (
+  <label className="form-field appearance-control">
+    <span className="field-label">Appearance</span>
+    <select className="number-input" value={appearance} onChange={event => onChange(event.target.value)}>
+      <option value="system">Use device setting</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  </label>
+);
+
+const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [profiles, setProfiles] = useState([]);
   const [routines, setRoutines] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -480,6 +496,7 @@ const TrackerApp = () => {
   const [templateSource, setTemplateSource] = useState(null);
   const [templateToDelete, setTemplateToDelete] = useState(null);
   const [builderTemplate, setBuilderTemplate] = useState(null);
+  const [workoutSummary, setWorkoutSummary] = useState(null);
   const importRef = useRef();
   const transferRef = useRef();
   const incomingTransferRef = useRef(false);
@@ -524,6 +541,9 @@ const TrackerApp = () => {
   const profile = profiles.find(item => item.id === selectedProfileId);
   const profileRoutines = useMemo(() => routines
     .filter(routine => routine.profileId === selectedProfileId && !routine.archived)
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [routines, selectedProfileId]);
+  const archivedRoutines = useMemo(() => routines
+    .filter(item => item.profileId === selectedProfileId && item.archived)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)), [routines, selectedProfileId]);
   const progressRoutines = useMemo(() => routines
     .filter(item => item.profileId === selectedProfileId)
@@ -675,7 +695,19 @@ const TrackerApp = () => {
   };
 
   const undoWorkoutSet = async () => {
-    await changeSelectedRoutine(current => undoLatestSessionSet(current, workout.id));
+    await changeSelectedRoutine(current => undoLatestSessionAction(current, workout.id));
+  };
+
+  const skipWorkoutSet = async (exerciseId, setId) => {
+    await changeSelectedRoutine(current => skipSessionSet(current, workout.id, exerciseId, setId));
+  };
+
+  const skipWorkoutExercise = async exerciseId => {
+    await changeSelectedRoutine(current => skipRemainingSessionExercise(current, workout.id, exerciseId));
+  };
+
+  const substituteWorkoutExercise = async (exerciseId, values) => {
+    await changeSelectedRoutine(current => substituteSessionExercise(current, workout.id, exerciseId, values));
   };
 
   const setWorkoutRpe = async rpe => {
@@ -694,10 +726,39 @@ const TrackerApp = () => {
   };
 
   const finishActiveWorkout = async () => {
-    await changeSelectedRoutine(current => finishWorkoutSession(current, workout.id));
+    const current = routinesRef.current.find(item => item.id === routine.id) || routine;
+    const updated = finishWorkoutSession(current, workout.id);
+    await saveRoutine(updated);
+    setWorkoutSummary(updated.workouts.find(item => item.id === workout.id));
     setFinishPrompt(null);
     setWorkoutId(null);
-    flash('Workout complete.');
+  };
+
+  const archivePlan = async item => {
+    if (item.workouts.some(day => day.session?.status === 'inProgress')) {
+      flash('Finish the workout in progress before archiving this plan.');
+      return;
+    }
+    const updated = archiveRoutine(item);
+    const remaining = profileRoutines.filter(entry => entry.id !== item.id);
+    const replacement = remaining[0] || null;
+    const profileUpdate = item.id === routine?.id
+      ? { ...profile, activeRoutineId: replacement?.id || null, updatedAt: new Date().toISOString() }
+      : null;
+    await Promise.all([save('routines', updated), profileUpdate ? save('profiles', profileUpdate) : Promise.resolve()]);
+    setRoutines(current => current.map(entry => entry.id === item.id ? updated : entry));
+    if (profileUpdate) {
+      setProfiles(current => current.map(entry => entry.id === profile.id ? profileUpdate : entry));
+      setSelectedRoutineId(replacement?.id || null);
+    }
+    flash(`${item.name} archived.`);
+  };
+
+  const restorePlan = async item => {
+    const updated = restoreRoutine(item);
+    await save('routines', updated);
+    setRoutines(current => current.map(entry => entry.id === item.id ? updated : entry));
+    flash(`${item.name} restored.`);
   };
 
   const reopenCompletedWorkout = async target => {
@@ -909,7 +970,9 @@ const TrackerApp = () => {
         {message && <div className="toast" role="status">{message}</div>}
         {updateRegistration && <div className="update-banner"><span>A new version is ready.</span><button type="button" onClick={() => updateRegistration.waiting?.postMessage('skip-waiting')}>Update now</button></div>}
 
-        {workout?.session?.status === 'inProgress' ? (
+        {workoutSummary ? (
+          <WorkoutSummary workout={workoutSummary} onDone={() => { setWorkoutSummary(null); setView('today'); }} />
+        ) : workout?.session?.status === 'inProgress' ? (
           <ActiveWorkoutSession
             workout={workout}
             onAdjust={adjustWorkoutSet}
@@ -917,6 +980,9 @@ const TrackerApp = () => {
             onFinish={requestFinishWorkout}
             onLeave={() => setWorkoutId(null)}
             onRpe={setWorkoutRpe}
+            onSkipExercise={skipWorkoutExercise}
+            onSkipSet={skipWorkoutSet}
+            onSubstitute={substituteWorkoutExercise}
             onUndo={undoWorkoutSet}
           />
         ) : view === 'builder' ? (
@@ -966,10 +1032,11 @@ const TrackerApp = () => {
             {!profileRoutines.length ? <p>No routines yet.</p> : profileRoutines.map(item => (
               <article className={`plan-card ${item.id === routine?.id ? 'active' : ''}`} key={item.id}>
                 <button className="plan-select" type="button" onClick={() => selectRoutine(item)}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><span>{item.id === routine?.id ? 'Active' : 'Use plan'}</span></button>
-                <div className="plan-actions"><div className="button-row"><RoutineNameEditor routine={item} onSave={name => renameRoutine(item, name)} /><button className="text-button" type="button" onClick={() => setCopyRequest({ type: 'routine', item })}>Copy</button><button className="text-button" type="button" onClick={() => setTemplateSource(item)}>Save as template</button></div></div>
+                <div className="plan-actions"><div className="button-row"><RoutineNameEditor routine={item} onSave={name => renameRoutine(item, name)} /><button className="text-button" type="button" onClick={() => setCopyRequest({ type: 'routine', item })}>Copy</button><button className="text-button" type="button" onClick={() => setTemplateSource(item)}>Save as template</button><button className="text-button" type="button" onClick={() => archivePlan(item)}>Archive</button></div></div>
                 {item.id === routine?.id && <MaxCorrection routine={item} onCorrect={maxes => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }} />}
               </article>
             ))}
+            {archivedRoutines.length > 0 && <div className="archived-plans"><div><p className="eyebrow">Not in your queue</p><h2>Archived plans</h2></div>{archivedRoutines.map(item => <article className="template-card" key={item.id}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><button className="secondary-button" type="button" onClick={() => restorePlan(item)}>Restore</button></article>)}</div>}
             <div className="template-library">
               <div><p className="eyebrow">Reusable setups</p><h2>Templates</h2><p>Templates regenerate a fresh routine from saved generator settings.</p></div>
               {!templates.length ? <p>No templates yet. Save one from a routine above.</p> : templates.map(item => (
@@ -988,6 +1055,7 @@ const TrackerApp = () => {
           <section className="section-page settings-page">
             <p className="eyebrow">This phone</p><h1>Settings & backup</h1>
             <article className="settings-card"><h2>Default profile</h2><p>Choose the profile that opens automatically when you launch the app.</p><label className="form-field"><span className="field-label">Open with</span><select className="number-input" aria-label="Default profile" value={defaultProfileId || profiles[0].id} onChange={async event => { const id = event.target.value; await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }}>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label></article>
+            <article className="settings-card"><h2>Appearance</h2><p>Follow this device or choose a theme for the app.</p><AppearanceControl appearance={appearance} onChange={onAppearanceChange} /></article>
             <article className="settings-card"><h2>Offline storage</h2><p>{persistent ? 'Persistent storage is enabled.' : 'Ask Chrome to protect this app from automatic storage cleanup.'}</p>{!persistent && <button className="secondary-button" type="button" onClick={async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }}>Request persistent storage</button>}</article>
             <article className="settings-card"><h2>CSV downloads</h2><p>{routine ? `Download the active plan, ${routine.name}, or its completed workout history. Exercise edits and completed-workout snapshots are included.` : 'Create a routine before downloading plan or history data.'}</p><div className="button-row"><button className="secondary-button" type="button" disabled={!routine} onClick={() => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8')}>Download plan CSV</button><button className="secondary-button" type="button" disabled={!completed.length} onClick={() => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8')}>Download history CSV</button></div></article>
             <article className="settings-card"><h2>Backup and transfer</h2><p>Backups are unencrypted files for long-term recovery. Transfers are encrypted, expire after 30 minutes, and move all data or one selected routine without an account.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines, templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><button className="secondary-button" type="button" onClick={makeTransfer}>Move all data</button><button className="secondary-button" type="button" onClick={() => transferRef.current.click()}>Open received transfer</button><button className="secondary-button" type="button" disabled={!routines.length} onClick={() => setChoosingRoutineTransfer(true)}>Transfer one routine</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /><input ref={transferRef} className="hidden-input" type="file" accept="text/plain,.txt,application/json,.json,.mcilroy-transfer" onChange={event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }} /></div></article>
@@ -1007,7 +1075,7 @@ const TrackerApp = () => {
       {templateSource && <SaveTemplateDialog routine={templateSource} onCancel={() => setTemplateSource(null)} onConfirm={saveRoutineTemplate} />}
       {templateToDelete && <ConfirmationModal title="Delete template?" confirmLabel="Delete template" onCancel={() => setTemplateToDelete(null)} onConfirm={deleteTemplate}>Delete {templateToDelete.name}? Routines already created from it will not be affected.</ConfirmationModal>}
 
-      {view !== 'builder' && !workout && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => setView(key)} key={key}>{label}</button>)}</nav>}
+      {view !== 'builder' && !workout && !workoutSummary && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => setView(key)} key={key}>{label}</button>)}</nav>}
     </div>
   );
 };
@@ -1017,7 +1085,7 @@ export const isInstalledApp = () => (
   (typeof navigator !== 'undefined' && navigator.standalone === true)
 );
 
-const CalculatorWebsite = () => (
+const CalculatorWebsite = ({ appearance, onAppearanceChange }) => (
   <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <div className="site-shell">
       <header className="site-header">
@@ -1026,6 +1094,7 @@ const CalculatorWebsite = () => (
             <span className="brand-mark">TM</span>
             <span>The McIlroy Method</span>
           </Link>
+          <AppearanceControl appearance={appearance} onChange={onAppearanceChange} />
         </nav>
       </header>
       <main className="site-main">
@@ -1039,6 +1108,20 @@ const CalculatorWebsite = () => (
   </Router>
 );
 
-const App = () => isInstalledApp() ? <TrackerApp /> : <CalculatorWebsite />;
+const APPEARANCE_KEY = 'mcilroy-method-appearance';
+
+const App = () => {
+  const [appearance, setAppearance] = useState(() => {
+    const saved = window.localStorage?.getItem(APPEARANCE_KEY);
+    return ['system', 'light', 'dark'].includes(saved) ? saved : 'system';
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = appearance;
+    window.localStorage?.setItem(APPEARANCE_KEY, appearance);
+  }, [appearance]);
+  return isInstalledApp()
+    ? <TrackerApp appearance={appearance} onAppearanceChange={setAppearance} />
+    : <CalculatorWebsite appearance={appearance} onAppearanceChange={setAppearance} />;
+};
 
 export default App;

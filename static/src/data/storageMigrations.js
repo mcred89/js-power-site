@@ -1,4 +1,4 @@
-export const DATABASE_VERSION = 5;
+export const DATABASE_VERSION = 6;
 
 const effectiveMaxesFor = (inputs, cycleIndex = 0) => ({
   maxSquat: Number(inputs.maxSquat) + (Number(inputs.squatIncrement) || 0) * cycleIndex,
@@ -27,6 +27,26 @@ export const addWorkoutSessions = routine => {
     })),
   };
 };
+
+export const addSessionActionMetadata = routine => !Array.isArray(routine.workouts) ? routine : ({
+  ...routine,
+  workouts: routine.workouts.map(workout => ({
+    ...workout,
+    session: workout.session?.exercises ? {
+      ...workout.session,
+      exercises: workout.session.exercises.map(exercise => ({
+        ...exercise,
+        original: Object.prototype.hasOwnProperty.call(exercise, 'original') ? exercise.original : null,
+        substitutedAt: Object.prototype.hasOwnProperty.call(exercise, 'substitutedAt') ? exercise.substitutedAt : null,
+        sets: Array.isArray(exercise.sets) ? exercise.sets.map(set => ({
+          ...set,
+          skippedAt: Object.prototype.hasOwnProperty.call(set, 'skippedAt') ? set.skippedAt : null,
+          skipActionId: Object.prototype.hasOwnProperty.call(set, 'skipActionId') ? set.skipActionId : null,
+        })) : exercise.sets,
+      })),
+    } : workout.session,
+  })),
+});
 
 const createRecordStore = (database, storeName) => {
   if (!database.objectStoreNames.contains(storeName)) {
@@ -83,6 +103,19 @@ export const databaseMigrations = {
       value: 5,
     });
   },
+  6: ({ transaction }) => {
+    const cursorRequest = transaction.objectStore('routines').openCursor();
+    cursorRequest.onsuccess = event => {
+      const cursor = event.target.result;
+      if (!cursor) return;
+      cursor.update(addSessionActionMetadata(cursor.value));
+      cursor.continue();
+    };
+    transaction.objectStore('metadata').put({
+      key: 'dataSchemaVersion',
+      value: 6,
+    });
+  },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
@@ -95,7 +128,7 @@ export const runDatabaseMigrations = (database, transaction, oldVersion, newVers
   }
 };
 
-export const BACKUP_VERSION = 5;
+export const BACKUP_VERSION = 6;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -126,6 +159,14 @@ export const backupMigrations = {
     version: 5,
     dataSchemaVersion: 5,
     templates: Array.isArray(backup.templates) ? backup.templates : [],
+  }),
+  6: backup => ({
+    ...backup,
+    version: 6,
+    dataSchemaVersion: 6,
+    routines: Array.isArray(backup.routines)
+      ? backup.routines.map(addSessionActionMetadata)
+      : backup.routines,
   }),
 };
 

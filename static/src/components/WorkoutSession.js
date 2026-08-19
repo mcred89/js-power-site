@@ -26,6 +26,64 @@ const currentExerciseIndex = session => {
   return index === -1 ? 0 : index;
 };
 
+export const useScreenWakeLock = active => {
+  useEffect(() => {
+    if (!active || !navigator.wakeLock?.request) return undefined;
+    let lock = null;
+    let cancelled = false;
+    const request = async () => {
+      if (document.visibilityState !== 'visible' || lock) return;
+      try {
+        const acquired = await navigator.wakeLock.request('screen');
+        if (cancelled) {
+          acquired.release();
+          return;
+        }
+        lock = acquired;
+        acquired.addEventListener?.('release', () => { lock = null; });
+      } catch (error) {
+        // Wake Lock is optional and may be denied by the browser or operating system.
+      }
+    };
+    const handleVisibility = () => { if (document.visibilityState === 'visible') request(); };
+    request();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibility);
+      lock?.release();
+    };
+  }, [active]);
+};
+
+const SubstituteDialog = ({ exercise, onCancel, onConfirm }) => {
+  const pending = exercise.sets.filter(set => set.status === 'pending');
+  const first = pending[0] || {};
+  const [movement, setMovement] = useState(exercise.movement);
+  const [weight, setWeight] = useState(first.actualWeight ?? exercise.plannedWeight ?? '');
+  const [setCount, setSetCount] = useState(String(Math.max(1, pending.length)));
+  const [reps, setReps] = useState(String(first.actualReps ?? first.plannedReps ?? ''));
+  return (
+    <div className="modal-backdrop">
+      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="substitute-title" onSubmit={event => {
+        event.preventDefault();
+        onConfirm({ movement: movement.trim(), weight, setCount, reps });
+      }}>
+        <p className="eyebrow">This workout only</p>
+        <h2 id="substitute-title">Substitute {exercise.movement}</h2>
+        <label className="form-field"><span className="field-label">Movement</span><input className="number-input" value={movement} onChange={event => setMovement(event.target.value)} required autoFocus /></label>
+        <div className="substitute-fields">
+          <label className="form-field"><span className="field-label">Weight (lb)</span><input className="number-input" inputMode="decimal" value={weight} onChange={event => setWeight(event.target.value)} /></label>
+          <label className="form-field"><span className="field-label">Remaining sets</span><input className="number-input" type="number" min="1" max="20" value={setCount} onChange={event => setSetCount(event.target.value)} required /></label>
+          <label className="form-field"><span className="field-label">Reps</span><input className="number-input" inputMode="numeric" value={reps} onChange={event => setReps(event.target.value)} required /></label>
+        </div>
+        <p className="field-help">Completed and skipped sets stay unchanged. Future workouts are not edited.</p>
+        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit">Use substitute</button></div>
+      </form>
+    </div>
+  );
+};
+
 const Stepper = ({ label, value, step, onChange }) => {
   const numeric = Number(value);
   const adjusted = change => onChange(String(Math.max(0, (Number.isFinite(numeric) ? numeric : 0) + change)));
@@ -53,11 +111,17 @@ export const ActiveWorkoutSession = ({
   onFinish,
   onLeave,
   onRpe,
+  onSkipExercise,
+  onSkipSet,
+  onSubstitute,
   onUndo,
 }) => {
   const session = workout.session;
   const [exerciseIndex, setExerciseIndex] = useState(() => currentExerciseIndex(session));
   const [clock, setClock] = useState(() => new Date().toISOString());
+  const [substituting, setSubstituting] = useState(false);
+
+  useScreenWakeLock(true);
 
   useEffect(() => {
     if (!session.runningSince) return undefined;
@@ -68,8 +132,8 @@ export const ActiveWorkoutSession = ({
   const exercise = session.exercises[exerciseIndex];
   const progress = progressFor(session);
   const currentSet = exercise.sets.find(set => set.status === 'pending');
-  const completedSets = session.exercises.flatMap(item => item.sets)
-    .filter(set => set.status === 'completed');
+  const reversibleSets = session.exercises.flatMap(item => item.sets)
+    .filter(set => set.status === 'completed' || (set.status === 'skipped' && set.skippedAt));
   const elapsed = sessionElapsedSeconds(session, clock);
 
   const completeSet = () => {
@@ -81,6 +145,18 @@ export const ActiveWorkoutSession = ({
     if (!hasMoreHere && exerciseIndex < session.exercises.length - 1) {
       setExerciseIndex(exerciseIndex + 1);
     }
+  };
+
+  const skipSet = () => {
+    if (!currentSet) return;
+    const hasMoreHere = exercise.sets.some(set => set.status === 'pending' && set.id !== currentSet.id);
+    onSkipSet(exercise.exerciseId, currentSet.id);
+    if (!hasMoreHere && exerciseIndex < session.exercises.length - 1) setExerciseIndex(exerciseIndex + 1);
+  };
+
+  const skipExercise = () => {
+    onSkipExercise(exercise.exerciseId);
+    if (exerciseIndex < session.exercises.length - 1) setExerciseIndex(exerciseIndex + 1);
   };
 
   return (
@@ -100,9 +176,11 @@ export const ActiveWorkoutSession = ({
 
       <div className="set-tally" aria-label={`${exercise.movement} set tally`}>
         {exercise.sets.map(set => (
-          <span className={set.status} key={set.id}>{set.status === 'completed' ? '✓' : set.number}</span>
+          <span className={set.status} key={set.id}>{set.status === 'completed' ? '✓' : set.status === 'skipped' ? '—' : set.number}</span>
         ))}
       </div>
+
+      {exercise.original && <p className="substitution-note">Substituted for {exercise.original.movement} in this workout.</p>}
 
       {currentSet ? (
         <div className="current-set-card">
@@ -111,6 +189,7 @@ export const ActiveWorkoutSession = ({
           <Stepper label="Reps" value={currentSet.actualReps} step={1} onChange={value => onAdjust(exercise.exerciseId, currentSet.id, { actualReps: value })} />
           <small>Plan: {currentSet.plannedWeight !== '' ? `${currentSet.plannedWeight} lb` : 'open weight'} · {currentSet.plannedReps || 'open reps'}</small>
           <button className="primary-button complete-set-button" type="button" onClick={completeSet}>Complete set</button>
+          <button className="text-button skip-set-button" type="button" onClick={skipSet}>Skip this set</button>
         </div>
       ) : <div className="exercise-finished"><strong>Exercise complete</strong><span>Use the arrows to review another exercise.</span></div>}
 
@@ -124,9 +203,39 @@ export const ActiveWorkoutSession = ({
       )}
 
       <div className="session-footer-actions">
-        <button className="secondary-button" type="button" disabled={!completedSets.length} onClick={onUndo}>Undo latest set</button>
+        <button className="secondary-button" type="button" disabled={!reversibleSets.length} onClick={onUndo}>Undo latest action</button>
+        <button className="secondary-button" type="button" disabled={!currentSet} onClick={skipExercise}>Skip exercise</button>
+        <button className="secondary-button" type="button" disabled={!currentSet} onClick={() => setSubstituting(true)}>Substitute</button>
         <button className="primary-button" type="button" onClick={onFinish}>Finish workout</button>
       </div>
+      {substituting && <SubstituteDialog exercise={exercise} onCancel={() => setSubstituting(false)} onConfirm={values => { onSubstitute(exercise.exerciseId, values); setSubstituting(false); }} />}
+    </section>
+  );
+};
+
+export const WorkoutSummary = ({ workout, onDone }) => {
+  const sets = workout.session.exercises.flatMap(exercise => exercise.sets);
+  const completed = sets.filter(set => set.status === 'completed');
+  const skipped = sets.filter(set => set.status === 'skipped');
+  const volume = completed.reduce((total, set) => {
+    const weight = Number(set.actualWeight);
+    const reps = Number(set.actualReps);
+    return total + (Number.isFinite(weight) && Number.isFinite(reps) ? weight * reps : 0);
+  }, 0);
+  const substitutions = workout.session.exercises.filter(exercise => exercise.original);
+  return (
+    <section className="workout-summary" aria-labelledby="workout-summary-title">
+      <p className="eyebrow">Workout complete</p>
+      <h1 id="workout-summary-title">{workout.name}</h1>
+      <div className="summary-grid">
+        <span><small>Workout time</small><strong>{formatDuration(workout.session.elapsedSeconds)}</strong></span>
+        <span><small>Completed sets</small><strong>{completed.length}</strong></span>
+        <span><small>Skipped sets</small><strong>{skipped.length}</strong></span>
+        <span><small>Volume</small><strong>{Math.round(volume).toLocaleString()} lb</strong></span>
+        <span><small>Main-lift RPE</small><strong>{workout.session.rpe || '—'}</strong></span>
+      </div>
+      {substitutions.length > 0 && <div className="summary-substitutions"><h2>Substitutions</h2>{substitutions.map(exercise => <p key={exercise.exerciseId}>{exercise.original.movement} → {exercise.movement}</p>)}</div>}
+      <button className="primary-button" type="button" onClick={onDone}>Done</button>
     </section>
   );
 };
@@ -155,6 +264,7 @@ export const WorkoutSessionHistory = ({ workout }) => {
       {session.exercises.map(exercise => (
         <section className="history-exercise" key={exercise.exerciseId}>
           <h2>{exercise.movement}</h2>
+          {exercise.original && <p className="substitution-note">Substituted for {exercise.original.movement}</p>}
           <p>{exercise.prescription || 'Open work'}</p>
           <div className="history-set-list">
             {exercise.sets.map(set => (

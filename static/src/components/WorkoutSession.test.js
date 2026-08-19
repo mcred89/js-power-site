@@ -4,6 +4,7 @@ import {
   ActiveWorkoutSession,
   formatDuration,
   WorkoutSessionHistory,
+  WorkoutSummary,
 } from './WorkoutSession';
 
 const workout = {
@@ -56,7 +57,7 @@ it('offers large set adjustments, completion, undo, and RPE controls', () => {
   act(() => button('Increase weight (lb)').dispatchEvent(new MouseEvent('click', { bubbles: true })));
   act(() => button('Complete set').dispatchEvent(new MouseEvent('click', { bubbles: true })));
   act(() => button('8').dispatchEvent(new MouseEvent('click', { bubbles: true })));
-  act(() => button('Undo latest set').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  act(() => button('Undo latest action').dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
   expect(onAdjust).toHaveBeenCalledWith('e1', 's2', { actualWeight: '205' });
   expect(onCompleteSet).toHaveBeenCalledWith('e1', 's2');
@@ -141,5 +142,37 @@ it('shows performed values, planned adjustments, and timing in history', () => {
   expect(div.textContent).toContain('Plan: 200 lb × 5');
   expect(div.textContent).toContain('Split 1:00 · Interval 1:00');
   expect(div.textContent).toContain('Main-lift RPE8');
+  act(() => root.unmount());
+});
+
+it('summarizes completed volume, skipped sets, RPE, and substitutions', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const onDone = jest.fn();
+  const completed = {
+    ...workout,
+    session: {
+      ...workout.session,
+      elapsedSeconds: 125,
+      rpe: 8,
+      exercises: [{
+        ...workout.session.exercises[0],
+        movement: 'Hack squat',
+        original: { movement: 'Squat' },
+        sets: [
+          { ...workout.session.exercises[0].sets[0], actualWeight: 200, actualReps: 5 },
+          { ...workout.session.exercises[0].sets[1], status: 'skipped' },
+        ],
+      }],
+    },
+  };
+  act(() => root.render(<WorkoutSummary workout={completed} onDone={onDone} />));
+
+  expect(div.textContent).toContain('2:05');
+  expect(div.textContent).toContain('1,000 lb');
+  expect(div.textContent).toContain('Squat → Hack squat');
+  act(() => [...div.querySelectorAll('button')].find(button => button.textContent === 'Done').click());
+  expect(onDone).toHaveBeenCalledTimes(1);
   act(() => root.unmount());
 });

@@ -61,7 +61,7 @@ const formatSeconds = seconds => seconds === null || seconds === undefined ? '' 
 export const routineHistoryToCsv = routine => {
   const rows = [[
     'Routine', 'Microcycle', 'Week', 'Workout', 'Session', 'Started at', 'Completed at',
-    'Total seconds', 'Movement', 'Set', 'Set status', 'Planned weight (lb)',
+    'Total seconds', 'Movement', 'Substituted for', 'Set', 'Set status', 'Planned weight (lb)',
     'Planned reps', 'Actual weight (lb)', 'Actual reps', 'RPE', 'Split seconds',
     'Interval seconds',
   ]];
@@ -72,7 +72,7 @@ export const routineHistoryToCsv = routine => {
         const shown = visibleExercise(exercise);
         rows.push([
           routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence, workout.name,
-          '', workout.completedAt, '', shown.movement, '', 'Legacy completed', shown.weight,
+          '', workout.completedAt, '', shown.movement, '', '', 'Legacy completed', shown.weight,
           shown.prescription, '', '', '', '', '',
         ]);
       });
@@ -94,7 +94,7 @@ export const routineHistoryToCsv = routine => {
         rows.push([
           routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence, workout.name,
           workout.session.startedAt, workout.completedAt, formatSeconds(workout.session.elapsedSeconds),
-          sessionExercise.movement, set.number, set.status, set.plannedWeight, set.plannedReps,
+          sessionExercise.movement, sessionExercise.original?.movement || '', set.number, set.status, set.plannedWeight, set.plannedReps,
           set.actualWeight, set.actualReps,
           sessionExercise.exerciseId === workout.session.primaryExerciseId ? workout.session.rpe : '',
           formatSeconds(set.splitSeconds), interval,
@@ -201,6 +201,18 @@ export const createRoutineFromTemplate = (template, profileId, name) => createRo
   },
 );
 
+export const archiveRoutine = routine => ({
+  ...routine,
+  archived: true,
+  updatedAt: now(),
+});
+
+export const restoreRoutine = routine => ({
+  ...routine,
+  archived: false,
+  updatedAt: now(),
+});
+
 export const setWorkoutComplete = (routine, workoutId, complete) => ({
   ...routine,
   updatedAt: now(),
@@ -247,6 +259,8 @@ export const startWorkoutSession = (routine, workoutId, timestamp = now()) => up
         movement: shown.movement,
         prescription: shown.prescription,
         plannedWeight: shown.weight,
+        original: null,
+        substitutedAt: null,
         sets: Array.from({ length: parsed.setCount }, (_, index) => ({
           id: makeId(),
           number: index + 1,
@@ -256,6 +270,8 @@ export const startWorkoutSession = (routine, workoutId, timestamp = now()) => up
           actualReps: parsed.actualReps,
           status: 'pending',
           completedAt: null,
+          skippedAt: null,
+          skipActionId: null,
           splitSeconds: null,
         })),
       };
@@ -337,39 +353,154 @@ export const completeSessionSet = (
   };
 });
 
-export const undoLatestSessionSet = (routine, workoutId, timestamp = now()) => updateWorkout(
+const stopSessionIfFinished = (session, timestamp) => hasPendingSets(session) ? session : {
+  ...session,
+  elapsedSeconds: sessionElapsedSeconds(session, timestamp),
+  runningSince: null,
+  stoppedAt: timestamp,
+};
+
+const skipSets = (routine, workoutId, exerciseId, shouldSkip, timestamp = now()) => updateWorkout(
   routine,
   workoutId,
   workout => {
     if (workout.session?.status !== 'inProgress') return workout;
-    const completed = workout.session.exercises.flatMap(exercise => exercise.sets
-      .filter(set => set.status === 'completed')
-      .map(set => ({ ...set, exerciseId: exercise.exerciseId })))
-      .sort((a, b) => b.completedAt.localeCompare(a.completedAt));
-    const latest = completed[0];
+    const skipActionId = makeId();
+    const exercises = workout.session.exercises.map(exercise => (
+      exercise.exerciseId !== exerciseId ? exercise : {
+        ...exercise,
+        sets: exercise.sets.map(set => (
+          set.status === 'pending' && shouldSkip(set)
+            ? { ...set, status: 'skipped', skippedAt: timestamp, skipActionId }
+            : set
+        )),
+      }
+    ));
+    const session = { ...workout.session, exercises };
+    return { ...workout, session: stopSessionIfFinished(session, timestamp) };
+  },
+);
+
+export const skipSessionSet = (
+  routine,
+  workoutId,
+  exerciseId,
+  setId,
+  timestamp = now(),
+) => skipSets(routine, workoutId, exerciseId, set => set.id === setId, timestamp);
+
+export const skipRemainingSessionExercise = (
+  routine,
+  workoutId,
+  exerciseId,
+  timestamp = now(),
+) => skipSets(routine, workoutId, exerciseId, () => true, timestamp);
+
+export const substituteSessionExercise = (
+  routine,
+  workoutId,
+  exerciseId,
+  values,
+  timestamp = now(),
+) => updateWorkout(routine, workoutId, workout => {
+  if (workout.session?.status !== 'inProgress') return workout;
+  const remainingSetCount = Math.max(1, Number(values.setCount) || 1);
+  const exercises = workout.session.exercises.map(exercise => {
+    if (exercise.exerciseId !== exerciseId) return exercise;
+    const settled = exercise.sets.filter(set => set.status !== 'pending');
+    const original = exercise.original || {
+      movement: exercise.movement,
+      prescription: exercise.prescription,
+      plannedWeight: exercise.plannedWeight,
+    };
+    const pending = Array.from({ length: remainingSetCount }, (_, index) => ({
+      id: makeId(),
+      number: settled.length + index + 1,
+      plannedWeight: values.weight,
+      plannedReps: values.reps,
+      actualWeight: values.weight,
+      actualReps: values.reps,
+      status: 'pending',
+      completedAt: null,
+      skippedAt: null,
+      skipActionId: null,
+      splitSeconds: null,
+    }));
+    return {
+      ...exercise,
+      movement: values.movement,
+      prescription: `${remainingSetCount} × ${values.reps}`,
+      plannedWeight: values.weight,
+      original,
+      substitutedAt: timestamp,
+      sets: [...settled, ...pending],
+    };
+  });
+  return {
+    ...workout,
+    session: {
+      ...workout.session,
+      exercises,
+      runningSince: workout.session.runningSince || timestamp,
+      stoppedAt: null,
+    },
+  };
+});
+
+export const undoLatestSessionAction = (routine, workoutId, timestamp = now()) => updateWorkout(
+  routine,
+  workoutId,
+  workout => {
+    if (workout.session?.status !== 'inProgress') return workout;
+    const actions = workout.session.exercises.flatMap(exercise => exercise.sets.flatMap(set => {
+      if (set.status === 'completed') return [{
+        type: 'completed', actionId: set.id, occurredAt: set.completedAt, exerciseId: exercise.exerciseId,
+      }];
+      if (set.status === 'skipped' && set.skippedAt) return [{
+        type: 'skipped', actionId: set.skipActionId || set.id, occurredAt: set.skippedAt, exerciseId: exercise.exerciseId,
+      }];
+      return [];
+    })).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
+    const latest = actions[0];
     if (!latest) return workout;
     const exercises = workout.session.exercises.map(exercise => ({
       ...exercise,
       sets: exercise.sets.map(set => (
-        exercise.exerciseId === latest.exerciseId && set.id === latest.id
-          ? { ...set, status: 'pending', completedAt: null, splitSeconds: null }
+        exercise.exerciseId === latest.exerciseId && (
+          (latest.type === 'completed' && set.id === latest.actionId) ||
+          (latest.type === 'skipped' && (set.skipActionId || set.id) === latest.actionId)
+        )
+          ? {
+            ...set,
+            status: 'pending',
+            completedAt: null,
+            skippedAt: null,
+            skipActionId: null,
+            splitSeconds: null,
+          }
           : set
       )),
     }));
     const session = { ...workout.session, exercises };
     if (workout.session.runningSince) return { ...workout, session };
-    const priorSplit = Math.max(0, ...completed.slice(1).map(set => set.splitSeconds));
+    const remainingCompleted = exercises.flatMap(exercise => exercise.sets)
+      .filter(set => set.status === 'completed');
+    const elapsedSeconds = latest.type === 'completed'
+      ? Math.max(0, ...remainingCompleted.map(set => set.splitSeconds))
+      : workout.session.elapsedSeconds;
     return {
       ...workout,
       session: {
         ...session,
-        elapsedSeconds: priorSplit,
+        elapsedSeconds,
         runningSince: timestamp,
         stoppedAt: null,
       },
     };
   },
 );
+
+export const undoLatestSessionSet = undoLatestSessionAction;
 
 export const setSessionRpe = (routine, workoutId, rpe) => updateWorkout(
   routine,
@@ -392,9 +523,11 @@ export const finishWorkoutSession = (routine, workoutId, timestamp = now()) => u
       .map(set => set.completedAt)
       .sort()
       .pop();
-    const elapsedSeconds = completedSets.length
-      ? lastSplit
-      : sessionElapsedSeconds(workout.session, timestamp);
+    const elapsedSeconds = !workout.session.runningSince && workout.session.stoppedAt
+      ? workout.session.elapsedSeconds
+      : completedSets.length
+        ? lastSplit
+        : sessionElapsedSeconds(workout.session, timestamp);
     return {
       ...workout,
       completedAt: timestamp,
@@ -408,7 +541,7 @@ export const finishWorkoutSession = (routine, workoutId, timestamp = now()) => u
         exercises: workout.session.exercises.map(exercise => ({
           ...exercise,
           sets: exercise.sets.map(set => set.status === 'pending'
-            ? { ...set, status: 'skipped' }
+            ? { ...set, status: 'skipped', skippedAt: timestamp, skipActionId: null }
             : set),
         })),
       },

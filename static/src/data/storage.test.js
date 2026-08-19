@@ -10,8 +10,8 @@ describe('portable backups', () => {
       profiles,
       routines,
       templates,
-      version: 5,
-      dataSchemaVersion: 5,
+      version: 6,
+      dataSchemaVersion: 6,
     });
   });
 
@@ -25,8 +25,8 @@ describe('portable backups', () => {
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
       ...oldBackup,
-      version: 5,
-      dataSchemaVersion: 5,
+      version: 6,
+      dataSchemaVersion: 6,
       templates: [],
     });
     expect(oldBackup.version).toBe(1);
@@ -39,8 +39,24 @@ describe('portable backups', () => {
     };
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
-      ...oldBackup, version: 5, dataSchemaVersion: 5, templates: [],
+      ...oldBackup, version: 6, dataSchemaVersion: 6, templates: [],
     });
+  });
+
+  it('upgrades version 5 session records without mutating unknown fields', () => {
+    const oldBackup = {
+      format: 'mcilroy-method-backup', version: 5, dataSchemaVersion: 5,
+      profiles: [], templates: [], unknown: 'retained',
+      routines: [{ id: 'r1', workouts: [{ session: { exercises: [{ unknown: true, sets: [{ status: 'skipped' }] }] } }] }],
+    };
+    const migrated = parseBackup(JSON.stringify(oldBackup));
+
+    expect(migrated).toMatchObject({ version: 6, dataSchemaVersion: 6, unknown: 'retained' });
+    expect(migrated.routines[0].workouts[0].session.exercises[0]).toMatchObject({
+      unknown: true, original: null, substitutedAt: null,
+      sets: [{ status: 'skipped', skippedAt: null, skipActionId: null }],
+    });
+    expect(oldBackup.version).toBe(5);
   });
 
   it('rejects backups made by a newer, incompatible app', () => {

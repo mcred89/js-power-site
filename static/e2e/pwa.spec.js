@@ -34,7 +34,10 @@ test('PWA tracks an autosaved workout session, history, and max correction', asy
   const finishDialog = page.getByRole('dialog');
   await expect(finishDialog).toContainText('planned sets will be recorded as skipped');
   await finishDialog.getByRole('button', { name: 'Finish workout' }).click();
-  await expect(page.getByText('Workout complete.')).toBeVisible();
+  await expect(page.getByText('Workout complete', { exact: true })).toBeVisible();
+  await expect(page.getByText('Completed sets')).toBeVisible();
+  await expect(page.getByText('Skipped sets')).toBeVisible();
+  await page.getByRole('button', { name: 'Done' }).click();
 
   await page.getByRole('button', { name: 'History' }).click();
   await expect(squatWorkoutCards().locator('.workout-maxes')).toHaveText(

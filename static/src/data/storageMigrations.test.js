@@ -1,5 +1,6 @@
 import {
   addEffectiveMaxSnapshots,
+  addSessionActionMetadata,
   addWorkoutSessions,
   databaseMigrations,
   runDatabaseMigrations,
@@ -29,12 +30,12 @@ const migrationDatabase = existingStores => {
 
 describe('IndexedDB migrations', () => {
   it('contains every migration through the current version', () => {
-    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3, 4, 5]);
+    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('creates all stores for a new installation', () => {
     const context = migrationDatabase([]);
-    runDatabaseMigrations(context.database, context.transaction, 0, 5);
+    runDatabaseMigrations(context.database, context.transaction, 0, 6);
 
     expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
     expect(context.puts).toEqual([
@@ -42,15 +43,16 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 3 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 4 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 5 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 6 } },
     ]);
   });
 
   it('upgrades version 1 through every later migration without recreating stores', () => {
     const context = migrationDatabase(['profiles', 'routines']);
-    runDatabaseMigrations(context.database, context.transaction, 1, 5);
+    runDatabaseMigrations(context.database, context.transaction, 1, 6);
 
     expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
-    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3, 4, 5]);
+    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3, 4, 5, 6]);
   });
 
   it('adds templates when upgrading from version 4', () => {
@@ -59,6 +61,14 @@ describe('IndexedDB migrations', () => {
 
     expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
     expect(context.puts).toEqual([{ name: 'metadata', value: { key: 'dataSchemaVersion', value: 5 } }]);
+  });
+
+  it('runs the session metadata migration when upgrading from version 5', () => {
+    const context = migrationDatabase(['profiles', 'routines', 'metadata', 'templates']);
+    runDatabaseMigrations(context.database, context.transaction, 5, 6);
+
+    expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
+    expect(context.puts).toEqual([{ name: 'metadata', value: { key: 'dataSchemaVersion', value: 6 } }]);
   });
 
   it('adds max snapshots without changing the original routine', () => {
@@ -85,5 +95,17 @@ describe('IndexedDB migrations', () => {
       session: null,
     });
     expect(routine.workouts[0].session).toBeUndefined();
+  });
+
+  it('adds session action metadata without changing the original routine', () => {
+    const routine = { workouts: [{ session: { exercises: [{ sets: [{ status: 'pending', unknown: true }] }] } }] };
+    const migrated = addSessionActionMetadata(routine);
+
+    expect(migrated.workouts[0].session.exercises[0]).toMatchObject({
+      original: null,
+      substitutedAt: null,
+      sets: [{ status: 'pending', unknown: true, skippedAt: null, skipActionId: null }],
+    });
+    expect(routine.workouts[0].session.exercises[0].original).toBeUndefined();
   });
 });

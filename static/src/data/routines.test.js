@@ -1,5 +1,6 @@
 import {
   adjustSessionSet,
+  archiveRoutine,
   completeSessionSet,
   correctMaxes,
   createRoutine,
@@ -12,9 +13,14 @@ import {
   reopenWorkoutSession,
   routineHistoryToCsv,
   routinePlanToCsv,
+  restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
   startWorkoutSession,
+  skipRemainingSessionExercise,
+  skipSessionSet,
+  substituteSessionExercise,
+  undoLatestSessionAction,
   undoLatestSessionSet,
   updateExercise,
   visibleExercise,
@@ -32,6 +38,16 @@ const inputs = {
 };
 
 describe('tracked routines', () => {
+  it('archives and restores a routine without changing its workouts', () => {
+    const routine = createRoutine('profile-1', 'Test plan', inputs);
+    const archived = archiveRoutine(routine);
+    const restored = restoreRoutine(archived);
+
+    expect(archived.archived).toBe(true);
+    expect(restored.archived).toBe(false);
+    expect(restored.workouts).toBe(routine.workouts);
+  });
+
   it('parses exact, ranged, and open prescriptions for set tracking', () => {
     expect(parsePrescription('4 × 6')).toEqual({ setCount: 4, plannedReps: 6, actualReps: 6 });
     expect(parsePrescription('3 × 5–20')).toEqual({ setCount: 3, plannedReps: '5–20', actualReps: 5 });
@@ -159,6 +175,43 @@ describe('tracked routines', () => {
     expect(session.exercises[0].sets.map(set => set.status)).toEqual(['completed', 'completed', 'completed', 'pending']);
     expect(session.elapsedSeconds).toBe(180);
     expect(session.runningSince).toBe('2026-08-18T12:05:00.000Z');
+  });
+
+  it('skips a set or remaining exercise and undoes the grouped skip', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const workout = routine.workouts[0];
+    routine = startWorkoutSession(routine, workout.id, '2026-08-18T12:00:00.000Z');
+    let exercise = routine.workouts[0].session.exercises[0];
+    routine = skipSessionSet(routine, workout.id, exercise.exerciseId, exercise.sets[0].id, '2026-08-18T12:01:00.000Z');
+    exercise = routine.workouts[0].session.exercises[0];
+    expect(exercise.sets.map(set => set.status)).toEqual(['skipped', 'pending', 'pending', 'pending']);
+
+    routine = skipRemainingSessionExercise(routine, workout.id, exercise.exerciseId, '2026-08-18T12:02:00.000Z');
+    const grouped = routine.workouts[0].session.exercises[0].sets.slice(1);
+    expect(new Set(grouped.map(set => set.skipActionId)).size).toBe(1);
+    routine = undoLatestSessionAction(routine, workout.id, '2026-08-18T12:03:00.000Z');
+    expect(routine.workouts[0].session.exercises[0].sets.map(set => set.status)).toEqual(['skipped', 'pending', 'pending', 'pending']);
+  });
+
+  it('substitutes only pending session work and preserves the generated plan', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const workout = routine.workouts[0];
+    const generatedMovement = visibleExercise(workout.exercises[0]).movement;
+    routine = startWorkoutSession(routine, workout.id, '2026-08-18T12:00:00.000Z');
+    let exercise = routine.workouts[0].session.exercises[0];
+    routine = completeSessionSet(routine, workout.id, exercise.exerciseId, exercise.sets[0].id, '2026-08-18T12:01:00.000Z');
+    exercise = routine.workouts[0].session.exercises[0];
+    routine = substituteSessionExercise(routine, workout.id, exercise.exerciseId, {
+      movement: 'Hack squat', weight: '225', setCount: '2', reps: '8',
+    }, '2026-08-18T12:02:00.000Z');
+
+    const substituted = routine.workouts[0].session.exercises[0];
+    expect(substituted).toMatchObject({ movement: 'Hack squat', original: { movement: generatedMovement } });
+    expect(substituted.sets.map(set => set.status)).toEqual(['completed', 'pending', 'pending']);
+    expect(substituted.sets.slice(1).map(set => set.actualWeight)).toEqual(['225', '225']);
+    expect(visibleExercise(routine.workouts[0].exercises[0]).movement).toBe(generatedMovement);
+    routine = finishWorkoutSession(routine, workout.id, '2026-08-18T12:03:00.000Z');
+    expect(routineHistoryToCsv(routine)).toContain('"Hack squat","Squat"');
   });
 
   it('finishes early with skipped sets, stored RPE, and the last set split', () => {
