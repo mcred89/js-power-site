@@ -9,7 +9,6 @@ import {
   completeSessionSet,
   correctMaxes,
   createRoutine,
-  createRoutineFromTemplate,
   createRoutineTemplate,
   deleteFutureWorkout,
   duplicateRoutine,
@@ -280,7 +279,7 @@ const WorkoutExercises = ({ routine, workout, editable, onChange }) => (
   </div>
 );
 
-const WorkoutMaxes = ({ workout }) => workout.cycleLabel && workout.effectiveMaxes ? (
+const WorkoutMaxes = ({ workout }) => workout.effectiveMaxes ? (
   <small className="workout-maxes">
     Maxes: Squat {workout.effectiveMaxes.maxSquat} · Press {workout.effectiveMaxes.maxPress} · Deadlift {workout.effectiveMaxes.maxDead} lb
   </small>
@@ -325,8 +324,19 @@ const MaxCorrection = ({ routine, onCorrect }) => {
   );
 };
 
-const RoutineBuilder = ({ profile, count, onCreate, onCancel }) => {
-  const [name, setName] = useState(`${profile.name}'s plan ${count + 1}`);
+export const templateBuilderInputs = template => ({
+  ...template.inputs,
+  microCycles: template.inputs?.microCycles?.map(cycle => ({ ...cycle })),
+  maxSquat: '',
+  maxPress: '',
+  maxDead: '',
+  squatIncrement: '',
+  pressIncrement: '',
+  deadliftIncrement: '',
+});
+
+export const RoutineBuilder = ({ profile, count, template, onCreate, onCancel }) => {
+  const [name, setName] = useState(template?.name || `${profile.name}'s plan ${count + 1}`);
   return (
     <div>
       <div className="routine-name-wrap">
@@ -335,7 +345,11 @@ const RoutineBuilder = ({ profile, count, onCreate, onCancel }) => {
           <input className="number-input" value={name} onChange={event => setName(event.target.value)} required />
         </label>
       </div>
-      <MaxesForm onCancel={onCancel} onCreate={inputs => onCreate(name.trim() || 'Strength plan', inputs)} />
+      <MaxesForm
+        initialInputs={template ? templateBuilderInputs(template) : undefined}
+        onCancel={onCancel}
+        onCreate={inputs => onCreate(name.trim() || 'Strength plan', inputs)}
+      />
     </div>
   );
 };
@@ -465,6 +479,7 @@ const TrackerApp = () => {
   const [copyRequest, setCopyRequest] = useState(null);
   const [templateSource, setTemplateSource] = useState(null);
   const [templateToDelete, setTemplateToDelete] = useState(null);
+  const [builderTemplate, setBuilderTemplate] = useState(null);
   const importRef = useRef();
   const transferRef = useRef();
   const incomingTransferRef = useRef(false);
@@ -567,6 +582,7 @@ const TrackerApp = () => {
     setRoutines(current => [...current, item]);
     setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedRoutineId(item.id);
+    setBuilderTemplate(null);
     setView('today');
     flash('Routine created on this phone.');
   };
@@ -609,13 +625,6 @@ const TrackerApp = () => {
     setTemplates(current => [...current, item]);
     setTemplateSource(null);
     flash('Template saved on this phone.');
-  };
-
-  const confirmTemplateUse = async (destination, name) => {
-    const item = createRoutineFromTemplate(copyRequest.item, destination, name);
-    await addCopiedRoutine(item);
-    setCopyRequest(null);
-    flash('Routine created from template.');
   };
 
   const renameTemplate = async (item, name) => {
@@ -911,7 +920,13 @@ const TrackerApp = () => {
             onUndo={undoWorkoutSet}
           />
         ) : view === 'builder' ? (
-          <RoutineBuilder profile={profile} count={profileRoutines.length} onCreate={addRoutine} onCancel={() => setView('plans')} />
+          <RoutineBuilder
+            profile={profile}
+            count={profileRoutines.length}
+            template={builderTemplate}
+            onCreate={addRoutine}
+            onCancel={() => { setBuilderTemplate(null); setView('plans'); }}
+          />
         ) : workout ? (
           <section className="workout-detail">
             <button className="text-button" type="button" onClick={() => { setWorkoutId(null); setEditingWorkout(false); }}>← Back</button>
@@ -947,7 +962,7 @@ const TrackerApp = () => {
           </section>
         ) : view === 'plans' ? (
           <section className="section-page">
-            <div className="section-heading"><div><p className="eyebrow">{profile.name}</p><h1>Plans</h1></div><button className="primary-button small-primary" type="button" onClick={() => setView('builder')}>New routine</button></div>
+            <div className="section-heading"><div><p className="eyebrow">{profile.name}</p><h1>Plans</h1></div><button className="primary-button small-primary" type="button" onClick={() => { setBuilderTemplate(null); setView('builder'); }}>New routine</button></div>
             {!profileRoutines.length ? <p>No routines yet.</p> : profileRoutines.map(item => (
               <article className={`plan-card ${item.id === routine?.id ? 'active' : ''}`} key={item.id}>
                 <button className="plan-select" type="button" onClick={() => selectRoutine(item)}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><span>{item.id === routine?.id ? 'Active' : 'Use plan'}</span></button>
@@ -960,7 +975,7 @@ const TrackerApp = () => {
               {!templates.length ? <p>No templates yet. Save one from a routine above.</p> : templates.map(item => (
                 <article className="template-card" key={item.id}>
                   <strong>{item.name}</strong>
-                  <div className="button-row"><button className="primary-button small-primary" type="button" onClick={() => setCopyRequest({ type: 'template', item })}>Use template</button><RoutineNameEditor routine={item} label="Template" onSave={name => renameTemplate(item, name)} /><button className="text-button danger-text" type="button" onClick={() => setTemplateToDelete(item)}>Delete</button></div>
+                  <div className="button-row"><button className="primary-button small-primary" type="button" onClick={() => { setBuilderTemplate(item); setView('builder'); }}>Use template</button><RoutineNameEditor routine={item} label="Template" onSave={name => renameTemplate(item, name)} /><button className="text-button danger-text" type="button" onClick={() => setTemplateToDelete(item)}>Delete</button></div>
                 </article>
               ))}
             </div>
@@ -988,7 +1003,7 @@ const TrackerApp = () => {
       {transferFile && <TransferUnlock file={transferFile} onCancel={() => setTransferFile(null)} onUnlock={unlockTransfer} />}
       {choosingRoutineTransfer && <RoutineTransferCreator routines={routines} onCancel={() => setChoosingRoutineTransfer(false)} onCreate={createRoutineTransfer} />}
       {receivedRoutine && <RoutineDestination transfer={receivedRoutine} profiles={profiles} onCancel={() => setReceivedRoutine(null)} onConfirm={chooseRoutineDestination} />}
-      {copyRequest && <RoutineCopyDialog title={copyRequest.type === 'routine' ? `Copy ${copyRequest.item.name}` : `Use ${copyRequest.item.name}`} eyebrow={copyRequest.type === 'routine' ? 'Copy routine' : 'Create from template'} defaultName={copyRequest.type === 'routine' ? `${copyRequest.item.name} copy` : copyRequest.item.name} profiles={profiles} selectedProfileId={selectedProfileId} confirmLabel={copyRequest.type === 'routine' ? 'Copy routine' : 'Create routine'} onCancel={() => setCopyRequest(null)} onConfirm={copyRequest.type === 'routine' ? confirmRoutineCopy : confirmTemplateUse} />}
+      {copyRequest && <RoutineCopyDialog title={`Copy ${copyRequest.item.name}`} eyebrow="Copy routine" defaultName={`${copyRequest.item.name} copy`} profiles={profiles} selectedProfileId={selectedProfileId} confirmLabel="Copy routine" onCancel={() => setCopyRequest(null)} onConfirm={confirmRoutineCopy} />}
       {templateSource && <SaveTemplateDialog routine={templateSource} onCancel={() => setTemplateSource(null)} onConfirm={saveRoutineTemplate} />}
       {templateToDelete && <ConfirmationModal title="Delete template?" confirmLabel="Delete template" onCancel={() => setTemplateToDelete(null)} onConfirm={deleteTemplate}>Delete {templateToDelete.name}? Routines already created from it will not be affected.</ConfirmationModal>}
 

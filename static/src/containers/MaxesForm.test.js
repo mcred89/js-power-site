@@ -51,3 +51,30 @@ it('continues to send generated inputs to the PWA callback', () => {
   expect(div.textContent).toContain('Build your routine');
   act(() => root.unmount());
 });
+
+it('prefills editable generator settings from a template', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const formRef = createRef();
+  act(() => root.render(<MaxesForm ref={formRef} onCreate={() => {}} initialInputs={{
+    maxSquat: '',
+    maxPress: '',
+    maxDead: '',
+    mainLiftChoice: 'High',
+    duration: '3 weeks',
+    includeStrongmanDay: true,
+  }} />));
+
+  expect(formRef.current.state).toMatchObject({
+    maxSquat: '',
+    mainLiftChoice: 'High',
+    duration: '3 weeks',
+    includeStrongmanDay: true,
+  });
+  expect(div.querySelector('[name="maxSquat"]').value).toBe('');
+  expect(div.querySelector('[name="mainLiftChoice"]:checked').value).toBe('High');
+  expect(div.querySelector('[name="duration"]:checked').value).toBe('3 weeks');
+  expect(div.querySelector('[name="includeStrongmanDay"]').checked).toBe(true);
+  act(() => root.unmount());
+});

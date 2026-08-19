@@ -4,6 +4,12 @@ const { createProfile, createRoutine, fillMaxes, selectVolume } = require('./hel
 test('PWA tracks an autosaved workout session, history, and max correction', async ({ page }) => {
   await createProfile(page);
   await createRoutine(page);
+  const squatWorkoutCards = () => page.locator('.workout-card').filter({
+    has: page.locator('strong').filter({ hasText: /^Squat$/ }),
+  });
+  await expect(page.locator('.workout-card').first().locator('.workout-maxes')).toHaveText(
+    'Maxes: Squat 315 · Press 185 · Deadlift 405 lb',
+  );
 
   await page.getByRole('button', { name: 'Open workout' }).click();
   await expect(page.getByRole('heading', { name: 'Squat' })).toBeVisible();
@@ -31,7 +37,10 @@ test('PWA tracks an autosaved workout session, history, and max correction', asy
   await expect(page.getByText('Workout complete.')).toBeVisible();
 
   await page.getByRole('button', { name: 'History' }).click();
-  await page.locator('.workout-card').filter({ hasText: 'Squat' }).click();
+  await expect(squatWorkoutCards().locator('.workout-maxes')).toHaveText(
+    'Maxes: Squat 315 · Press 185 · Deadlift 405 lb',
+  );
+  await squatWorkoutCards().click();
   await expect(page.getByText('227 lb × 5 reps')).toBeVisible();
   await expect(page.locator('.history-summary')).toContainText('8');
   await page.getByRole('button', { name: 'Back' }).click();
@@ -46,16 +55,16 @@ test('PWA tracks an autosaved workout session, history, and max correction', asy
   await expect(page.getByText('Future workouts updated.')).toBeVisible();
 
   await page.getByRole('button', { name: 'History' }).click();
-  await page.locator('.workout-card').filter({ hasText: 'Squat' }).click();
+  await squatWorkoutCards().click();
   await expect(page.getByText('227 lb × 5 reps')).toBeVisible();
   await page.getByRole('button', { name: 'Back' }).click();
   await page.getByRole('button', { name: 'Today' }).click();
-  await page.locator('.workout-card').filter({ hasText: 'Squat' }).first().click();
+  await squatWorkoutCards().first().click();
   await expect(page.getByText('280 lb')).toBeVisible();
   await page.getByRole('button', { name: 'Back' }).click();
 
   await page.getByRole('button', { name: 'History' }).click();
-  await page.locator('.workout-card').filter({ hasText: 'Squat' }).click();
+  await squatWorkoutCards().click();
   await page.getByRole('button', { name: 'Return to workout queue' }).click();
   await expect(page.getByText('Workout returned to your queue.')).toBeVisible();
   await page.getByRole('button', { name: 'Leave' }).click();

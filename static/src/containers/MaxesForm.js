@@ -9,41 +9,60 @@ const eventLifts = [
   { key: 'deadlift', label: 'Deadlift' },
 ];
 
+const defaultFormState = {
+  maxSquat: '',
+  maxPress: '',
+  maxDead: '',
+  mainLiftChoices: ['Low', 'High'],
+  mainLiftChoice: '',
+  durationChoices: ['3 weeks', '5 weeks'],
+  duration: '5 weeks',
+  mesoMode: false,
+  microCycles: [
+    { duration: '5 weeks', volume: 'Low' },
+    { duration: '5 weeks', volume: 'Low' },
+  ],
+  squatIncrement: '10',
+  pressIncrement: '5',
+  deadliftIncrement: '10',
+  includeStrongmanDay: false,
+  includeBackoffSets: false,
+  squatEventEnabled: false,
+  squatEventMovement: '',
+  squatEventSets: '',
+  squatEventReps: '',
+  pressEventEnabled: false,
+  pressEventMovement: '',
+  pressEventSets: '',
+  pressEventReps: '',
+  deadliftEventEnabled: false,
+  deadliftEventMovement: '',
+  deadliftEventSets: '',
+  deadliftEventReps: '',
+  needsToFillOutForm: true,
+};
+
+const initialFormState = initialInputs => {
+  const allowedInputs = Object.keys(defaultFormState).reduce((result, key) => (
+    Object.prototype.hasOwnProperty.call(initialInputs || {}, key)
+      ? { ...result, [key]: initialInputs[key] }
+      : result
+  ), {});
+  return {
+    ...defaultFormState,
+    ...allowedInputs,
+    mainLiftChoices: [...defaultFormState.mainLiftChoices],
+    durationChoices: [...defaultFormState.durationChoices],
+    microCycles: (allowedInputs.microCycles || defaultFormState.microCycles)
+      .map(cycle => ({ ...cycle })),
+    needsToFillOutForm: true,
+  };
+};
+
 export class MaxesForm extends Component {
   constructor(props) {
     super(props);
-    this.state = {
-      maxSquat: '',
-      maxPress: '',
-      maxDead: '',
-      mainLiftChoices: ['Low', 'High'],
-      mainLiftChoice: '',
-      durationChoices: ['3 weeks', '5 weeks'],
-      duration: '5 weeks',
-      mesoMode: false,
-      microCycles: [
-        { duration: '5 weeks', volume: 'Low' },
-        { duration: '5 weeks', volume: 'Low' },
-      ],
-      squatIncrement: '10',
-      pressIncrement: '5',
-      deadliftIncrement: '10',
-      includeStrongmanDay: false,
-      includeBackoffSets: false,
-      squatEventEnabled: false,
-      squatEventMovement: '',
-      squatEventSets: '',
-      squatEventReps: '',
-      pressEventEnabled: false,
-      pressEventMovement: '',
-      pressEventSets: '',
-      pressEventReps: '',
-      deadliftEventEnabled: false,
-      deadliftEventMovement: '',
-      deadliftEventSets: '',
-      deadliftEventReps: '',
-      needsToFillOutForm: true,
-    };
+    this.state = initialFormState(props.initialInputs);
     this.handleChange = this.handleChange.bind(this);
     this.handleCheckbox = this.handleCheckbox.bind(this);
     this.handleSubmit = this.handleSubmit.bind(this);

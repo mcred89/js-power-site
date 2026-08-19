@@ -1,6 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import App, { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, isInstalledApp, PlanSetup, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, TransferCreator, WorkoutCard } from './App';
+import App, { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, isInstalledApp, PlanSetup, RoutineBuilder, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, templateBuilderInputs, TransferCreator, WorkoutCard } from './App';
 
 describe('default profile selection', () => {
   const profiles = [{ id: 'wife' }, { id: 'husband' }];
@@ -12,6 +12,54 @@ describe('default profile selection', () => {
   it('falls back to the first profile when the saved default no longer exists', () => {
     expect(initialProfileId(profiles, 'deleted')).toBe('wife');
   });
+});
+
+it('keeps template setup choices but requests new maxes and increases', () => {
+  const template = { inputs: {
+    maxSquat: '315',
+    maxPress: '185',
+    maxDead: '405',
+    mesoMode: true,
+    microCycles: [{ duration: '3 weeks', volume: 'High' }],
+    squatIncrement: '10',
+    pressIncrement: '5',
+    deadliftIncrement: '15',
+    includeStrongmanDay: true,
+  } };
+
+  expect(templateBuilderInputs(template)).toEqual(expect.objectContaining({
+    maxSquat: '',
+    maxPress: '',
+    maxDead: '',
+    squatIncrement: '',
+    pressIncrement: '',
+    deadliftIncrement: '',
+    mesoMode: true,
+    microCycles: [{ duration: '3 weeks', volume: 'High' }],
+    includeStrongmanDay: true,
+  }));
+  expect(template.inputs.microCycles).toEqual([{ duration: '3 weeks', volume: 'High' }]);
+});
+
+it('opens a template in the normal editable routine builder', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  act(() => root.render(
+    <RoutineBuilder
+      profile={{ name: 'Alex' }}
+      count={2}
+      template={{ name: 'Meet prep', inputs: { mainLiftChoice: 'High', duration: '3 weeks' } }}
+      onCreate={() => {}}
+      onCancel={() => {}}
+    />,
+  ));
+
+  expect(div.querySelector('.routine-name-wrap input').value).toBe('Meet prep');
+  expect(div.querySelector('[name="maxSquat"]').value).toBe('');
+  expect(div.querySelector('[name="mainLiftChoice"]:checked').value).toBe('High');
+  expect(div.querySelector('[name="duration"]:checked').value).toBe('3 weeks');
+  act(() => root.unmount());
 });
 
 describe('native transfer sharing', () => {
@@ -112,6 +160,24 @@ it('shows the completion date on a completed workout card', () => {
   }} onOpen={() => {}} />));
 
   expect(div.textContent).toContain('Completed August 18, 2026');
+  act(() => root.unmount());
+});
+
+it('shows effective maxes on a single-cycle workout card', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+
+  act(() => root.render(<WorkoutCard workout={{
+    cycleLabel: null,
+    weekLabel: 'Week 1',
+    name: 'Squat',
+    effectiveMaxes: { maxSquat: 315, maxPress: 185, maxDead: 405 },
+  }} onOpen={() => {}} />));
+
+  expect(div.querySelector('.workout-maxes').textContent).toBe(
+    'Maxes: Squat 315 · Press 185 · Deadlift 405 lb',
+  );
   act(() => root.unmount());
 });
 
