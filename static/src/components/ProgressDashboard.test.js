@@ -28,7 +28,9 @@ it('renders profile progress and switches main lifts', () => {
   act(() => root.render(<ProgressDashboard profile={{ name: 'Alex' }} routines={[trackedRoutine]} now={new Date('2026-08-18T12:00:00.000Z')} />));
 
   expect(div.textContent).toContain('Alex');
-  expect(div.textContent).toContain('350 lb');
+  expect(div.querySelector('.strength-progress h2').textContent).toBe('Estimated max');
+  expect(div.querySelector('.pr-summary small').textContent).toBe('Lifetime estimated max');
+  expect(div.querySelector('.chart-point text').textContent).toBe('350 lb');
   expect(div.textContent).toContain('1,500 lb');
   const deadlift = Array.from(div.querySelectorAll('.lift-tabs button')).find(button => button.textContent === 'Deadlift');
   act(() => deadlift.dispatchEvent(new MouseEvent('click', { bubbles: true })));

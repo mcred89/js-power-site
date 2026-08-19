@@ -19,6 +19,13 @@ const progressFor = session => {
   };
 };
 
+const currentExerciseIndex = session => {
+  const index = session.exercises.findIndex(exercise => (
+    exercise.sets.some(set => set.status === 'pending')
+  ));
+  return index === -1 ? 0 : index;
+};
+
 const Stepper = ({ label, value, step, onChange }) => {
   const numeric = Number(value);
   const adjusted = change => onChange(String(Math.max(0, (Number.isFinite(numeric) ? numeric : 0) + change)));
@@ -49,7 +56,7 @@ export const ActiveWorkoutSession = ({
   onUndo,
 }) => {
   const session = workout.session;
-  const [exerciseIndex, setExerciseIndex] = useState(0);
+  const [exerciseIndex, setExerciseIndex] = useState(() => currentExerciseIndex(session));
   const [clock, setClock] = useState(() => new Date().toISOString());
 
   useEffect(() => {

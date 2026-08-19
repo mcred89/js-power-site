@@ -65,6 +65,55 @@ it('offers large set adjustments, completion, undo, and RPE controls', () => {
   act(() => root.unmount());
 });
 
+it('resumes on the first exercise that still has pending sets', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const resumedWorkout = {
+    ...workout,
+    session: {
+      ...workout.session,
+      exercises: [
+        {
+          ...workout.session.exercises[0],
+          movement: 'Press',
+          sets: workout.session.exercises[0].sets.map(set => ({
+            ...set,
+            status: 'completed',
+          })),
+        },
+        {
+          exerciseId: 'e2',
+          movement: 'Accessory Movement',
+          prescription: '1 × 10',
+          sets: [{ id: 's3', number: 1, status: 'completed' }],
+        },
+        {
+          exerciseId: 'e3',
+          movement: 'Curls',
+          prescription: '3 × 10',
+          sets: [{ id: 's4', number: 1, status: 'pending', actualWeight: '20', actualReps: '10' }],
+        },
+      ],
+    },
+  };
+
+  act(() => root.render(<ActiveWorkoutSession
+    workout={resumedWorkout}
+    onAdjust={() => {}}
+    onCompleteSet={() => {}}
+    onFinish={() => {}}
+    onLeave={() => {}}
+    onRpe={() => {}}
+    onUndo={() => {}}
+  />));
+
+  expect(div.querySelector('.exercise-pager h1').textContent).toBe('Curls');
+  expect(div.textContent).toContain('Exercise 3 of 3');
+  expect(div.querySelector('[aria-label="Previous exercise"]').disabled).toBe(false);
+  act(() => root.unmount());
+});
+
 it('shows performed values, planned adjustments, and timing in history', () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const div = document.createElement('div');

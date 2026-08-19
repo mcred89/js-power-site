@@ -301,10 +301,12 @@ body { min-width:320px; }
 .lift-tabs button { min-height:42px; border:1px solid var(--line); border-radius:9px; color:var(--muted); background:#fbfcfb; cursor:pointer; font-size:13px; font-weight:750; }
 .lift-tabs button.active { border-color:var(--accent); color:#fff; background:var(--accent); }
 .chart-wrap { min-width:0; }
+.chart-scroll { overflow-x:auto; padding-top:4px; }
 .line-chart { width:100%; height:auto; display:block; overflow:visible; }
 .line-chart line { stroke:var(--line); stroke-width:2; }
 .line-chart polyline { fill:none; stroke:var(--accent); stroke-linecap:round; stroke-linejoin:round; stroke-width:4; }
 .line-chart circle { fill:var(--paper); stroke:var(--accent); stroke-width:4; }
+.line-chart text { fill:var(--ink); font-size:13px; font-weight:800; paint-order:stroke; stroke:var(--paper); stroke-linejoin:round; stroke-width:4px; }
 .chart-range { display:flex; justify-content:space-between; margin-top:-8px; color:var(--muted); font-size:10px; }
 .bar-chart { height:150px; display:flex; align-items:flex-end; gap:clamp(2px,1vw,7px); margin-top:22px; padding-top:8px; border-bottom:1px solid var(--line); }
 .bar-column { height:100%; min-width:2px; display:flex; align-items:flex-end; flex:1; }

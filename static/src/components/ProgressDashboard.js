@@ -24,7 +24,7 @@ const weekLabel = value => new Intl.DateTimeFormat('en-US', {
 
 const LineChart = ({ points, lift }) => {
   if (!points.length) return <div className="progress-empty">No tracked {lift.toLowerCase()} sets in this range.</div>;
-  const width = 600;
+  const width = Math.max(600, 56 + (points.length - 1) * 72);
   const height = 220;
   const padding = 28;
   const values = points.map(point => point.value);
@@ -39,11 +39,18 @@ const LineChart = ({ points, lift }) => {
 
   return (
     <div className="chart-wrap">
-      <svg className="line-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${lift} estimated one rep max trend: ${points.map(point => `${formatDate(point.completedAt)}, ${formatWeight(point.value)}`).join('; ')}`}>
-        <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
-        {coordinates.length > 1 && <polyline points={coordinates.map(point => `${point.x},${point.y}`).join(' ')} />}
-        {coordinates.map(point => <circle key={point.workoutId} cx={point.x} cy={point.y} r="6"><title>{formatDate(point.completedAt)} · {formatWeight(point.value)}</title></circle>)}
-      </svg>
+      <div className="chart-scroll">
+        <svg className="line-chart" style={{ minWidth: `${width}px` }} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${lift} estimated max trend: ${points.map(point => `${formatDate(point.completedAt)}, ${formatWeight(point.value)}`).join('; ')}`}>
+          <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
+          {coordinates.length > 1 && <polyline points={coordinates.map(point => `${point.x},${point.y}`).join(' ')} />}
+          {coordinates.map(point => (
+            <g className="chart-point" key={point.workoutId}>
+              <circle cx={point.x} cy={point.y} r="6"><title>{formatDate(point.completedAt)} · {formatWeight(point.value)}</title></circle>
+              <text x={point.x} y={point.y - 13} textAnchor="middle">{formatWeight(point.value)}</text>
+            </g>
+          ))}
+        </svg>
+      </div>
       <div className="chart-range"><span>{formatDate(points[0].completedAt)}</span><span>{formatDate(points[points.length - 1].completedAt)}</span></div>
     </div>
   );
@@ -94,7 +101,7 @@ export const ProgressDashboard = ({ profile, routines, now = new Date() }) => {
       </div>
 
       <article className="progress-card strength-progress">
-        <div className="progress-card-heading"><div><p className="eyebrow">Strength trend</p><h2>Estimated 1RM</h2></div>{result.personalRecord && <div className="pr-summary"><small>Lifetime PR</small><strong>{formatWeight(result.personalRecord.value)}</strong><span>{formatDate(result.personalRecord.completedAt)}</span></div>}</div>
+        <div className="progress-card-heading"><div><p className="eyebrow">Strength trend</p><h2>Estimated max</h2></div>{result.personalRecord && <div className="pr-summary"><small>Lifetime estimated max</small><strong>{formatWeight(result.personalRecord.value)}</strong><span>{formatDate(result.personalRecord.completedAt)}</span></div>}</div>
         <div className="lift-tabs" role="group" aria-label="Main lift">{MAIN_LIFTS.map(item => <button className={lift === item ? 'active' : ''} type="button" onClick={() => setLift(item)} aria-pressed={lift === item} key={item}>{item}</button>)}</div>
         <LineChart points={result.e1rmSeries} lift={lift} />
         <p className="progress-note">Best completed set per workout using the Epley estimate.</p>
