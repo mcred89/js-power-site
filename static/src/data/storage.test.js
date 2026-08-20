@@ -72,3 +72,33 @@ describe('portable backups', () => {
     expect(() => parseBackup('{"profiles":[]}')).toThrow('not a supported');
   });
 });
+
+describe('IndexedDB connection reuse', () => {
+  it('opens the database once across multiple transactions', async () => {
+    const originalIndexedDB = window.indexedDB;
+    const open = jest.fn(() => {
+      const database = {
+        close: jest.fn(),
+        transaction: () => {
+          const transaction = {
+            objectStore: () => ({ getAll: () => ({ result: [] }) }),
+          };
+          Promise.resolve().then(() => transaction.oncomplete());
+          return transaction;
+        },
+      };
+      const request = { result: database };
+      Promise.resolve().then(() => request.onsuccess());
+      return request;
+    });
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: { open } });
+
+    let isolatedStorage;
+    jest.isolateModules(() => { isolatedStorage = require('./storage'); });
+    await isolatedStorage.getAll('profiles');
+    await isolatedStorage.getAll('routines');
+
+    expect(open).toHaveBeenCalledTimes(1);
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: originalIndexedDB });
+  });
+});

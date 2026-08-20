@@ -62,6 +62,44 @@ const PlansScreen = lazy(() => import('./components/PlansScreen').then(module =>
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(module => ({ default: module.SettingsScreen })));
 const TrackerScreenFallback = ({ label }) => <div className="loading-screen">Opening {label}…</div>;
 
+export const createSerializedRoutineWriter = persist => {
+  let tail = null;
+  return record => {
+    const write = () => persist('routines', record);
+    // A lifecycle flush must enter persistence in the same event turn when the queue is idle.
+    // Later writes still chain in order. IndexedDB completion is asynchronous and cannot be
+    // guaranteed if the browser kills the page, which is why the session also flushes on hidden.
+    let current;
+    if (tail) {
+      current = tail.then(write, write);
+    } else {
+      try {
+        current = Promise.resolve(write());
+      } catch (error) {
+        current = Promise.reject(error);
+      }
+    }
+    tail = current;
+    const clear = () => { if (tail === current) tail = null; };
+    current.then(clear, clear);
+    return current;
+  };
+};
+
+export const completeWorkoutSetWithDraft = (routine, workoutId, exerciseId, setId, draft) => {
+  const adjusted = draft
+    ? adjustSessionSet(routine, workoutId, exerciseId, setId, draft)
+    : routine;
+  return completeSessionSet(adjusted, workoutId, exerciseId, setId);
+};
+
+export const skipWorkoutSetWithDraft = (routine, workoutId, exerciseId, setId, draft) => {
+  const adjusted = draft
+    ? adjustSessionSet(routine, workoutId, exerciseId, setId, draft)
+    : routine;
+  return skipSessionSet(adjusted, workoutId, exerciseId, setId);
+};
+
 export const initialProfileId = (profiles, defaultProfileId) => (
   profiles.some(profile => profile.id === defaultProfileId)
     ? defaultProfileId
@@ -488,7 +526,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const transferRef = useRef();
   const incomingTransferRef = useRef(false);
   const routinesRef = useRef([]);
-  const routineSaveQueueRef = useRef(Promise.resolve());
+  const routineWriterRef = useRef();
+  if (!routineWriterRef.current) routineWriterRef.current = createSerializedRoutineWriter(save);
   const showWorkout = useCallback(target => {
     setWorkoutId(target.id);
     setEditingWorkout(false);
@@ -597,10 +636,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const saveRoutine = async updated => {
     routinesRef.current = routinesRef.current.map(item => item.id === updated.id ? updated : item);
     setRoutines(routinesRef.current);
-    routineSaveQueueRef.current = routineSaveQueueRef.current
-      .catch(() => {})
-      .then(() => save('routines', updated));
-    await routineSaveQueueRef.current;
+    await routineWriterRef.current(updated);
   };
 
   const changeSelectedRoutine = transform => {
@@ -703,20 +739,29 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     await changeSelectedRoutine(current => adjustSessionSet(current, workout.id, exerciseId, setId, values));
   };
 
-  const completeWorkoutSet = async (exerciseId, setId) => {
-    await changeSelectedRoutine(current => completeSessionSet(current, workout.id, exerciseId, setId));
+  const completeWorkoutSet = async (exerciseId, setId, draft) => {
+    await changeSelectedRoutine(current => (
+      completeWorkoutSetWithDraft(current, workout.id, exerciseId, setId, draft)
+    ));
   };
 
   const undoWorkoutSet = async () => {
     await changeSelectedRoutine(current => undoLatestSessionAction(current, workout.id));
   };
 
-  const skipWorkoutSet = async (exerciseId, setId) => {
-    await changeSelectedRoutine(current => skipSessionSet(current, workout.id, exerciseId, setId));
+  const skipWorkoutSet = async (exerciseId, setId, draft) => {
+    await changeSelectedRoutine(current => (
+      skipWorkoutSetWithDraft(current, workout.id, exerciseId, setId, draft)
+    ));
   };
 
-  const skipWorkoutExercise = async exerciseId => {
-    await changeSelectedRoutine(current => skipRemainingSessionExercise(current, workout.id, exerciseId));
+  const skipWorkoutExercise = async (exerciseId, setId, draft) => {
+    await changeSelectedRoutine(current => {
+      const adjusted = draft && setId
+        ? adjustSessionSet(current, workout.id, exerciseId, setId, draft)
+        : current;
+      return skipRemainingSessionExercise(adjusted, workout.id, exerciseId);
+    });
   };
 
   const substituteWorkoutExercise = async (exerciseId, values) => {

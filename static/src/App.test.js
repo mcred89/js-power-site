@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
-import { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, PlanSetup, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, templateBuilderInputs, TransferCreator, WorkoutCard } from './TrackerApp';
+import { canShareTransfer, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, initialProfileId, PlanSetup, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, TransferCreator, WorkoutCard } from './TrackerApp';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
 describe('default profile selection', () => {
@@ -14,6 +14,70 @@ describe('default profile selection', () => {
   it('falls back to the first profile when the saved default no longer exists', () => {
     expect(initialProfileId(profiles, 'deleted')).toBe('wife');
   });
+});
+
+it('starts the first routine persistence synchronously and serializes later saves', async () => {
+  const releases = [];
+  const persisted = [];
+  const persist = jest.fn((store, record) => {
+    persisted.push([store, record.id]);
+    return new Promise(resolve => releases.push(resolve));
+  });
+  const write = createSerializedRoutineWriter(persist);
+
+  const first = write({ id: 'first' });
+  const second = write({ id: 'second' });
+  expect(persisted).toEqual([['routines', 'first']]);
+  releases.shift()();
+  await Promise.resolve();
+  expect(persisted).toEqual([['routines', 'first'], ['routines', 'second']]);
+  releases.shift()();
+  await Promise.all([first, second]);
+  expect(persist).toHaveBeenCalledTimes(2);
+});
+
+it('continues the routine persistence queue after a failed save', async () => {
+  const persist = jest.fn()
+    .mockRejectedValueOnce(new Error('write failed'))
+    .mockResolvedValueOnce(undefined);
+  const write = createSerializedRoutineWriter(persist);
+  const first = write({ id: 'first' });
+  const second = write({ id: 'second' });
+  await expect(first).rejects.toThrow('write failed');
+  await expect(second).resolves.toBeUndefined();
+  expect(persist.mock.calls.map(call => call[1].id)).toEqual(['first', 'second']);
+});
+
+it.each([
+  ['complete', completeWorkoutSetWithDraft, 'completed'],
+  ['skip', skipWorkoutSetWithDraft, 'skipped'],
+])('persists draft values and the %s transition in one TrackerApp write', async (label, transform, status) => {
+  const persist = jest.fn().mockResolvedValue(undefined);
+  const write = createSerializedRoutineWriter(persist);
+  const routine = {
+    id: 'routine-1',
+    workouts: [{
+      id: 'workout-1',
+      session: {
+        status: 'inProgress',
+        runningSince: null,
+        elapsedSeconds: 0,
+        exercises: [{
+          exerciseId: 'exercise-1',
+          sets: [{ id: 'set-1', number: 1, actualWeight: '200', actualReps: '5', status: 'pending' }],
+        }],
+      },
+    }],
+  };
+  const updated = transform(routine, 'workout-1', 'exercise-1', 'set-1', {
+    actualWeight: '225',
+    actualReps: '8',
+  });
+  await write(updated);
+
+  expect(persist).toHaveBeenCalledTimes(1);
+  expect(persist.mock.calls[0][1].workouts[0].session.exercises[0].sets[0])
+    .toEqual(expect.objectContaining({ actualWeight: '225', actualReps: '8', status }));
 });
 
 it('keeps template setup choices but requests new maxes and increases', () => {

@@ -7,42 +7,64 @@ import {
 
 const DATABASE_NAME = 'mcilroy-method';
 
-const openDatabase = () => new Promise((resolve, reject) => {
+// Keep one connection for the lifetime of the page. Opening IndexedDB is asynchronous and
+// comparatively expensive; re-opening it for every set completion also made rapid workout
+// updates queue behind repeated connection handshakes. The browser still owns durability,
+// and versionchange closes this cached connection so a newer app version can migrate safely.
+let databasePromise;
+let cachedDatabase;
+
+const openDatabase = () => {
+  if (databasePromise) return databasePromise;
   if (!window.indexedDB) {
-    reject(new Error('IndexedDB is not available in this browser.'));
-    return;
+    return Promise.reject(new Error('IndexedDB is not available in this browser.'));
   }
-
-  const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
-  request.onupgradeneeded = event => {
-    runDatabaseMigrations(request.result, request.transaction, event.oldVersion, event.newVersion);
-  };
-  request.onsuccess = () => resolve(request.result);
-  request.onerror = () => reject(request.error);
-});
-
-const transaction = async (storeName, mode, action) => {
-  const database = await openDatabase();
-  return new Promise((resolve, reject) => {
-    const tx = database.transaction(storeName, mode);
-    const store = tx.objectStore(storeName);
-    let request;
-    try {
-      request = action(store);
-    } catch (error) {
-      database.close();
-      reject(error);
-      return;
-    }
-    tx.oncomplete = () => {
-      database.close();
-      resolve(request?.result);
+  databasePromise = new Promise((resolve, reject) => {
+    const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+    request.onupgradeneeded = event => {
+      runDatabaseMigrations(request.result, request.transaction, event.oldVersion, event.newVersion);
     };
-    tx.onerror = () => {
-      database.close();
-      reject(tx.error);
+    request.onsuccess = () => {
+      const database = request.result;
+      cachedDatabase = database;
+      database.onversionchange = () => {
+        database.close();
+        cachedDatabase = undefined;
+        databasePromise = undefined;
+      };
+      resolve(database);
+    };
+    request.onerror = () => {
+      databasePromise = undefined;
+      reject(request.error);
     };
   });
+  return databasePromise;
+};
+
+const runTransaction = (database, storeName, mode, action) => new Promise((resolve, reject) => {
+  const tx = database.transaction(storeName, mode);
+  const store = tx.objectStore(storeName);
+  let request;
+  try {
+    request = action(store);
+  } catch (error) {
+    reject(error);
+    return;
+  }
+  tx.oncomplete = () => {
+    resolve(request?.result);
+  };
+  tx.onerror = () => {
+    reject(tx.error);
+  };
+});
+
+const transaction = (storeName, mode, action) => {
+  // Once startup has opened IndexedDB, lifecycle flushes enter a transaction in the same
+  // browser event turn. The first-ever open is necessarily asynchronous by IndexedDB design.
+  if (cachedDatabase) return runTransaction(cachedDatabase, storeName, mode, action);
+  return openDatabase().then(database => runTransaction(database, storeName, mode, action));
 };
 
 export const getAll = storeName => transaction(storeName, 'readonly', store => store.getAll());
