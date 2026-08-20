@@ -1,5 +1,14 @@
 const { expect, test } = require('./fixtures');
 const { createProfile, createRoutine, fillMaxes, selectVolume } = require('./helpers');
+const usesLocalReleaseFixtures = !process.env.SMOKE_BASE_URL;
+
+// Only the intentional failed runtime-image request is expected to reach the
+// browser console; all other console errors still fail the fixture audit.
+test.use({ expectedConsoleErrors: [/missing-runtime\.png/] });
+
+test.beforeEach(async ({ request }) => {
+  if (usesLocalReleaseFixtures) await request.get('/__smoke/release/reset');
+});
 
 test('PWA tracks an autosaved workout session, history, and max correction', async ({ page }) => {
   await createProfile(page);
@@ -149,12 +158,16 @@ test('PWA persists data, has install metadata, and launches offline', async ({ p
     return response.json();
   });
   expect(receivedShare).toEqual({ name: 'routine.txt', contents: 'encrypted transfer' });
-  await page.reload();
-  await expect(page.getByText('Offline Plan')).toBeVisible();
+  // The first reload after installation is deliberately offline: every emitted
+  // lazy screen must come from the atomic shell without an online warm reload.
   await context.setOffline(true);
   await page.reload();
   await expect(page.getByText('Offline Plan')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Your next workout' })).toBeVisible();
+  for (const screen of ['Plans', 'History', 'Progress', 'Settings']) {
+    await page.getByRole('button', { name: screen }).click();
+    await expect(page.getByRole('heading', { name: screen === 'Settings' ? 'Settings & backup' : screen })).toBeVisible();
+  }
   await context.setOffline(false);
 });
 
@@ -167,4 +180,82 @@ test('PWA deletes a profile only after confirmation', async ({ page }) => {
   page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Delete Delete Me' }).click();
   await expect(page.getByRole('heading', { name: 'Who is training?' })).toBeVisible();
+});
+
+test('PWA atomically installs updates and preserves release-independent transfers', async ({ page }) => {
+  test.skip(!usesLocalReleaseFixtures, 'Release switching is available only from the local smoke server.');
+  await page.goto('/');
+  // Ensure TrackerApp has committed its update listener before asking Chromium
+  // to discover the next release.
+  await expect(page.getByRole('heading', { name: 'Who is training?' })).toBeVisible();
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      await new Promise(resolve => navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }));
+    }
+  });
+  const initial = await page.evaluate(async () => ({
+    caches: await caches.keys(),
+    controller: navigator.serviceWorker.controller.scriptURL,
+  }));
+  expect(initial.caches.filter(name => name.startsWith('mcilroy-shell-'))).toHaveLength(1);
+
+  await page.evaluate(async () => {
+    const formData = new FormData();
+    formData.append('transfer', new File(['survives update'], 'update.txt', { type: 'text/plain' }));
+    await fetch('/receive-transfer', { method: 'POST', body: formData });
+  });
+
+  await page.request.get('/__smoke/release/two');
+  await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
+  await expect.poll(() => page.evaluate(async () => Boolean(
+    (await navigator.serviceWorker.getRegistration()).waiting,
+  ))).toBe(true);
+  await expect(page.getByText('A new version is ready.')).toBeVisible();
+  const waitingCaches = await page.evaluate(async () => ({
+    caches: await caches.keys(),
+    waiting: Boolean((await navigator.serviceWorker.getRegistration()).waiting),
+  }));
+  expect(waitingCaches.waiting).toBe(true);
+  expect(waitingCaches.caches.filter(name => name.startsWith('mcilroy-shell-'))).toHaveLength(2);
+
+  await Promise.all([
+    page.waitForEvent('load'),
+    page.getByRole('button', { name: 'Update now' }).click(),
+  ]);
+  await expect.poll(() => page.evaluate(async () => (
+    (await caches.keys()).filter(name => name.startsWith('mcilroy-shell-')).length
+  ))).toBe(1);
+  const transfer = await page.evaluate(async () => (await fetch('/incoming-transfer')).json());
+  expect(transfer).toEqual({ name: 'update.txt', contents: 'survives update' });
+
+  const controllerBeforeFailedInstall = await page.evaluate(() => navigator.serviceWorker.controller.scriptURL);
+  await page.request.get('/__smoke/release/failed');
+  await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()).update());
+  await expect.poll(() => page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    return registration.installing ? registration.installing.state : 'none';
+  }), { timeout: 10000 }).toBe('none');
+  const afterFailedInstall = await page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    return {
+      caches: await caches.keys(),
+      controller: navigator.serviceWorker.controller.scriptURL,
+      waiting: Boolean(registration.waiting),
+    };
+  });
+  expect(afterFailedInstall.waiting).toBe(false);
+  expect(afterFailedInstall.controller).toBe(controllerBeforeFailedInstall);
+  expect(afterFailedInstall.caches.filter(name => name.startsWith('mcilroy-shell-'))).toHaveLength(1);
+
+  await page.evaluate(() => new Promise(resolve => {
+    const image = new Image();
+    image.onload = image.onerror = resolve;
+    image.src = '/missing-runtime.png';
+  }));
+  const cachedFailure = await page.evaluate(async () => {
+    const shell = (await caches.keys()).find(name => name.startsWith('mcilroy-shell-'));
+    return Boolean(await (await caches.open(shell)).match('/missing-runtime.png'));
+  });
+  expect(cachedFailure).toBe(false);
 });

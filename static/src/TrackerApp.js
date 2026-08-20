@@ -89,7 +89,10 @@ const RoutineDestination = lazy(() => import('./components/TrackerOverlays').the
 const RoutineCopyDialog = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.RoutineCopyDialog })));
 const SaveTemplateDialog = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.SaveTemplateDialog })));
 const TrackerNotices = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TrackerNotices })));
-const TrackerScreenFallback = ({ label }) => <div className="loading-screen">Opening {label}…</div>;
+const TrackerScreenFallback = ({ label, error, onRetry }) => <div className="loading-screen">
+  <p>{error || `Opening ${label}…`}</p>
+  {error && <button className="secondary-button" onClick={onRetry}>Retry</button>}
+</div>;
 
 export const createSerializedRoutineWriter = persist => {
   let tail = null;
@@ -168,6 +171,22 @@ export const mergeRoutineRead = (current, records, requestedGeneration, currentG
     if (!known.has(item.id)) known.set(item.id, item);
   });
   return [...known.values()];
+};
+
+export const createControllerChangeHandler = (initiallyControlled, reloadPage) => {
+  let wasControlled = initiallyControlled;
+  let reloading = false;
+  return () => {
+    // The first controller on a pristine install makes the current page
+    // controlled; only a later replacement controller represents an update.
+    if (!wasControlled) {
+      wasControlled = true;
+      return;
+    }
+    if (reloading) return;
+    reloading = true;
+    reloadPage();
+  };
 };
 
 export const trackerLoadPolicy = view => ({
@@ -431,6 +450,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [message, setMessage] = useState('');
   const [persistent, setPersistent] = useState(false);
   const [profileRoutinesLoaded, setProfileRoutinesLoaded] = useState(false);
+  const [profileRoutinesError, setProfileRoutinesError] = useState('');
+  const [profileRoutinesRetry, setProfileRoutinesRetry] = useState(0);
   const [todayRoutinesLoaded, setTodayRoutinesLoaded] = useState(false);
   const [templatesLoaded, setTemplatesLoaded] = useState(false);
   const [updateRegistration, setUpdateRegistration] = useState(null);
@@ -453,7 +474,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const incomingTransferRef = useRef(false);
   const overlayTaskRef = useRef(null);
   const routinesRef = useRef([]);
+  const loadedProfileRoutinesFor = useRef();
   const profileLoadGeneration = useRef(0);
+  const todayLoadGeneration = useRef(0);
   const routineWriterRef = useRef();
   if (!routineWriterRef.current) routineWriterRef.current = createSerializedRoutineWriter(save);
   const showWorkout = useCallback(target => {
@@ -478,28 +501,36 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       .finally(() => setLoading(false));
   }, []);
 
+  const profile = profiles.find(item => item.id === selectedProfileId);
+  const todayRoutineKey = todayRoutineIds(profile).join('|');
+  const todayIds = useMemo(() => todayRoutineKey ? todayRoutineKey.split('|') : [], [todayRoutineKey]);
+
   useEffect(() => {
     if (loading || !selectedProfileId) return undefined;
-    const generation = ++profileLoadGeneration.current;
-    const selected = profiles.find(item => item.id === selectedProfileId);
+    const generation = ++todayLoadGeneration.current;
     setTodayRoutinesLoaded(false);
-    setProfileRoutinesLoaded(false);
-    Promise.all(todayRoutineIds(selected)
+    Promise.all(todayIds
       .map(id => get('routines', id)))
       .then(records => {
-        if (generation !== profileLoadGeneration.current) return;
+        if (generation !== todayLoadGeneration.current) return;
         // Merge by id instead of replacing the cache: a slower read must not discard a
         // routine already updated by an action in this page session.
-        setRoutines(current => mergeRoutineRead(current, records, generation, profileLoadGeneration.current));
+        setRoutines(current => mergeRoutineRead(current, records, generation, todayLoadGeneration.current));
         setTodayRoutinesLoaded(true);
       })
-      .catch(error => { if (generation === profileLoadGeneration.current) setMessage(error.message); });
-    return () => { profileLoadGeneration.current += 1; };
-  }, [loading, profiles, selectedProfileId]);
+      .catch(error => { if (generation === todayLoadGeneration.current) setMessage(error.message); });
+    return () => { todayLoadGeneration.current += 1; };
+  }, [loading, selectedProfileId, todayIds]);
 
   useEffect(() => {
     if (loading || !selectedProfileId || !trackerLoadPolicy(view).profileRoutines) return;
-    const generation = profileLoadGeneration.current;
+    if (loadedProfileRoutinesFor.current === selectedProfileId) {
+      setProfileRoutinesLoaded(true);
+      return;
+    }
+    const generation = ++profileLoadGeneration.current;
+    setProfileRoutinesLoaded(false);
+    setProfileRoutinesError('');
     getAllByIndex('routines', 'profileId', selectedProfileId).then(records => {
       if (generation !== profileLoadGeneration.current) return;
       setRoutines(current => {
@@ -510,9 +541,17 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         });
         return [...known.values()];
       });
+      // A full profile index read is reusable across secondary screens. Routine
+      // actions keep this cache coherent through their normal state updates; only
+      // operations that replace an unknown portion of storage invalidate it.
+      loadedProfileRoutinesFor.current = selectedProfileId;
       setProfileRoutinesLoaded(true);
-    }).catch(error => setMessage(error.message));
-  }, [loading, selectedProfileId, view]);
+    }).catch(error => {
+      if (generation !== profileLoadGeneration.current) return;
+      setProfileRoutinesError(error.message);
+    });
+    return () => { profileLoadGeneration.current += 1; };
+  }, [loading, profileRoutinesRetry, selectedProfileId, view]);
 
   useEffect(() => {
     if (loading || !trackerLoadPolicy(view).templates || templatesLoaded) return;
@@ -527,24 +566,29 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   useEffect(() => {
     const handleUpdate = event => setUpdateRegistration(event.detail);
-    const shouldReloadForUpdate = Boolean(navigator.serviceWorker?.controller);
-    let reloading = false;
-    const reload = () => {
-      if (!shouldReloadForUpdate || reloading) return;
-      reloading = true;
-      window.location.reload();
-    };
+    let disposed = false;
+    let stopObservingUpdates = () => {};
+    const reload = createControllerChangeHandler(
+      Boolean(navigator.serviceWorker?.controller),
+      () => window.location.reload(),
+    );
     window.addEventListener('app-update-available', handleUpdate);
     navigator.serviceWorker?.addEventListener('controllerchange', reload);
+    import('./serviceWorkerUpdates').then(({ observeServiceWorkerUpdates }) => {
+      const stop = observeServiceWorkerUpdates(setUpdateRegistration);
+      if (disposed) stop();
+      else stopObservingUpdates = stop;
+    });
     return () => {
+      disposed = true;
       window.removeEventListener('app-update-available', handleUpdate);
       navigator.serviceWorker?.removeEventListener('controllerchange', reload);
+      stopObservingUpdates();
       // The shared client owns every backup, CSV, transfer, and import task.
       cancelDataTasks();
     };
   }, []);
 
-  const profile = profiles.find(item => item.id === selectedProfileId);
   // Partition once when stored routines change. These lists feed most tracker views, so
   // avoiding three full filter/sort passes also prevents incidental UI state from rescanning
   // a large history while preserving the existing newest-first ordering.
@@ -604,6 +648,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     routinesRef.current = allRoutines;
     setTemplates(allTemplates);
     setTemplatesLoaded(true);
+    loadedProfileRoutinesFor.current = null;
     return { profiles: allProfiles, routines: allRoutines, templates: allTemplates };
   };
 
@@ -1033,6 +1078,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       setProfiles(current => [...current.filter(item => !profileResults.has(item.id)), ...profileResults.values()]);
       setRoutines(current => [...current.filter(item => !routineResults.has(item.id)), ...routineResults.values()]);
       setTemplates(current => [...current.filter(item => !templateResults.has(item.id)), ...templateResults.values()]);
+      // Import plans may describe only changed records, so the in-memory routine
+      // list no longer proves that any profile is a complete indexed snapshot.
+      loadedProfileRoutinesFor.current = null;
+      setProfileRoutinesLoaded(false);
       const summary = importPlanSummary(importPlan);
       setImportPlan(null);
       flash(`Import complete: ${summary.copy} copied, ${summary.merge} merged, ${summary.skip} skipped.`);
@@ -1071,27 +1120,46 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       deleteByIndex: { routines: [{ indexName: 'profileId', key: profile.id }] },
     });
     setProfiles(remaining);
+    loadedProfileRoutinesFor.current = null;
     setDefaultProfileId(nextDefaultProfileId);
     setRoutines(current => current.filter(item => item.profileId !== profile.id));
     setSelectedProfileId(remaining[0]?.id || null);
     setView('today');
   };
 
-  if (loading) return <div className="loading-screen">Opening your training log…</div>;
+  // Notices belong above screen routing so an update remains actionable during
+  // loading, onboarding, and profile creation without rerendering screen trees.
+  const notices = (message || updateRegistration) && (
+    <Suspense fallback={null}>
+      <TrackerNotices message={message} updateRegistration={updateRegistration} />
+    </Suspense>
+  );
+  if (loading) return <>{notices}<div className="loading-screen">Opening your training log…</div></>;
   if (!profiles.length || addingProfile) return (
-    <main className="onboarding">
-      {addingProfile && <button className="text-button" type="button" onClick={() => setAddingProfile(false)}>← Back</button>}
-      <ProfileForm onSave={addProfile} title={profiles.length ? 'Add another person' : 'Who is training?'} />
-    </main>
+    <>
+      {notices}
+      <main className="onboarding">
+        {addingProfile && <button className="text-button" type="button" onClick={() => setAddingProfile(false)}>← Back</button>}
+        <ProfileForm onSave={addProfile} title={profiles.length ? 'Add another person' : 'Who is training?'} />
+      </main>
+    </>
   );
 
   return (
     <div className="site-shell">
+      {notices}
       {workout?.session?.status !== 'inProgress' && <header className="app-header">
         <div className="header-inner">
           <button className="brand compact-brand" type="button" onClick={() => { setView('today'); setWorkoutId(null); }}><span className="brand-mark">TM</span><span>The McIlroy Method</span></button>
           <div className="profile-switcher">
-            <select aria-label="Current profile" value={profile.id} onChange={event => { setTodayRoutinesLoaded(false); setSelectedProfileId(event.target.value); setSelectedRoutineId(null); setWorkoutId(null); }}>
+            <select aria-label="Current profile" value={profile.id} onChange={event => {
+              const nextProfileId = event.target.value;
+              setTodayRoutinesLoaded(false);
+              setProfileRoutinesLoaded(false);
+              setSelectedProfileId(nextProfileId);
+              setSelectedRoutineId(null);
+              setWorkoutId(null);
+            }}>
               {profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
             </select>
             <button type="button" aria-label="Add profile" onClick={() => setAddingProfile(true)}>+</button>
@@ -1100,8 +1168,6 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       </header>}
 
       <main className="app-main">
-        {(message || updateRegistration) && <Suspense fallback={null}><TrackerNotices message={message} updateRegistration={updateRegistration} /></Suspense>}
-
         {workoutSummary ? (
           <WorkoutSummary workout={workoutSummary} onDone={() => { setWorkoutSummary(null); setView('today'); }} />
         ) : workout?.session?.status === 'inProgress' ? (
@@ -1163,13 +1229,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} archived={archivedRoutines} activeId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, archive: archivePlan, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, restore: restorePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} archived={archivedRoutines} activeId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, archive: archivePlan, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, restore: restorePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
-          !profileRoutinesLoaded ? <TrackerScreenFallback label="history" /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
+          !profileRoutinesLoaded ? <TrackerScreenFallback label="history" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
             <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
           </Suspense>
         ) : view === 'progress' ? (
-          !profileRoutinesLoaded ? <TrackerScreenFallback label="progress" /> : <Suspense fallback={<TrackerScreenFallback label="progress" />}>
+          !profileRoutinesLoaded ? <TrackerScreenFallback label="progress" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="progress" />}>
             <ProgressScreen profile={profile} routines={progressRoutines} />
           </Suspense>
         ) : (

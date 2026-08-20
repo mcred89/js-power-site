@@ -1,9 +1,14 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
-import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
+import TrackerApp from './TrackerApp';
+import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
 import { RoutineCopyDialog, TransferCreator } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
+
+jest.mock('./data/dataWorkerFactory', () => ({
+  createDataWorker: jest.fn(() => { throw new Error('Worker unavailable in Jest.'); }),
+}));
 
 describe('default profile selection', () => {
   const profiles = [{ id: 'wife' }, { id: 'husband' }];
@@ -14,6 +19,26 @@ describe('default profile selection', () => {
 
   it('falls back to the first profile when the saved default no longer exists', () => {
     expect(initialProfileId(profiles, 'deleted')).toBe('wife');
+  });
+});
+
+describe('service worker controller changes', () => {
+  it('learns the initial controller and reloads once for its replacement', () => {
+    const reload = jest.fn();
+    const controllerChanged = createControllerChangeHandler(false, reload);
+    controllerChanged();
+    expect(reload).not.toHaveBeenCalled();
+    controllerChanged();
+    controllerChanged();
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads once on the first replacement when already controlled', () => {
+    const reload = jest.fn();
+    const controllerChanged = createControllerChangeHandler(true, reload);
+    controllerChanged();
+    controllerChanged();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -81,6 +106,39 @@ describe('staged tracker loading', () => {
     const root = createRoot(div);
     await act(async () => root.render(<overlays.TrackerNotices message="Saved" updateRegistration={null} />));
     expect(div.textContent).toContain('Saved');
+    act(() => root.unmount());
+    global.IS_REACT_ACT_ENVIRONMENT = false;
+  });
+
+  it('activates the current waiting worker when the observed registration is stale', async () => {
+    global.IS_REACT_ACT_ENVIRONMENT = true;
+    const waiting = { postMessage: jest.fn() };
+    const currentRegistration = {
+      waiting, installing: null, addEventListener: jest.fn(), removeEventListener: jest.fn(),
+    };
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        controller: {},
+        getRegistration: jest.fn().mockResolvedValue(currentRegistration),
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
+    });
+    const overlays = await import('./components/TrackerOverlays');
+    const div = document.createElement('div');
+    const root = createRoot(div);
+    await act(async () => root.render(<overlays.TrackerNotices
+      message=""
+      updateRegistration={{ waiting: null }}
+    />));
+
+    await act(async () => div.querySelector('button').click());
+
+    expect(navigator.serviceWorker.getRegistration).toHaveBeenCalledTimes(1);
+    expect(waiting.postMessage).toHaveBeenCalledWith('skip-waiting');
+    expect(div.querySelector('button').disabled).toBe(true);
+    expect(div.querySelector('button').textContent).toBe('Updating…');
     act(() => root.unmount());
     global.IS_REACT_ACT_ENVIRONMENT = false;
   });
@@ -368,6 +426,24 @@ it('renders without crashing', async () => {
   const div = document.createElement('div');
   const root = createRoot(div);
   await act(async () => root.render(<App />));
+  act(() => root.unmount());
+});
+
+it('shows a waiting update while the tracker is onboarding', async () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const registration = { waiting: { postMessage: jest.fn() } };
+  await act(async () => root.render(<TrackerApp appearance="system" onAppearanceChange={() => {}} />));
+  expect(div.textContent).toContain('Who is training?');
+
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent('app-update-available', { detail: registration }));
+    await Promise.resolve();
+  });
+
+  expect(div.textContent).toContain('A new version is ready.');
+  expect([...div.querySelectorAll('button')].map(button => button.textContent)).toContain('Update now');
   act(() => root.unmount());
 });
 

@@ -1,11 +1,15 @@
 const base = require('@playwright/test');
 
 const test = base.test.extend({
-  page: async ({ page }, use, testInfo) => {
+  expectedConsoleErrors: [[], { option: true }],
+  page: async ({ page, expectedConsoleErrors }, use, testInfo) => {
     const errors = [];
     page.on('pageerror', error => errors.push(`Page error: ${error.message}`));
     page.on('console', message => {
-      if (message.type() === 'error') errors.push(`Console error: ${message.text()}`);
+      const diagnostic = `${message.text()} ${message.location().url || ''}`;
+      if (message.type() === 'error' && !expectedConsoleErrors.some(pattern => pattern.test(diagnostic))) {
+        errors.push(`Console error: ${message.text()}`);
+      }
     });
 
     if (testInfo.project.name === 'pwa-mobile') {

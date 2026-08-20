@@ -2,7 +2,30 @@ import React, { useState } from 'react';
 import { importPlanSummary } from '../data/importBackup';
 import { canShareTransfer, createSharedTransferContents, download } from '../data/transferUi';
 
-export const TrackerNotices = ({ message, updateRegistration }) => <>{message && <div className="toast" role="status">{message}</div>}{updateRegistration && <div className="update-banner"><span>A new version is ready.</span><button type="button" onClick={() => updateRegistration.waiting?.postMessage('skip-waiting')}>Update now</button></div>}</>;
+export const TrackerNotices = ({ message, updateRegistration }) => {
+  const [updating, setUpdating] = useState(false);
+  const activateUpdate = async () => {
+    if (updating) return;
+    setUpdating(true);
+    let currentRegistration = null;
+    try {
+      currentRegistration = await navigator.serviceWorker?.getRegistration?.();
+    } catch {
+      // The registration passed by the observer remains a safe fallback.
+    }
+    const waitingWorker = currentRegistration?.waiting || updateRegistration?.waiting;
+    if (!waitingWorker) {
+      setUpdating(false);
+      return;
+    }
+    try {
+      waitingWorker.postMessage('skip-waiting');
+    } catch {
+      setUpdating(false);
+    }
+  };
+  return <>{message && <div className="toast" role="status">{message}</div>}{updateRegistration && <div className="update-banner"><span>A new version is ready.</span><button type="button" disabled={updating} onClick={activateUpdate}>{updating ? 'Updating…' : 'Update now'}</button></div>}</>;
+};
 
 export const ImportPreview = ({ plan, busy, onCancel, onConfirm }) => {
   const summary = importPlanSummary(plan);
