@@ -51,7 +51,7 @@ export const HistoryScreen = memo(({ eyebrow, routine, completed, PlanSetup, Wor
         <>
           {/* Keep only this window mounted: long histories must not grow the DOM without bound. */}
           <div className="history-workout-list" ref={listRef}>
-            {visible.map(item => <div className="history-workout" key={item.id}><WorkoutCard workout={item} onOpen={() => onOpen(item)} /></div>)}
+            {visible.map(item => <div className="history-workout" key={item.id}><WorkoutCard routine={routine} workout={item} onOpen={() => onOpen(item)} /></div>)}
           </div>
           {visible.length < completed.length && (
             <button className="secondary-button full-button" type="button" onClick={showOlder}>

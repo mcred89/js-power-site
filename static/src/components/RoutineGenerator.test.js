@@ -29,6 +29,15 @@ describe('mesocycle max progression', () => {
       maxDead: 630,
     });
   });
+
+  it('keeps maxes unchanged for same and projected adaptive progression', () => {
+    expect(getEffectiveMaxes({ ...plan, maxProgressionMode: 'same' }, 2)).toEqual({
+      maxSquat: 500, maxPress: 225, maxDead: 600,
+    });
+    expect(getEffectiveMaxes({ ...plan, maxProgressionMode: 'adaptive' }, 2)).toEqual({
+      maxSquat: 500, maxPress: 225, maxDead: 600,
+    });
+  });
 });
 
 describe('routine exports', () => {

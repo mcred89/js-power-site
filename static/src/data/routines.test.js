@@ -1,5 +1,6 @@
 import {
   adjustSessionSet,
+  adaptiveCycleMaxes,
   archiveRoutine,
   completeSessionSet,
   correctMaxes,
@@ -11,6 +12,7 @@ import {
   finishWorkoutSession,
   parsePrescription,
   reopenWorkoutSession,
+  refreshAdaptiveProgression,
   routineHistoryToCsv,
   routinePlanToCsv,
   restoreRoutine,
@@ -89,6 +91,69 @@ describe('tracked routines', () => {
     routine = correctMaxes(routine, { maxSquat: '600', maxPress: '225', maxDead: '600' });
 
     expect(visibleExercise(routine.workouts[0].exercises[0])).toMatchObject({ weight: '350', prescription: '3 × 5' });
+  });
+
+  it('raises adaptive future cycles from the best completed estimate and propagates it', () => {
+    let routine = createRoutine('profile-1', 'Adaptive plan', {
+      ...inputs,
+      mesoMode: true,
+      maxProgressionMode: 'adaptive',
+      microCycles: [
+        { duration: '3 weeks', volume: 'Low' },
+        { duration: '3 weeks', volume: 'Low' },
+        { duration: '3 weeks', volume: 'Low' },
+      ],
+    });
+    routine = startWorkoutSession(routine, routine.workouts[0].id, '2026-01-01T00:00:00.000Z');
+    const session = routine.workouts[0].session;
+    routine = adjustSessionSet(routine, routine.workouts[0].id, session.exercises[0].exerciseId, session.exercises[0].sets[0].id, {
+      actualWeight: '405', actualReps: '10',
+    });
+    routine = completeSessionSet(routine, routine.workouts[0].id, session.exercises[0].exerciseId, session.exercises[0].sets[0].id, '2026-01-01T00:01:00.000Z');
+    routine = finishWorkoutSession(routine, routine.workouts[0].id, '2026-01-01T00:02:00.000Z');
+    const refreshed = refreshAdaptiveProgression(routine);
+
+    expect(refreshed.changed).toBe(true);
+    expect(adaptiveCycleMaxes(refreshed.routine)).toEqual([
+      { maxSquat: 500, maxPress: 225, maxDead: 600 },
+      { maxSquat: 540, maxPress: 225, maxDead: 600 },
+      { maxSquat: 540, maxPress: 225, maxDead: 600 },
+    ]);
+    expect(refreshed.routine.workouts[15].effectiveMaxes.maxSquat).toBe(540);
+    expect(visibleExercise(refreshed.routine.workouts[15].exercises[0]).weight).toBe(355);
+    expect(refreshed.routine.workouts[30].effectiveMaxes.maxSquat).toBe(540);
+    expect(refreshed.routine.workouts[0].effectiveMaxes.maxSquat).toBe(500);
+  });
+
+  it('uses the prior max as an adaptive floor and freezes an active future workout', () => {
+    let routine = createRoutine('profile-1', 'Adaptive plan', {
+      ...inputs,
+      mesoMode: true,
+      maxProgressionMode: 'adaptive',
+      microCycles: [
+        { duration: '3 weeks', volume: 'Low' },
+        { duration: '3 weeks', volume: 'Low' },
+      ],
+    });
+    routine = startWorkoutSession(routine, routine.workouts[15].id, '2026-01-01T00:00:00.000Z');
+    routine = {
+      ...routine,
+      workouts: routine.workouts.map((workout, index) => index === 0 ? {
+        ...workout,
+        completedAt: '2026-01-02T00:00:00.000Z',
+        session: {
+          primaryExerciseId: 'primary',
+          exercises: [{ exerciseId: 'primary', movement: 'Squat', sets: [
+            { status: 'completed', actualWeight: 380, actualReps: 10 },
+          ] }],
+        },
+      } : workout),
+    };
+    const refreshed = refreshAdaptiveProgression(routine).routine;
+
+    expect(refreshed.workouts[15].effectiveMaxes.maxSquat).toBe(500);
+    expect(refreshed.workouts[15].session.status).toBe('inProgress');
+    expect(refreshed.workouts[18].effectiveMaxes.maxSquat).toBe(505);
   });
 
   it('duplicates the current plan without history or shared nested data', () => {

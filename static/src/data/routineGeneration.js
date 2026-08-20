@@ -30,11 +30,20 @@ const getWeekGroups = duration => duration === '3 weeks'
   ? [[0, 1], [2, 3], [4]]
   : [[0], [1], [2], [3], [4]];
 
-export const getEffectiveMaxes = (props, cycleIndex) => ({
-  maxSquat: Number(props.maxSquat) + (Number(props.squatIncrement) || 0) * cycleIndex,
-  maxPress: Number(props.maxPress) + (Number(props.pressIncrement) || 0) * cycleIndex,
-  maxDead: Number(props.maxDead) + (Number(props.deadliftIncrement) || 0) * cycleIndex,
-});
+export const MAX_PROGRESSION_MODES = {
+  SAME: 'same',
+  FIXED: 'fixed',
+  ADAPTIVE: 'adaptive',
+};
+
+export const getEffectiveMaxes = (props, cycleIndex) => {
+  const fixed = !props.maxProgressionMode || props.maxProgressionMode === MAX_PROGRESSION_MODES.FIXED;
+  return {
+    maxSquat: Number(props.maxSquat) + (fixed ? (Number(props.squatIncrement) || 0) * cycleIndex : 0),
+    maxPress: Number(props.maxPress) + (fixed ? (Number(props.pressIncrement) || 0) * cycleIndex : 0),
+    maxDead: Number(props.maxDead) + (fixed ? (Number(props.deadliftIncrement) || 0) * cycleIndex : 0),
+  };
+};
 
 const getSessions = (weekIndexes, includeStrongmanDay, duration) => {
   const sessions = weekIndexes.flatMap((sourceWeek, cycleIndex) => days.map(day => ({ ...day, sourceWeek, cycleIndex })));
@@ -77,10 +86,10 @@ const getExercises = (day, props) => {
 
 // This module must stay React-free: tracker persistence imports it while calculator
 // presentation is lazy. Importing UI here would pull the website graph into standalone.
-export const buildRoutinePlan = props => {
+export const buildRoutinePlan = (props, resolvedCycleMaxes = []) => {
   const cycles = props.mesoMode ? props.microCycles : [{ duration: props.duration, volume: props.mainLiftChoice }];
   return cycles.map((cycle, cycleIndex) => {
-    const effectiveMaxes = getEffectiveMaxes(props, cycleIndex);
+    const effectiveMaxes = resolvedCycleMaxes[cycleIndex] || getEffectiveMaxes(props, cycleIndex);
     const routineProps = { ...props, ...effectiveMaxes, mainLiftChoice: cycle.volume, duration: cycle.duration };
     const weeks = getWeekGroups(cycle.duration).map(weekIndexes => (
       getSessions(weekIndexes, props.includeStrongmanDay, cycle.duration).map((day, dayIndex) => ({
@@ -107,7 +116,7 @@ export const routineToCsv = props => {
 
 export const routineToMarkdown = props => buildRoutinePlan(props).map((cycle, cycleIndex) => {
   const heading = props.mesoMode
-    ? `## Microcycle ${cycleIndex + 1}: ${cycle.duration}, ${cycle.volume} volume\n\nMaxes: Squat ${cycle.effectiveMaxes.maxSquat} lb · Press ${cycle.effectiveMaxes.maxPress} lb · Deadlift ${cycle.effectiveMaxes.maxDead} lb`
+    ? `## Microcycle ${cycleIndex + 1}: ${cycle.duration}, ${cycle.volume} volume\n\nMaxes: Squat ${cycle.effectiveMaxes.maxSquat} lb · Press ${cycle.effectiveMaxes.maxPress} lb · Deadlift ${cycle.effectiveMaxes.maxDead} lb${props.maxProgressionMode === MAX_PROGRESSION_MODES.ADAPTIVE && cycleIndex > 0 ? ' (projected; updates from completed sets)' : ''}`
     : `## ${cycle.duration}, ${cycle.volume} volume`;
   const weeks = cycle.weeks.map((week, weekIndex) => {
     const sessions = week.map(day => {

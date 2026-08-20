@@ -1,4 +1,14 @@
-export const DATABASE_VERSION = 8;
+export const DATABASE_VERSION = 9;
+
+export const addMaxProgressionMode = record => ({
+  ...record,
+  inputs: record.inputs ? {
+    ...record.inputs,
+    maxProgressionMode: Object.prototype.hasOwnProperty.call(record.inputs, 'maxProgressionMode')
+      ? record.inputs.maxProgressionMode
+      : 'fixed',
+  } : record.inputs,
+});
 
 export const addAccessoryWeakPoints = routine => ({
   ...routine,
@@ -203,6 +213,28 @@ export const databaseMigrations = {
       };
     });
   },
+  9: ({ transaction, done }) => {
+    let storesRemaining = 2;
+    const finishStore = () => {
+      storesRemaining -= 1;
+      if (storesRemaining === 0) {
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 9 });
+        done();
+      }
+    };
+    ['routines', 'templates'].forEach(storeName => {
+      const cursorRequest = transaction.objectStore(storeName).openCursor();
+      cursorRequest.onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) {
+          finishStore();
+          return;
+        }
+        cursor.update(addMaxProgressionMode(cursor.value));
+        cursor.continue();
+      };
+    });
+  },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
@@ -219,7 +251,7 @@ export const runDatabaseMigrations = (database, transaction, oldVersion, newVers
   run(oldVersion + 1);
 };
 
-export const BACKUP_VERSION = 8;
+export const BACKUP_VERSION = 9;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -274,6 +306,17 @@ export const backupMigrations = {
       : backup.routines,
     templates: Array.isArray(backup.templates)
       ? backup.templates.map(addAccessoryWeakPoints)
+      : backup.templates,
+  }),
+  9: backup => ({
+    ...backup,
+    version: 9,
+    dataSchemaVersion: 9,
+    routines: Array.isArray(backup.routines)
+      ? backup.routines.map(addMaxProgressionMode)
+      : backup.routines,
+    templates: Array.isArray(backup.templates)
+      ? backup.templates.map(addMaxProgressionMode)
       : backup.templates,
   }),
 };

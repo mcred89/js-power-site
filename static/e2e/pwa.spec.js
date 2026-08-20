@@ -65,7 +65,7 @@ test('PWA bounds long History and Progress DOM while retaining complete metrics'
   await createRoutine(page, { name: 'Long History Plan' });
   await page.evaluate(async () => {
     const database = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('mcilroy-method', 8);
+      const request = indexedDB.open('mcilroy-method', 9);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

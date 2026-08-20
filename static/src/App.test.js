@@ -462,6 +462,33 @@ it('shows effective maxes on a single-cycle workout card', () => {
   act(() => root.unmount());
 });
 
+it('shows compact adaptive status on future workout cards', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const workout = {
+    cycleIndex: 1,
+    cycleLabel: 'Cycle 2',
+    weekLabel: 'Week 1',
+    name: 'Squat',
+    effectiveMaxes: { maxSquat: 315, maxPress: 185, maxDead: 405 },
+  };
+  const routine = {
+    inputs: {
+      mesoMode: true,
+      maxProgressionMode: 'adaptive',
+      maxSquat: '315', maxPress: '185', maxDead: '405',
+      microCycles: [{}, {}],
+    },
+    workouts: [{ cycleIndex: 0, completedAt: null }, workout],
+  };
+
+  act(() => root.render(<WorkoutCard routine={routine} workout={workout} onOpen={() => {}} />));
+
+  expect(div.querySelector('.adaptive-max-status').textContent).toBe('Adaptive · projected from Cycle 1');
+  act(() => root.unmount());
+});
+
 it('renders without crashing', async () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const div = document.createElement('div');

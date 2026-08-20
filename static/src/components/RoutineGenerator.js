@@ -62,7 +62,7 @@ const Routine = props => {
             {props.mesoMode && (
               <div className="microcycle-heading">
                 <div><p className="eyebrow">Microcycle {cycleIndex + 1}</p><h2>{cycle.duration} · {cycle.volume} volume</h2></div>
-                <p>Maxes: Squat {cycle.effectiveMaxes.maxSquat} · Press {cycle.effectiveMaxes.maxPress} · Deadlift {cycle.effectiveMaxes.maxDead} lb</p>
+                <p>Maxes: Squat {cycle.effectiveMaxes.maxSquat} · Press {cycle.effectiveMaxes.maxPress} · Deadlift {cycle.effectiveMaxes.maxDead} lb{props.maxProgressionMode === 'adaptive' && cycleIndex > 0 ? ' · projected' : ''}</p>
               </div>
             )}
             {cycle.weeks.map((week, weekIndex) => (

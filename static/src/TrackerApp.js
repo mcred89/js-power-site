@@ -3,6 +3,7 @@ import { WorkoutSessionHistory, WorkoutSummary } from './components/WorkoutSessi
 import { ActiveWorkoutScreen } from './components/EagerTrackerScreens';
 import {
   adjustSessionSet,
+  adaptiveStatusForWorkout,
   archiveRoutine,
   clearExerciseOverrides,
   completeSessionSet,
@@ -13,6 +14,7 @@ import {
   duplicateRoutine,
   finishWorkoutSession,
   reopenWorkoutSession,
+  refreshAdaptiveProgression,
   restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
@@ -310,9 +312,10 @@ const WorkoutExercises = ({ routine, workout, editable, onChange }) => (
   </div>
 );
 
-const WorkoutMaxes = ({ workout }) => workout.effectiveMaxes ? (
+const WorkoutMaxes = ({ routine, workout }) => workout.effectiveMaxes ? (
   <small className="workout-maxes">
     Maxes: Squat {workout.effectiveMaxes.maxSquat} · Press {workout.effectiveMaxes.maxPress} · Deadlift {workout.effectiveMaxes.maxDead} lb
+    {adaptiveStatusForWorkout(routine, workout) && <span className="adaptive-max-status">{adaptiveStatusForWorkout(routine, workout)}</span>}
   </small>
 ) : null;
 
@@ -322,9 +325,9 @@ export const formatCompletedDate = completedAt => new Intl.DateTimeFormat('en-US
   year: 'numeric',
 }).format(new Date(completedAt));
 
-export const WorkoutCard = ({ workout, onOpen }) => (
+export const WorkoutCard = ({ routine, workout, onOpen }) => (
   <button className="workout-card" type="button" onClick={onOpen}>
-    <span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong>{workout.completedAt && <small>Completed {formatCompletedDate(workout.completedAt)}</small>}<WorkoutMaxes workout={workout} /></span>
+    <span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong>{workout.completedAt && <small>Completed {formatCompletedDate(workout.completedAt)}</small>}<WorkoutMaxes routine={routine} workout={workout} /></span>
     <span aria-hidden="true">→</span>
   </button>
 );
@@ -413,6 +416,11 @@ export const ConfirmationModal = ({ title, children, confirmLabel, onCancel, onC
 );
 
 const setupValue = value => value === true ? 'Yes' : value === false ? 'No' : value || 'Not set';
+const progressionLabel = mode => ({
+  same: 'Keep maxes the same',
+  fixed: 'Fixed increases',
+  adaptive: 'Adaptive from completed sets',
+}[mode || 'fixed']);
 
 export const PlanSetup = ({ routine }) => {
   const { inputs = {} } = routine;
@@ -437,11 +445,12 @@ export const PlanSetup = ({ routine }) => {
             <ol className="setup-cycles">
               {(inputs.microCycles || []).map((cycle, index) => <li key={index}>Cycle {index + 1}: {setupValue(cycle.duration)}, {setupValue(cycle.volume)} volume</li>)}
             </ol>
-            <dl className="setup-grid">
+            <p><strong>Max progression:</strong> {progressionLabel(inputs.maxProgressionMode)}</p>
+            {(inputs.maxProgressionMode || 'fixed') === 'fixed' && <dl className="setup-grid">
               <div><dt>Squat increase</dt><dd>{setupValue(inputs.squatIncrement)} lb</dd></div>
               <div><dt>Press increase</dt><dd>{setupValue(inputs.pressIncrement)} lb</dd></div>
               <div><dt>Deadlift increase</dt><dd>{setupValue(inputs.deadliftIncrement)} lb</dd></div>
-            </dl>
+            </dl>}
           </>
         ) : <p>{setupValue(inputs.duration)} · {setupValue(inputs.mainLiftChoice)} volume</p>}
       </div>
@@ -874,7 +883,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const finishActiveWorkout = async () => {
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
-    const updated = finishWorkoutSession(current, workout.id);
+    const finished = finishWorkoutSession(current, workout.id);
+    const adaptive = refreshAdaptiveProgression(finished);
+    const updated = adaptive.routine;
     const updatedProfile = profileAfterFinishedRoutine(profile, routine.id);
     const shouldClear = updatedProfile !== profile;
     await saveRoutine(updated, record => applyBatch({
@@ -885,6 +896,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     }), true);
     if (shouldClear) setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
     setWorkoutSummary(updated.workouts.find(item => item.id === workout.id));
+    if (adaptive.changed) flash('Adaptive maxes updated for future cycles.');
     setFinishPrompt(null);
     setWorkoutId(null);
   };
@@ -929,7 +941,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     }
     if (target.session) {
       const current = routinesRef.current.find(item => item.id === routine.id) || routine;
-      const updatedRoutine = reopenWorkoutSession(current, target.id);
+      const updatedRoutine = refreshAdaptiveProgression(reopenWorkoutSession(current, target.id)).routine;
       const updatedProfile = profileWithActiveWorkout(profile, routine.id);
       await saveRoutine(updatedRoutine, record => applyBatch({
         puts: { routines: [record], profiles: [updatedProfile] },
@@ -1254,7 +1266,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             <button className="text-button" type="button" onClick={() => { setWorkoutId(null); setEditingWorkout(false); }}>← Back</button>
             <p className="eyebrow">{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</p>
             <div className="detail-heading"><h1>{workout.name}</h1>{!workout.completedAt && <button className="secondary-button" type="button" onClick={() => setEditingWorkout(!editingWorkout)}>{editingWorkout ? 'Done editing' : 'Edit exercises'}</button>}</div>
-            <WorkoutMaxes workout={workout} />
+            <WorkoutMaxes routine={routine} workout={workout} />
             {workout.session?.status === 'completed'
               ? <WorkoutSessionHistory workout={workout} />
               : <WorkoutExercises routine={routine} workout={workout} editable={editingWorkout} onChange={editExercise} />}
@@ -1276,11 +1288,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
                 <div className="next-workout">
                   <p>{pending[0].cycleLabel && <>{pending[0].cycleLabel} · </>}{pending[0].weekLabel}</p>
                   <h2>{pending[0].name}</h2>
-                  <WorkoutMaxes workout={pending[0]} />
+                  <WorkoutMaxes routine={routine} workout={pending[0]} />
                   <WorkoutExercises routine={routine} workout={pending[0]} editable={false} />
                   <button className="primary-button" type="button" onClick={() => showWorkout(pending[0])}>Open workout</button>
                 </div>
-                {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
+                {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
               </>
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>

@@ -17,6 +17,7 @@ const defaultFormState = {
   durationChoices: ['3 weeks', '5 weeks'],
   duration: '5 weeks',
   mesoMode: false,
+  maxProgressionMode: 'fixed',
   microCycles: [
     { duration: '5 weeks', volume: 'Low' },
     { duration: '5 weeks', volume: 'Low' },
@@ -218,14 +219,30 @@ export class RoutineForm extends Component {
                 ))}
               </div>
               <button className="add-cycle" type="button" onClick={this.addCycle}>+ Add microcycle</button>
-              <div className="increment-section">
+              <fieldset className="option-group progression-mode">
+                <legend className="option-title">Max progression</legend>
+                <div className="option-list progression-options">
+                  {[
+                    ['same', 'Keep maxes the same'],
+                    ['fixed', 'Increase by set amounts'],
+                    ['adaptive', 'Adapt from completed sets'],
+                  ].map(([value, label]) => (
+                    <label className="option-label" key={value}>
+                      <input className="option-input" required type="radio" name="maxProgressionMode" value={value} checked={this.state.maxProgressionMode === value} onChange={this.handleChange} />
+                      <span className="option-text">{label}</span>
+                    </label>
+                  ))}
+                </div>
+                {this.state.maxProgressionMode === 'adaptive' && <p className="field-help">Later cycles begin as projections. Completed main-lift sets can raise future maxes and prescriptions automatically.</p>}
+              </fieldset>
+              {this.state.maxProgressionMode === 'fixed' && <div className="increment-section">
                 <p className="option-title">Max increase after each microcycle</p>
                 <div className="field-grid three-fields">
                   <NumberInput name="squatIncrement" label="Squat increase" controlFunc={this.handleChange} content={this.state.squatIncrement} min={0} max={100} />
                   <NumberInput name="pressIncrement" label="Press increase" controlFunc={this.handleChange} content={this.state.pressIncrement} min={0} max={100} />
                   <NumberInput name="deadliftIncrement" label="Deadlift increase" controlFunc={this.handleChange} content={this.state.deadliftIncrement} min={0} max={100} />
                 </div>
-              </div>
+              </div>}
             </fieldset>
           )}
           {(this.state.mainLiftChoice === 'Low' || (this.state.mesoMode && this.state.microCycles.some(cycle => cycle.volume === 'Low'))) && (

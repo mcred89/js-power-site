@@ -1,20 +1,10 @@
-export const MAIN_LIFTS = ['Squat', 'Press', 'Deadlift'];
+import { estimatedOneRepMax, MAIN_LIFTS, normalizeMainLift } from './estimatedMax';
+
+export { estimatedOneRepMax, MAIN_LIFTS, normalizeMainLift } from './estimatedMax';
 
 const numeric = value => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-};
-
-export const normalizeMainLift = movement => {
-  const normalized = String(movement || '').trim().toLowerCase();
-  return MAIN_LIFTS.find(lift => lift.toLowerCase() === normalized) || null;
-};
-
-export const estimatedOneRepMax = (weight, reps) => {
-  const parsedWeight = numeric(weight);
-  const parsedReps = numeric(reps);
-  if (parsedWeight === null || parsedReps === null || parsedWeight <= 0 || parsedReps <= 0) return null;
-  return parsedWeight * (1 + parsedReps / 30);
 };
 
 const startOfDay = value => {

@@ -1,4 +1,5 @@
-import { buildRoutinePlan } from './routineGeneration';
+import { completedPrimaryEstimate, MAIN_LIFTS } from './estimatedMax';
+import { buildRoutinePlan, MAX_PROGRESSION_MODES } from './routineGeneration';
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -97,11 +98,11 @@ export const routineHistoryCsvRows = routine => [...routineHistoryCsvRowIterator
 
 export const routineHistoryToCsv = routine => routineHistoryCsvRows(routine).join('\n');
 
-export const createRoutine = (profileId, name, inputs) => {
+export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) => {
   let sequence = 0;
   const workouts = [];
 
-  buildRoutinePlan(inputs).forEach((cycle, cycleIndex) => {
+  buildRoutinePlan(inputs, resolvedCycleMaxes).forEach((cycle, cycleIndex) => {
     cycle.weeks.forEach((week, weekIndex) => {
       week.forEach(day => {
         sequence += 1;
@@ -621,6 +622,89 @@ export const clearExerciseOverrides = (routine, workoutId, exerciseId) => ({
   )),
 });
 
+const maxKeyForLift = {
+  Squat: 'maxSquat',
+  Press: 'maxPress',
+  Deadlift: 'maxDead',
+};
+
+const roundToNearestFive = value => Math.round(value / 5) * 5;
+
+export const adaptiveCycleMaxes = routine => {
+  const inputs = routine.inputs || {};
+  const cycleCount = inputs.mesoMode ? (inputs.microCycles || []).length : 1;
+  const starting = {
+    maxSquat: Number(inputs.maxSquat),
+    maxPress: Number(inputs.maxPress),
+    maxDead: Number(inputs.maxDead),
+  };
+  const bestByCycle = Array.from({ length: cycleCount }, () => ({}));
+  (routine.workouts || []).forEach(workout => {
+    const estimate = completedPrimaryEstimate(workout);
+    if (!estimate || !bestByCycle[workout.cycleIndex]) return;
+    bestByCycle[workout.cycleIndex][estimate.lift] = Math.max(
+      bestByCycle[workout.cycleIndex][estimate.lift] || 0,
+      estimate.value,
+    );
+  });
+  const maxes = [starting];
+  for (let cycleIndex = 1; cycleIndex < cycleCount; cycleIndex += 1) {
+    const previous = maxes[cycleIndex - 1];
+    const previousBest = bestByCycle[cycleIndex - 1];
+    maxes.push(MAIN_LIFTS.reduce((result, lift) => {
+      const key = maxKeyForLift[lift];
+      const estimate = previousBest[lift] ? roundToNearestFive(previousBest[lift]) : previous[key];
+      return { ...result, [key]: Math.max(previous[key], estimate) };
+    }, {}));
+  }
+  return maxes;
+};
+
+export const refreshAdaptiveProgression = routine => {
+  if (!routine.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE) {
+    return { routine, changed: false };
+  }
+  const cycleMaxes = adaptiveCycleMaxes(routine);
+  const regenerated = createRoutine(routine.profileId, routine.name, routine.inputs, cycleMaxes);
+  const generatedBySequence = new Map(regenerated.workouts.map(workout => [workout.sequence, workout]));
+  let changed = false;
+  const workouts = routine.workouts.map(workout => {
+    const generatedWorkout = generatedBySequence.get(workout.sequence);
+    if (workout.completedAt || workout.session?.status === 'inProgress' || !generatedWorkout) return workout;
+    const next = {
+      ...workout,
+      effectiveMaxes: generatedWorkout.effectiveMaxes,
+      exercises: generatedWorkout.exercises.map((exercise, exerciseIndex) => ({
+        ...exercise,
+        id: workout.exercises[exerciseIndex]?.id || exercise.id,
+        overrides: workout.exercises[exerciseIndex]?.overrides || {},
+      })),
+    };
+    if (JSON.stringify(next.effectiveMaxes) !== JSON.stringify(workout.effectiveMaxes) ||
+        JSON.stringify(next.exercises.map(exercise => exercise.generated)) !==
+          JSON.stringify(workout.exercises.map(exercise => exercise.generated))) changed = true;
+    return next;
+  });
+  return {
+    changed,
+    routine: changed ? { ...routine, workouts, updatedAt: now() } : routine,
+  };
+};
+
+export const adaptiveStatusForWorkout = (routine, workout) => {
+  if (!routine?.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE || !workout?.cycleIndex) return null;
+  const previousIndex = workout.cycleIndex - 1;
+  const previous = routine.workouts.filter(item => item.cycleIndex === previousIndex);
+  const allComplete = previous.length > 0 && previous.every(item => item.completedAt);
+  const maxes = adaptiveCycleMaxes(routine);
+  const improved = Object.keys(maxes[workout.cycleIndex] || {}).some(key => (
+    maxes[workout.cycleIndex][key] > maxes[previousIndex][key]
+  ));
+  const source = `Cycle ${workout.cycleIndex}`;
+  if (improved) return `Adaptive · updated from ${source}`;
+  return `Adaptive · ${allComplete ? 'set' : 'projected'} from ${source}`;
+};
+
 export const correctMaxes = (routine, maxes) => {
   const inputs = { ...routine.inputs, ...maxes };
   const regenerated = createRoutine(routine.profileId, routine.name, inputs);
@@ -628,13 +712,13 @@ export const correctMaxes = (routine, maxes) => {
   // chained mesocycles remain O(W); gaps from user deletions must not shift later plans.
   const generatedBySequence = [null, ...regenerated.workouts];
 
-  return {
+  const corrected = {
     ...routine,
     inputs,
     updatedAt: now(),
     workouts: routine.workouts.map(workout => {
       const generatedWorkout = generatedBySequence[workout.sequence];
-      if (workout.completedAt || !generatedWorkout) {
+      if (workout.completedAt || workout.session?.status === 'inProgress' || !generatedWorkout) {
         // Completed prescriptions are historical snapshots. Unknown sequences can come from
         // older/imported data and must also survive rather than being guessed by array position.
         return workout;
@@ -652,6 +736,7 @@ export const correctMaxes = (routine, maxes) => {
       };
     }),
   };
+  return refreshAdaptiveProgression(corrected).routine;
 };
 
 export const cloneImportedRecord = record => ({

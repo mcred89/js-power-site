@@ -64,6 +64,8 @@ button,input,select { font:inherit; }
 .remove-cycle,.add-cycle { border:0; color:var(--accent); background:transparent; cursor:pointer; font-size:13px; font-weight:750; }
 .remove-cycle:disabled { color:#adb5b0; cursor:default; }
 .add-cycle { margin-top:14px; padding:7px 0; }
+.progression-mode { margin:22px 0 0; padding:0; border:0; }
+.progression-options { grid-template-columns:repeat(3,minmax(0,1fr)); }
 .increment-section { margin-top:16px; padding-top:18px; border-top:1px solid var(--line); }
 .microcycle { display:grid; gap:16px; }
 .microcycle + .microcycle { margin-top:24px; padding-top:30px; border-top:1px solid #cfd8d2; }
@@ -157,6 +159,7 @@ body { min-width:320px; }
 .next-workout > p { margin:0 0 7px; color:var(--accent); font-size:13px; font-weight:750; }
 .next-workout > h2 { font:500 36px Georgia,serif; }
 .workout-maxes { display:block; margin-top:7px; color:var(--muted); font-size:12px; font-weight:500; line-height:1.5; }
+.adaptive-max-status { display:block; color:var(--accent); font-weight:700; }
 .exercise-list { display:grid; gap:0; margin:24px 0; }
 .exercise-row { min-height:64px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:13px 0; border-top:1px solid var(--line); }
 .exercise-row:first-child { border-top:0; }
@@ -357,6 +360,7 @@ body { min-width:320px; }
 .timing-card dd { margin:0; font-size:17px; font-weight:800; }
 
 @media(max-width:600px) {
+  .progression-options { grid-template-columns:1fr; }
   .header-inner,.app-main { width:calc(100% - 24px); }
   .compact-brand span:last-child { display:none; }
   .profile-switcher select { max-width:160px; }
