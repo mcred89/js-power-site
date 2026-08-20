@@ -13,8 +13,6 @@ import {
   duplicateRoutine,
   finishWorkoutSession,
   reopenWorkoutSession,
-  routineHistoryToCsv,
-  routinePlanToCsv,
   restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
@@ -26,7 +24,6 @@ import {
   updateExercise,
   visibleExercise,
 } from './data/routines';
-import { createTransferPackage, openTransferPackage } from './data/transferPackage';
 import {
   download,
   sharedTransferContents,
@@ -34,12 +31,10 @@ import {
 } from './data/transferUi';
 import {
   applyBatch,
-  exportBackup,
   get,
   getAll,
   getAllByIndex,
   hasPersistentStorage,
-  parseBackup,
   remove,
   requestPersistentStorage,
   save,
@@ -75,6 +70,17 @@ const HistoryScreen = lazy(() => import('./components/HistoryScreen').then(modul
 const PlansScreen = lazy(() => import('./components/PlansScreen').then(module => ({ default: module.PlansScreen })));
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(module => ({ default: module.SettingsScreen })));
 const loadImportTools = () => import('./data/importBackup');
+const DATA_TASKS = {
+  PARSE_BACKUP: 'parse-backup', PLAN_IMPORT: 'plan-import',
+  CREATE_TRANSFER: 'create-transfer',
+  PLAN_CSV: 'plan-csv', HISTORY_CSV: 'history-csv',
+};
+// Loading the worker client only when Settings data work starts keeps the installed Today shell
+// below its entry budget; adding a task must not eagerly import migration, CSV, or crypto code.
+const loadDataTaskClient = () => import('./data/dataTaskClient');
+const runDataTaskInBackground = (type, payload) => loadDataTaskClient()
+  .then(module => module.runDataTaskInBackground(type, payload));
+const cancelDataTasks = () => loadDataTaskClient().then(module => module.cancelBackgroundDataTasks());
 const ImportPreview = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.ImportPreview })));
 const TransferCreator = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferCreator })));
 const TransferUnlock = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferUnlock })));
@@ -169,10 +175,6 @@ export const trackerLoadPolicy = view => ({
   templates: ['plans', 'builder', 'settings'].includes(view),
   persistence: view === 'settings',
 });
-
-export const globalDataOperations = new Set([
-  'backup', 'transfer', 'import-plan', 'routine-destination',
-]);
 
 export const importPlanBatch = plan => ({
   puts: {
@@ -445,9 +447,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [templateToDelete, setTemplateToDelete] = useState(null);
   const [builderTemplate, setBuilderTemplate] = useState(null);
   const [workoutSummary, setWorkoutSummary] = useState(null);
+  const [dataTaskBusy, setDataTaskBusy] = useState(false);
   const importRef = useRef();
   const transferRef = useRef();
   const incomingTransferRef = useRef(false);
+  const overlayTaskRef = useRef(null);
   const routinesRef = useRef([]);
   const profileLoadGeneration = useRef(0);
   const routineWriterRef = useRef();
@@ -535,6 +539,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     return () => {
       window.removeEventListener('app-update-available', handleUpdate);
       navigator.serviceWorker?.removeEventListener('controllerchange', reload);
+      // The shared client owns every backup, CSV, transfer, and import task.
+      cancelDataTasks();
     };
   }, []);
 
@@ -864,43 +870,72 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const importBackupFile = async file => {
+    if (dataTaskBusy) return;
+    setDataTaskBusy(true);
     try {
-      const backup = parseBackup(await file.text());
+      const backup = await runDataTaskInBackground(DATA_TASKS.PARSE_BACKUP, { contents: await file.text() });
       const local = await loadAllData();
-      const { createImportPlan } = await loadImportTools();
-      setImportPlan(createImportPlan(backup, local.profiles, local.routines, local.templates));
+      setImportPlan(await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, { backup, ...local }));
     } catch (error) {
       flash(error.message);
+    } finally {
+      setDataTaskBusy(false);
     }
   };
 
   const makeTransfer = async () => {
+    if (dataTaskBusy) return;
+    setDataTaskBusy(true);
     try {
       const local = await loadAllData();
-      const transfer = await createTransferPackage(exportBackup(local.profiles, local.routines, local.templates));
+      const transfer = await runDataTaskInBackground(DATA_TASKS.CREATE_TRANSFER, { data: {
+        format: 'mcilroy-method-backup', version: 7, dataSchemaVersion: 7,
+        exportedAt: new Date().toISOString(), ...local,
+      }, options: { compress: true } });
       setCreatedTransfer({
         ...transfer,
         filename: `mcilroy-method-transfer-${new Date().toISOString().slice(0, 10)}.txt`,
       });
     } catch (error) {
       flash(error.message);
+    } finally {
+      setDataTaskBusy(false);
+    }
+  };
+
+  const downloadRoutineCsv = async (type, suffix) => {
+    if (dataTaskBusy || !routine) return;
+    setDataTaskBusy(true);
+    try {
+      const chunks = await runDataTaskInBackground(type, { routine });
+      download(chunks, `${safeFilename(routine.name)}-${suffix}.csv`, 'text/csv;charset=utf-8');
+    } catch (error) {
+      flash(error.message);
+    } finally {
+      setDataTaskBusy(false);
     }
   };
 
   const unlockTransferContents = async (contents, key) => {
+    if (dataTaskBusy) return;
+    setDataTaskBusy(true);
+    const task = {};
+    overlayTaskRef.current = task;
     try {
-      const plaintext = await openTransferPackage(contents, key);
+      const local = await loadAllData();
+      if (overlayTaskRef.current !== task) return;
+      const result = await runDataTaskInBackground('open-transfer-plan', { contents, key, local });
+      if (overlayTaskRef.current !== task) return;
       setTransferFile(null);
-      const payload = JSON.parse(plaintext);
-      if (payload.format === 'mcilroy-method-routine-transfer' && payload.version === 1 && payload.routine) {
-        setReceivedRoutine(payload);
-      } else {
-        const local = await loadAllData();
-        const { createImportPlan } = await loadImportTools();
-        setImportPlan(createImportPlan(parseBackup(plaintext), local.profiles, local.routines, local.templates));
-      }
+      if (result.routine) setReceivedRoutine(result.routine);
+      else setImportPlan(result.plan);
     } catch (error) {
-      flash(error.message);
+      if (error.name !== 'AbortError') flash(error.message);
+    } finally {
+      if (overlayTaskRef.current === task) {
+        overlayTaskRef.current = null;
+        setDataTaskBusy(false);
+      }
     }
   };
 
@@ -918,23 +953,30 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const createRoutineTransfer = async routineId => {
+    if (dataTaskBusy) return;
     const selected = routines.find(item => item.id === routineId);
     if (!selected) return;
+    setDataTaskBusy(true);
     try {
-      const payload = JSON.stringify({
+      const task = runDataTaskInBackground(DATA_TASKS.CREATE_TRANSFER, { data: {
         format: 'mcilroy-method-routine-transfer',
         version: 1,
         profileName: profiles.find(item => item.id === selected.profileId)?.name || 'Imported profile',
         routine: selected,
-      });
-      const transfer = await createTransferPackage(payload, Date.now(), { compress: true });
+      }, options: { compress: true } });
+      overlayTaskRef.current = task;
+      const transfer = await task;
+      if (overlayTaskRef.current !== task) return;
       setChoosingRoutineTransfer(false);
       setCreatedTransfer({
         ...transfer,
         filename: `${safeFilename(selected.name)}-${new Date().toISOString().slice(0, 10)}.txt`,
       });
     } catch (error) {
-      flash(error.message);
+      if (error.name !== 'AbortError') flash(error.message);
+    } finally {
+      overlayTaskRef.current = null;
+      setDataTaskBusy(false);
     }
   };
 
@@ -968,15 +1010,18 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const chooseRoutineDestination = async (destination, name) => {
     const local = await loadAllData();
-    const { createImportPlan } = await loadImportTools();
     const profileId = destination === 'new' ? makeId() : destination;
     const incomingProfiles = destination === 'new' ? [{ id: profileId, name }] : [];
     const incomingRoutine = { ...receivedRoutine.routine, profileId };
     setReceivedRoutine(null);
-    setImportPlan(createImportPlan({ profiles: incomingProfiles, routines: [incomingRoutine], templates: [] }, local.profiles, local.routines, local.templates));
+    setImportPlan(await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, {
+      backup: { profiles: incomingProfiles, routines: [incomingRoutine], templates: [] }, ...local,
+    }));
   };
 
   const confirmImport = async () => {
+    if (dataTaskBusy) return;
+    setDataTaskBusy(true);
     try {
       const { importPlanSummary } = await loadImportTools();
       // An import preview describes one user decision. All stores commit together so an
@@ -994,15 +1039,16 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     } catch (error) {
       if (error.name === 'BatchConflictError') {
         const local = await loadAllData();
-        const { createImportPlan } = await loadImportTools();
         const backup = {
           profiles: importPlan.profiles.map(item => item.imported),
           routines: importPlan.routines.map(item => item.imported),
           templates: (importPlan.templates || []).map(item => item.imported),
         };
-        setImportPlan(createImportPlan(backup, local.profiles, local.routines, local.templates));
+        setImportPlan(await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, { backup, ...local }));
       }
       flash(error.message);
+    } finally {
+      setDataTaskBusy(false);
     }
   };
 
@@ -1127,17 +1173,17 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             <ProgressScreen profile={profile} routines={progressRoutines} />
           </Suspense>
         ) : (
-          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} refs={{ import: importRef, transfer: transferRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, planCsv: () => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8'), historyCsv: () => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8'), backup: async () => { const local = await loadAllData(); download(exportBackup(local.profiles, local.routines, local.templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`); }, transfer: makeTransfer, routineTransfer: async () => { const records = await getAllByIndex('routines', 'profileId', profile.id); setRoutines(current => [...current.filter(item => item.profileId !== profile.id), ...records]); setChoosingRoutineTransfer(true); }, importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, transferFile: event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
+          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} busy={dataTaskBusy} refs={{ import: importRef, transfer: transferRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, planCsv: () => downloadRoutineCsv(DATA_TASKS.PLAN_CSV, 'plan'), historyCsv: () => downloadRoutineCsv(DATA_TASKS.HISTORY_CSV, 'history'), backup: async () => { if (dataTaskBusy) return; setDataTaskBusy(true); try { const local = await loadAllData(); download(await runDataTaskInBackground('serialize-backup', local), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`); } catch (error) { flash(error.message); } finally { setDataTaskBusy(false); } }, transfer: makeTransfer, routineTransfer: async () => { const records = await getAllByIndex('routines', 'profileId', profile.id); setRoutines(current => [...current.filter(item => item.profileId !== profile.id), ...records]); setChoosingRoutineTransfer(true); }, importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, transferFile: event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
         )}
       </main>
 
       {workoutToDelete && <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={() => setWorkoutToDelete(null)} onConfirm={confirmDeleteWorkout}>This removes {workoutToDelete.weekLabel} · {workoutToDelete.name} from this routine. It will not be marked complete or appear in history.</ConfirmationModal>}
       {finishPrompt && <ConfirmationModal title="Finish this workout?" confirmLabel="Finish workout" onCancel={() => setFinishPrompt(null)} onConfirm={finishActiveWorkout}>{finishPrompt.pendingSets ? `${finishPrompt.pendingSets} planned set${finishPrompt.pendingSets === 1 ? '' : 's'} will be recorded as skipped. ` : ''}{finishPrompt.missingRpe ? 'The main-lift RPE is still blank.' : ''}</ConfirmationModal>}
       <Suspense fallback={null}>
-      {importPlan && <ImportPreview plan={importPlan} onCancel={() => setImportPlan(null)} onConfirm={confirmImport} />}
+      {importPlan && <ImportPreview plan={importPlan} busy={dataTaskBusy} onCancel={() => { if (!dataTaskBusy) setImportPlan(null); }} onConfirm={confirmImport} />}
       {createdTransfer && <TransferCreator transfer={createdTransfer} onClose={() => setCreatedTransfer(null)} onShare={sendTransfer} />}
-      {transferFile && <TransferUnlock file={transferFile} onCancel={() => setTransferFile(null)} onUnlock={unlockTransfer} />}
-      {choosingRoutineTransfer && <RoutineTransferCreator routines={routines} onCancel={() => setChoosingRoutineTransfer(false)} onCreate={createRoutineTransfer} />}
+      {transferFile && <TransferUnlock file={transferFile} busy={dataTaskBusy} onCancel={() => { overlayTaskRef.current = null; cancelDataTasks(); setDataTaskBusy(false); setTransferFile(null); }} onUnlock={unlockTransfer} />}
+      {choosingRoutineTransfer && <RoutineTransferCreator routines={routines} busy={dataTaskBusy} onCancel={() => { overlayTaskRef.current = null; cancelDataTasks(); setDataTaskBusy(false); setChoosingRoutineTransfer(false); }} onCreate={createRoutineTransfer} />}
       {receivedRoutine && <RoutineDestination transfer={receivedRoutine} profiles={profiles} onCancel={() => setReceivedRoutine(null)} onConfirm={chooseRoutineDestination} />}
       {copyRequest && <RoutineCopyDialog title={`Copy ${copyRequest.item.name}`} eyebrow="Copy routine" defaultName={`${copyRequest.item.name} copy`} profiles={profiles} selectedProfileId={selectedProfileId} confirmLabel="Copy routine" onCancel={() => setCopyRequest(null)} onConfirm={confirmRoutineCopy} />}
       {templateSource && <SaveTemplateDialog routine={templateSource} onCancel={() => setTemplateSource(null)} onConfirm={saveRoutineTemplate} />}

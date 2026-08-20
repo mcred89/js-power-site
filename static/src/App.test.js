@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
-import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, globalDataOperations, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
+import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
 import { RoutineCopyDialog, TransferCreator } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
@@ -50,7 +50,6 @@ describe('staged tracker loading', () => {
     expect(trackerLoadPolicy('today')).toEqual({ profileRoutines: false, templates: false, persistence: false });
     expect(trackerLoadPolicy('progress')).toEqual({ profileRoutines: true, templates: false, persistence: false });
     expect(trackerLoadPolicy('settings')).toEqual({ profileRoutines: false, templates: true, persistence: true });
-    expect([...globalDataOperations]).toEqual(['backup', 'transfer', 'import-plan', 'routine-destination']);
   });
 
   it('turns an import decision into one multi-store batch without skipped records', () => {

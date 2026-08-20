@@ -19,64 +19,52 @@ export const visibleExercise = exercise => ({
   prescription: exercise.overrides.prescription ?? exercise.generated.prescription,
 });
 
-const escapeCsv = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+export const escapeCsv = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
-const planWorkoutsToCsv = (routine, workouts) => {
-  const rows = [[
-    'Routine',
-    'Microcycle',
-    'Week',
-    'Workout',
-    'Session',
-    'Movement',
-    'Weight (lb)',
-    'Prescription',
-    'Status',
-    'Completed at',
-  ]];
+const planHeader = [
+  'Routine', 'Microcycle', 'Week', 'Workout', 'Session', 'Movement', 'Weight (lb)',
+  'Prescription', 'Status', 'Completed at',
+];
 
-  workouts.forEach(workout => workout.exercises.forEach(exercise => {
-    const shown = visibleExercise(exercise);
-    rows.push([
-      routine.name,
-      workout.cycleLabel,
-      workout.weekLabel,
-      workout.sequence,
-      workout.name,
-      shown.movement,
-      shown.weight,
-      shown.prescription,
-      workout.completedAt ? 'Completed' : 'Planned',
-      workout.completedAt,
-    ]);
-  }));
+// Workers consume these iterators one row at a time. Keep the synchronous array exports
+// below for compatibility, but do not make background downloads retain the entire CSV.
+export function* routinePlanCsvRowIterator(routine) {
+  yield planHeader.map(escapeCsv).join(',');
+  for (const workout of routine.workouts) {
+    for (const exercise of workout.exercises) {
+      const shown = visibleExercise(exercise);
+      yield [routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence,
+        workout.name, shown.movement, shown.weight, shown.prescription,
+        workout.completedAt ? 'Completed' : 'Planned', workout.completedAt]
+        .map(escapeCsv).join(',');
+    }
+  }
+}
 
-  return rows.map(row => row.map(escapeCsv).join(',')).join('\n');
-};
-
-export const routinePlanToCsv = routine => planWorkoutsToCsv(routine, routine.workouts);
+export const routinePlanCsvRows = routine => [...routinePlanCsvRowIterator(routine)];
+export const routinePlanToCsv = routine => routinePlanCsvRows(routine).join('\n');
 
 const formatSeconds = seconds => seconds === null || seconds === undefined ? '' : seconds;
 
-export const routineHistoryToCsv = routine => {
-  const rows = [[
+export function* routineHistoryCsvRowIterator(routine) {
+  yield [
     'Routine', 'Microcycle', 'Week', 'Workout', 'Session', 'Started at', 'Completed at',
     'Total seconds', 'Movement', 'Substituted for', 'Set', 'Set status', 'Planned weight (lb)',
     'Planned reps', 'Actual weight (lb)', 'Actual reps', 'RPE', 'Split seconds',
     'Interval seconds',
-  ]];
+  ].map(escapeCsv).join(',');
 
-  routine.workouts.filter(workout => workout.completedAt).forEach(workout => {
+  for (const workout of routine.workouts.filter(item => item.completedAt)) {
     if (!workout.session?.exercises) {
-      workout.exercises.forEach(exercise => {
+      for (const exercise of workout.exercises) {
         const shown = visibleExercise(exercise);
-        rows.push([
+        yield [
           routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence, workout.name,
           '', workout.completedAt, '', shown.movement, '', '', 'Legacy completed', shown.weight,
           shown.prescription, '', '', '', '', '',
-        ]);
-      });
-      return;
+        ].map(escapeCsv).join(',');
+      }
+      continue;
     }
 
     const intervals = new Map();
@@ -88,23 +76,26 @@ export const routineHistoryToCsv = routine => {
         intervals.set(set.id, set.splitSeconds - previousSplit);
         previousSplit = set.splitSeconds;
       });
-    workout.session.exercises.forEach(sessionExercise => {
-      sessionExercise.sets.forEach(set => {
+    for (const sessionExercise of workout.session.exercises) {
+      for (const set of sessionExercise.sets) {
         const interval = intervals.has(set.id) ? intervals.get(set.id) : '';
-        rows.push([
+        yield [
           routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence, workout.name,
           workout.session.startedAt, workout.completedAt, formatSeconds(workout.session.elapsedSeconds),
           sessionExercise.movement, sessionExercise.original?.movement || '', set.number, set.status, set.plannedWeight, set.plannedReps,
           set.actualWeight, set.actualReps,
           sessionExercise.exerciseId === workout.session.primaryExerciseId ? workout.session.rpe : '',
           formatSeconds(set.splitSeconds), interval,
-        ]);
-      });
-    });
-  });
+        ].map(escapeCsv).join(',');
+      }
+    }
+  }
 
-  return rows.map(row => row.map(escapeCsv).join(',')).join('\n');
-};
+}
+
+export const routineHistoryCsvRows = routine => [...routineHistoryCsvRowIterator(routine)];
+
+export const routineHistoryToCsv = routine => routineHistoryCsvRows(routine).join('\n');
 
 export const createRoutine = (profileId, name, inputs) => {
   let sequence = 0;
