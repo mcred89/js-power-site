@@ -1,7 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
-import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, globalDataOperations, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
+import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, globalDataOperations, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
 import { RoutineCopyDialog, TransferCreator } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
@@ -51,6 +51,28 @@ describe('staged tracker loading', () => {
     expect(trackerLoadPolicy('progress')).toEqual({ profileRoutines: true, templates: false, persistence: false });
     expect(trackerLoadPolicy('settings')).toEqual({ profileRoutines: false, templates: true, persistence: true });
     expect([...globalDataOperations]).toEqual(['backup', 'transfer', 'import-plan', 'routine-destination']);
+  });
+
+  it('turns an import decision into one multi-store batch without skipped records', () => {
+    expect(importPlanBatch({
+      profiles: [
+        { action: 'copy', imported: { id: 'p1' }, result: { id: 'p1' } },
+        { action: 'skip', imported: { id: 'p2' }, local: { id: 'p2' }, result: { id: 'p2' } },
+      ],
+      routines: [{ action: 'merge', imported: { id: 'r1' }, local: { id: 'r1', local: true }, result: { id: 'r1' } }],
+      templates: [],
+    })).toEqual({
+      puts: {
+        profiles: [{ id: 'p1' }],
+        routines: [{ id: 'r1' }],
+        templates: [],
+      },
+      conditions: {
+        profiles: [{ key: 'p1', expected: undefined }, { key: 'p2', expected: { id: 'p2' } }],
+        routines: [{ key: 'r1', expected: { id: 'r1', local: true } }],
+        templates: [],
+      },
+    });
   });
 
   it('loads the overlay module independently of TrackerApp', async () => {

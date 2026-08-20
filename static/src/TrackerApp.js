@@ -26,7 +26,6 @@ import {
   updateExercise,
   visibleExercise,
 } from './data/routines';
-import { createImportPlan, importPlanSummary } from './data/importBackup';
 import { createTransferPackage, openTransferPackage } from './data/transferPackage';
 import {
   download,
@@ -75,6 +74,7 @@ const ProgressScreen = lazy(() => import('./components/ProgressScreen').then(mod
 const HistoryScreen = lazy(() => import('./components/HistoryScreen').then(module => ({ default: module.HistoryScreen })));
 const PlansScreen = lazy(() => import('./components/PlansScreen').then(module => ({ default: module.PlansScreen })));
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(module => ({ default: module.SettingsScreen })));
+const loadImportTools = () => import('./data/importBackup');
 const ImportPreview = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.ImportPreview })));
 const TransferCreator = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferCreator })));
 const TransferUnlock = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferUnlock })));
@@ -173,6 +173,19 @@ export const trackerLoadPolicy = view => ({
 export const globalDataOperations = new Set([
   'backup', 'transfer', 'import-plan', 'routine-destination',
 ]);
+
+export const importPlanBatch = plan => ({
+  puts: {
+    profiles: plan.profiles.filter(item => item.action !== 'skip').map(item => item.result),
+    routines: plan.routines.filter(item => item.action !== 'skip').map(item => item.result),
+    templates: (plan.templates || []).filter(item => item.action !== 'skip').map(item => item.result),
+  },
+  conditions: {
+    profiles: plan.profiles.map(item => ({ key: item.imported.id, expected: item.local })),
+    routines: plan.routines.map(item => ({ key: item.imported.id, expected: item.local })),
+    templates: (plan.templates || []).map(item => ({ key: item.imported.id, expected: item.local })),
+  },
+});
 
 export const profileWithActiveWorkout = (profile, routineId, updatedAt = new Date().toISOString()) => ({
   ...profile,
@@ -591,10 +604,12 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const addProfile = async name => {
     const item = { id: makeId(), name, activeWorkoutRoutineId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const shouldMakeDefault = profiles.length === 0;
-    await Promise.all([
-      save('profiles', item),
-      shouldMakeDefault ? save('metadata', { key: 'defaultProfileId', value: item.id }) : Promise.resolve(),
-    ]);
+    // The first profile and its default pointer are one logical record. Never publish either
+    // in React unless the shared IndexedDB transaction commits both of them.
+    await applyBatch({ puts: {
+      profiles: [item],
+      ...(shouldMakeDefault ? { metadata: [{ key: 'defaultProfileId', value: item.id }] } : {}),
+    } });
     setProfiles(current => [...current, item]);
     if (shouldMakeDefault) setDefaultProfileId(item.id);
     setSelectedProfileId(item.id);
@@ -621,7 +636,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const addRoutine = async (name, inputs) => {
     const item = createRoutine(profile.id, name, inputs);
     const updatedProfile = { ...profile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
-    await Promise.all([save('routines', item), save('profiles', updatedProfile)]);
+    await applyBatch({ puts: { routines: [item], profiles: [updatedProfile] } });
     setRoutines(current => [...current, item]);
     setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedRoutineId(item.id);
@@ -646,7 +661,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const destinationProfile = profiles.find(entry => entry.id === item.profileId);
     if (!destinationProfile) return;
     const updatedProfile = { ...destinationProfile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
-    await Promise.all([save('routines', item), save('profiles', updatedProfile)]);
+    await applyBatch({ puts: { routines: [item], profiles: [updatedProfile] } });
     setRoutines(current => [...current, item]);
     setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedProfileId(item.profileId);
@@ -788,10 +803,15 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const updated = archiveRoutine(item);
     const remaining = profileRoutines.filter(entry => entry.id !== item.id);
     const replacement = remaining[0] || null;
-    const profileUpdate = item.id === routine?.id
+    // The rendered fallback routine can differ from the durable profile pointer. Only clear
+    // the pointer when the archived record is the one the profile actually selected.
+    const profileUpdate = item.id === profile.activeRoutineId
       ? { ...profile, activeRoutineId: replacement?.id || null, updatedAt: new Date().toISOString() }
       : null;
-    await Promise.all([save('routines', updated), profileUpdate ? save('profiles', profileUpdate) : Promise.resolve()]);
+    await applyBatch({ puts: {
+      routines: [updated],
+      ...(profileUpdate ? { profiles: [profileUpdate] } : {}),
+    } });
     setRoutines(current => current.map(entry => entry.id === item.id ? updated : entry));
     if (profileUpdate) {
       setProfiles(current => current.map(entry => entry.id === profile.id ? profileUpdate : entry));
@@ -847,6 +867,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     try {
       const backup = parseBackup(await file.text());
       const local = await loadAllData();
+      const { createImportPlan } = await loadImportTools();
       setImportPlan(createImportPlan(backup, local.profiles, local.routines, local.templates));
     } catch (error) {
       flash(error.message);
@@ -875,6 +896,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         setReceivedRoutine(payload);
       } else {
         const local = await loadAllData();
+        const { createImportPlan } = await loadImportTools();
         setImportPlan(createImportPlan(parseBackup(plaintext), local.profiles, local.routines, local.templates));
       }
     } catch (error) {
@@ -946,6 +968,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const chooseRoutineDestination = async (destination, name) => {
     const local = await loadAllData();
+    const { createImportPlan } = await loadImportTools();
     const profileId = destination === 'new' ? makeId() : destination;
     const incomingProfiles = destination === 'new' ? [{ id: profileId, name }] : [];
     const incomingRoutine = { ...receivedRoutine.routine, profileId };
@@ -954,15 +977,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const confirmImport = async () => {
-    const profileChanges = importPlan.profiles.filter(item => item.action !== 'skip');
-    const routineChanges = importPlan.routines.filter(item => item.action !== 'skip');
-    const templateChanges = importPlan.templates.filter(item => item.action !== 'skip');
     try {
-      await Promise.all([
-        ...profileChanges.map(item => save('profiles', item.result)),
-        ...routineChanges.map(item => save('routines', item.result)),
-        ...templateChanges.map(item => save('templates', item.result)),
-      ]);
+      const { importPlanSummary } = await loadImportTools();
+      // An import preview describes one user decision. All stores commit together so an
+      // invalid record, quota error, or abort cannot leave a partially imported backup.
+      await applyBatch(importPlanBatch(importPlan));
       const profileResults = new Map(importPlan.profiles.map(item => [item.imported.id, item.result]));
       const routineResults = new Map(importPlan.routines.map(item => [item.imported.id, item.result]));
       const templateResults = new Map(importPlan.templates.map(item => [item.imported.id, item.result]));
@@ -973,15 +992,22 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       setImportPlan(null);
       flash(`Import complete: ${summary.copy} copied, ${summary.merge} merged, ${summary.skip} skipped.`);
     } catch (error) {
+      if (error.name === 'BatchConflictError') {
+        const local = await loadAllData();
+        const { createImportPlan } = await loadImportTools();
+        const backup = {
+          profiles: importPlan.profiles.map(item => item.imported),
+          routines: importPlan.routines.map(item => item.imported),
+          templates: (importPlan.templates || []).map(item => item.imported),
+        };
+        setImportPlan(createImportPlan(backup, local.profiles, local.routines, local.templates));
+      }
       flash(error.message);
     }
   };
 
   const deleteProfile = async () => {
     if (!profile || !window.confirm(`Delete ${profile.name} and every routine stored for this profile?`)) return;
-    // The startup cache intentionally contains only Today records. Deletion must query the
-    // index so deferred/archived routines cannot survive as orphaned local data.
-    const owned = await getAllByIndex('routines', 'profileId', profile.id);
     const remaining = profiles.filter(item => item.id !== profile.id);
     const nextDefaultProfileId = profile.id === defaultProfileId ? remaining[0]?.id || null : defaultProfileId;
     await applyBatch({
@@ -990,11 +1016,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         : {},
       deletes: {
         profiles: [profile.id],
-        routines: owned.map(item => item.id),
         ...(profile.id === defaultProfileId && !nextDefaultProfileId
           ? { metadata: ['defaultProfileId'] }
           : {}),
       },
+      // Resolve ownership within the same transaction as profile deletion so a routine
+      // created concurrently cannot be stranded after an earlier index read.
+      deleteByIndex: { routines: [{ indexName: 'profileId', key: profile.id }] },
     });
     setProfiles(remaining);
     setDefaultProfileId(nextDefaultProfileId);

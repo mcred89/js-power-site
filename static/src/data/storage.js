@@ -5,6 +5,7 @@ import {
   migrateBackup,
   runDatabaseMigrations,
 } from './storageMigrations';
+import { serializedRecordsEqual } from './recordComparison';
 
 const DATABASE_NAME = 'mcilroy-method';
 
@@ -84,9 +85,21 @@ export const get = (storeName, id) => transaction(storeName, 'readonly', store =
 export const save = (storeName, value) => transaction(storeName, 'readwrite', store => store.put(value));
 export const remove = (storeName, id) => transaction(storeName, 'readwrite', store => store.delete(id));
 
-export const applyBatch = ({ puts = {}, deletes = {} }) => {
-  const storeNames = [...new Set([...Object.keys(puts), ...Object.keys(deletes)])];
+const batchConflict = () => Object.assign(
+  new Error('Data changed. Review the updated import.'),
+  { name: 'BatchConflictError' },
+);
+
+export const applyBatch = ({ puts = {}, deletes = {}, conditions = {}, deleteByIndex = {} }) => {
+  const storeNames = [...new Set([
+    ...Object.keys(puts), ...Object.keys(deletes), ...Object.keys(conditions), ...Object.keys(deleteByIndex),
+  ])];
   storeNames.forEach(validateStoreName);
+  Object.entries(deleteByIndex).forEach(([storeName, removals]) => removals.forEach(({ indexName }) => {
+    if (storeName !== 'routines' || indexName !== 'profileId') {
+      throw new Error(`Unknown IndexedDB index: ${storeName}.${indexName}.`);
+    }
+  }));
   if (!storeNames.length) return Promise.resolve();
   return openDatabase().then(database => new Promise((resolve, reject) => {
     const tx = database.transaction(storeNames, 'readwrite');
@@ -104,7 +117,7 @@ export const applyBatch = ({ puts = {}, deletes = {} }) => {
     };
     tx.onerror = () => fail(tx.error);
     tx.onabort = () => fail(tx.error);
-    try {
+    const performWrites = () => {
       storeNames.forEach(storeName => {
         const store = tx.objectStore(storeName);
         (puts[storeName] || []).forEach(value => {
@@ -119,6 +132,45 @@ export const applyBatch = ({ puts = {}, deletes = {} }) => {
             try { tx.abort(); } catch (error) { fail(request.error || error); }
           };
         });
+        (deleteByIndex[storeName] || []).forEach(({ indexName, key }) => {
+          const request = store.index(indexName).openKeyCursor(key);
+          request.onsuccess = () => {
+            const cursor = request.result;
+            if (!cursor) return;
+            store.delete(cursor.primaryKey);
+            cursor.continue();
+          };
+          request.onerror = () => {
+            try { tx.abort(); } catch (error) { fail(request.error || error); }
+          };
+        });
+      });
+    };
+    try {
+      const checks = Object.entries(conditions).flatMap(([storeName, entries]) => (
+        entries.map(entry => ({ storeName, ...entry }))
+      ));
+      if (!checks.length) {
+        performWrites();
+        return;
+      }
+      let remainingChecks = checks.length;
+      checks.forEach(({ storeName, key, expected }) => {
+        const request = tx.objectStore(storeName).get(key);
+        request.onsuccess = () => {
+          if (!serializedRecordsEqual(request.result, expected)) {
+            const conflict = batchConflict();
+            try { tx.abort(); } catch (error) { fail(conflict); }
+            fail(conflict);
+            return;
+          }
+          remainingChecks -= 1;
+          // Reads and writes stay in this transaction, closing the preview/confirmation race.
+          if (!remainingChecks) performWrites();
+        };
+        request.onerror = () => {
+          try { tx.abort(); } catch (error) { fail(request.error || error); }
+        };
       });
     } catch (error) {
       try { tx.abort(); } catch (abortError) { fail(error || abortError); }

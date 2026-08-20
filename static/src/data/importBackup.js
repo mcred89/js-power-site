@@ -1,17 +1,4 @@
-const comparableRecord = value => {
-  if (Array.isArray(value)) return value.map(comparableRecord);
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((result, key) => ({
-      ...result,
-      [key]: comparableRecord(value[key]),
-    }), {});
-  }
-  return value;
-};
-
-const recordsEqual = (left, right) => (
-  JSON.stringify(comparableRecord(left)) === JSON.stringify(comparableRecord(right))
-);
+import { serializedRecordsEqual } from './recordComparison';
 
 const mergeRecord = (local, imported) => ({ ...imported, ...local });
 
@@ -34,7 +21,7 @@ const planStore = (importedRecords, localRecords, type) => {
   return importedRecords.map(imported => {
     const local = localById.get(imported.id);
     if (!local) return { type, status: 'new', action: 'copy', imported, result: imported };
-    if (recordsEqual(local, imported)) {
+    if (serializedRecordsEqual(local, imported)) {
       return { type, status: 'duplicate', action: 'skip', imported, local, result: local };
     }
     return {

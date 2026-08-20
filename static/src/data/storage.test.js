@@ -179,4 +179,96 @@ describe('atomic IndexedDB batches', () => {
     } })).rejects.toBeTruthy();
     await expect(isolatedStorage.get('profiles', 'p1')).resolves.toBeUndefined();
   });
+
+  it('does not partially import when a record in the final store fails', async () => {
+    await expect(isolatedStorage.applyBatch({ puts: {
+      profiles: [{ id: 'import-profile', unknownProfileField: true }],
+      routines: [{ id: 'import-routine', profileId: 'import-profile', unknownRoutineField: true }],
+      templates: [{ name: 'missing primary key' }],
+    } })).rejects.toBeTruthy();
+    await expect(isolatedStorage.get('profiles', 'import-profile')).resolves.toBeUndefined();
+    await expect(isolatedStorage.get('routines', 'import-routine')).resolves.toBeUndefined();
+  });
+
+  it('does not partially delete a profile or its routines when a delete fails', async () => {
+    await isolatedStorage.applyBatch({ puts: {
+      profiles: [{ id: 'delete-profile' }],
+      routines: [{ id: 'delete-routine', profileId: 'delete-profile' }],
+    } });
+    await expect(isolatedStorage.applyBatch({ deletes: {
+      profiles: ['delete-profile'],
+      routines: ['delete-routine', undefined],
+    } })).rejects.toBeTruthy();
+    await expect(isolatedStorage.get('profiles', 'delete-profile')).resolves.toEqual({ id: 'delete-profile' });
+    await expect(isolatedStorage.get('routines', 'delete-routine')).resolves.toMatchObject({ profileId: 'delete-profile' });
+  });
+
+  it('does not activate a routine when creating that routine fails', async () => {
+    await isolatedStorage.save('profiles', { id: 'create-profile', activeRoutineId: null });
+    await expect(isolatedStorage.applyBatch({ puts: {
+      profiles: [{ id: 'create-profile', activeRoutineId: 'new-routine' }],
+      routines: [{ profileId: 'create-profile' }],
+    } })).rejects.toBeTruthy();
+    await expect(isolatedStorage.get('profiles', 'create-profile')).resolves.toMatchObject({ activeRoutineId: null });
+  });
+
+  it('aborts an import when a record changed after its preview', async () => {
+    const previewed = { id: 'race-profile', name: 'Before', unknown: { retained: true } };
+    await isolatedStorage.save('profiles', previewed);
+    await isolatedStorage.save('profiles', { ...previewed, name: 'Changed while preview was open' });
+
+    await expect(isolatedStorage.applyBatch({
+      puts: { profiles: [{ ...previewed, importedOnly: true }] },
+      conditions: { profiles: [{ key: previewed.id, expected: previewed }] },
+    })).rejects.toMatchObject({ name: 'BatchConflictError' });
+    await expect(isolatedStorage.get('profiles', previewed.id)).resolves.toEqual({
+      ...previewed,
+      name: 'Changed while preview was open',
+    });
+  });
+
+  it('uses serialized-record semantics for conditional import guards', async () => {
+    await isolatedStorage.save('profiles', {
+      id: 'json-semantics', nested: { kept: true }, values: [null, null],
+    });
+    await expect(isolatedStorage.applyBatch({
+      puts: { profiles: [{ id: 'json-semantics', committed: true }] },
+      conditions: { profiles: [{
+        key: 'json-semantics',
+        expected: {
+          values: [, undefined], id: 'json-semantics', nested: { omitted: undefined, kept: true },
+        },
+      }] },
+    })).resolves.toBeUndefined();
+    await expect(isolatedStorage.get('profiles', 'json-semantics')).resolves.toEqual({
+      id: 'json-semantics', committed: true,
+    });
+  });
+
+  it('deletes routines found through an index in the profile transaction', async () => {
+    await isolatedStorage.applyBatch({ puts: {
+      profiles: [{ id: 'indexed-delete' }],
+      routines: [
+        { id: 'known', profileId: 'indexed-delete' },
+        { id: 'deferred', profileId: 'indexed-delete', unknown: true },
+        { id: 'kept', profileId: 'other' },
+      ],
+    } });
+
+    await isolatedStorage.applyBatch({
+      deletes: { profiles: ['indexed-delete'] },
+      deleteByIndex: { routines: [{ indexName: 'profileId', key: 'indexed-delete' }] },
+    });
+
+    await expect(isolatedStorage.get('profiles', 'indexed-delete')).resolves.toBeUndefined();
+    await expect(isolatedStorage.get('routines', 'known')).resolves.toBeUndefined();
+    await expect(isolatedStorage.get('routines', 'deferred')).resolves.toBeUndefined();
+    await expect(isolatedStorage.get('routines', 'kept')).resolves.toMatchObject({ profileId: 'other' });
+  });
+
+  it('validates indexes used by atomic deletes', () => {
+    expect(() => isolatedStorage.applyBatch({
+      deleteByIndex: { profiles: [{ indexName: 'profileId', key: 'p1' }] },
+    })).toThrow('Unknown IndexedDB index');
+  });
 });
