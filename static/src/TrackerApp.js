@@ -29,15 +29,30 @@ import {
 import { createImportPlan, importPlanSummary } from './data/importBackup';
 import { createTransferPackage, openTransferPackage } from './data/transferPackage';
 import {
+  download,
+  sharedTransferContents,
+  shareTransfer,
+} from './data/transferUi';
+import {
+  applyBatch,
   exportBackup,
   get,
   getAll,
+  getAllByIndex,
   hasPersistentStorage,
   parseBackup,
   remove,
   requestPersistentStorage,
   save,
 } from './data/storage';
+export {
+  canShareTransfer,
+  createSharedTransferContents,
+  createTransferFile,
+  download,
+  sharedTransferContents,
+  shareTransfer,
+} from './data/transferUi';
 
 const makeId = () => (
   typeof crypto !== 'undefined' && crypto.randomUUID
@@ -60,12 +75,20 @@ const ProgressScreen = lazy(() => import('./components/ProgressScreen').then(mod
 const HistoryScreen = lazy(() => import('./components/HistoryScreen').then(module => ({ default: module.HistoryScreen })));
 const PlansScreen = lazy(() => import('./components/PlansScreen').then(module => ({ default: module.PlansScreen })));
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(module => ({ default: module.SettingsScreen })));
+const ImportPreview = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.ImportPreview })));
+const TransferCreator = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferCreator })));
+const TransferUnlock = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferUnlock })));
+const RoutineTransferCreator = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.RoutineTransferCreator })));
+const RoutineDestination = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.RoutineDestination })));
+const RoutineCopyDialog = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.RoutineCopyDialog })));
+const SaveTemplateDialog = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.SaveTemplateDialog })));
+const TrackerNotices = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TrackerNotices })));
 const TrackerScreenFallback = ({ label }) => <div className="loading-screen">Opening {label}…</div>;
 
 export const createSerializedRoutineWriter = persist => {
   let tail = null;
-  return record => {
-    const write = () => persist('routines', record);
+  return (record, persistOverride) => {
+    const write = () => persistOverride ? persistOverride(record) : persist('routines', record);
     // A lifecycle flush must enter persistence in the same event turn when the queue is idle.
     // Later writes still chain in order. IndexedDB completion is asynchronous and cannot be
     // guaranteed if the browser kills the page, which is why the session also flushes on hidden.
@@ -84,6 +107,14 @@ export const createSerializedRoutineWriter = persist => {
     current.then(clear, clear);
     return current;
   };
+};
+
+export const commitRoutineLifecycle = async ({ writer, routine, profile, persist, publish }) => {
+  // Lifecycle state is not optimistic: routine/session and profile pointer become visible
+  // only after their queued multi-store transaction commits. A failed transaction therefore
+  // leaves React state and the committed routine ref aligned with IndexedDB.
+  await writer(routine, record => persist(record, profile));
+  publish(routine, profile);
 };
 
 export const completeWorkoutSetWithDraft = (routine, workoutId, exerciseId, setId, draft) => {
@@ -106,50 +137,54 @@ export const initialProfileId = (profiles, defaultProfileId) => (
     : profiles[0]?.id || null
 );
 
-const download = (contents, name, type = 'application/json') => {
-  const blob = new Blob([contents], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  link.click();
-  URL.revokeObjectURL(url);
+export const todayRoutineIds = profile => [...new Set([
+  profile?.activeRoutineId,
+  profile?.activeWorkoutRoutineId,
+].filter(Boolean))];
+
+export const loadInitialTrackerRecords = async storage => {
+  const [profiles, savedDefault] = await Promise.all([
+    storage.getAll('profiles'), storage.get('metadata', 'defaultProfileId'),
+  ]);
+  const selectedProfileId = initialProfileId(profiles, savedDefault?.value);
+  const selected = profiles.find(item => item.id === selectedProfileId);
+  const routines = (await Promise.all(todayRoutineIds(selected).map(id => storage.get('routines', id))))
+    .filter(Boolean);
+  return { profiles, routines, selectedProfileId, defaultProfileId: savedDefault?.value || null };
 };
 
-const SHARED_TRANSFER_FORMAT = 'mcilroy-method-shared-transfer';
+export const mergeRoutineRead = (current, records, requestedGeneration, currentGeneration) => {
+  if (requestedGeneration !== currentGeneration) return current;
+  const known = new Map(current.map(item => [item.id, item]));
+  records.filter(Boolean).forEach(item => {
+    // A read begun before an action may contain an older copy. Only fill cache misses;
+    // explicit writes already keep the in-memory record current.
+    if (!known.has(item.id)) known.set(item.id, item);
+  });
+  return [...known.values()];
+};
 
-export const createSharedTransferContents = transfer => JSON.stringify({
-  format: SHARED_TRANSFER_FORMAT,
-  version: 1,
-  key: transfer.key,
-  package: JSON.parse(transfer.contents),
+export const trackerLoadPolicy = view => ({
+  profileRoutines: ['plans', 'history', 'progress'].includes(view),
+  templates: ['plans', 'builder', 'settings'].includes(view),
+  persistence: view === 'settings',
 });
 
-export const createTransferFile = transfer => new File(
-  [createSharedTransferContents(transfer)],
-  transfer.filename,
-  { type: 'text/plain' },
+export const globalDataOperations = new Set([
+  'backup', 'transfer', 'import-plan', 'routine-destination',
+]);
+
+export const profileWithActiveWorkout = (profile, routineId, updatedAt = new Date().toISOString()) => ({
+  ...profile,
+  activeWorkoutRoutineId: routineId,
+  updatedAt,
+});
+
+export const profileAfterFinishedRoutine = (profile, routineId, updatedAt = new Date().toISOString()) => (
+  profile.activeWorkoutRoutineId === routineId
+    ? profileWithActiveWorkout(profile, null, updatedAt)
+    : profile
 );
-
-export const canShareTransfer = transfer => {
-  if (!navigator.share || !navigator.canShare) return false;
-  return navigator.canShare({ files: [createTransferFile(transfer)] });
-};
-
-export const shareTransfer = transfer => navigator.share({
-  files: [createTransferFile(transfer)],
-});
-
-export const sharedTransferContents = contents => {
-  try {
-    const shared = JSON.parse(contents);
-    if (shared.format !== SHARED_TRANSFER_FORMAT || shared.version !== 1 ||
-        typeof shared.key !== 'string' || !shared.package) return null;
-    return { key: shared.key, contents: JSON.stringify(shared.package) };
-  } catch (error) {
-    return null;
-  }
-};
 
 const safeFilename = value => value.toLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
@@ -172,134 +207,6 @@ const ProfileForm = ({ onSave, title = 'Who is training?' }) => {
       </label>
       <button className="primary-button" type="submit">Create profile</button>
     </form>
-  );
-};
-
-export const ImportPreview = ({ plan, onCancel, onConfirm }) => {
-  const summary = importPlanSummary(plan);
-  const sections = [['Profiles', plan.profiles], ['Routines', plan.routines], ['Templates', plan.templates || []]];
-  return (
-    <div className="modal-backdrop">
-      <section className="confirmation-modal import-preview" role="dialog" aria-modal="true" aria-labelledby="import-preview-title">
-        <p className="eyebrow">Backup review</p>
-        <h2 id="import-preview-title">Preview import</h2>
-        <p>{summary.copy} copied · {summary.skip} skipped · {summary.merge} merged</p>
-        <p className="import-note">Merges keep this phone's values and completed workout snapshots, while adding records and workouts found only in the backup.</p>
-        <div className="import-preview-list">
-          {sections.map(([title, items]) => (
-            <div key={title}>
-              <h3>{title}</h3>
-              {!items.length ? <p>None</p> : items.map((item, index) => (
-                <div className="import-preview-row" key={`${item.imported.id}-${index}`}>
-                  <span><strong>{item.imported.name || 'Unnamed'}</strong><small>{item.status}</small></span>
-                  <b className={`import-action ${item.action}`}>{item.action}</b>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-        <div className="button-row modal-actions">
-          <button className="secondary-button" type="button" onClick={onCancel}>Cancel</button>
-          <button className="primary-button" type="button" onClick={onConfirm}>Import backup</button>
-        </div>
-      </section>
-    </div>
-  );
-};
-
-export const TransferCreator = ({ transfer, onClose, onShare }) => {
-  const shareSupported = canShareTransfer(transfer);
-  return (
-  <div className="modal-backdrop">
-    <section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title">
-      <p className="eyebrow">Encrypted transfer</p>
-      <h2 id="transfer-title">Send to another phone</h2>
-      <p>{shareSupported ? 'Use your phone\'s share menu and choose Quick Share or another nearby option.' : 'Direct sharing is not supported by this browser. Download the file and share it from your phone\'s Files app.'}</p>
-      {shareSupported && <button className="primary-button full-button" type="button" onClick={onShare}>Share with nearby phone</button>}
-      <button className="secondary-button full-button" type="button" onClick={() => download(createSharedTransferContents(transfer), transfer.filename, 'text/plain')}>Download file instead</button>
-      <p>On the other phone, accept the file and open it with McIlroy Method. The app will preview it automatically. It expires at {new Date(transfer.expiresAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.</p>
-      <div className="button-row modal-actions"><button className="primary-button" type="button" onClick={onClose}>Done</button></div>
-    </section>
-  </div>
-  );
-};
-
-const TransferUnlock = ({ file, onCancel, onUnlock }) => {
-  const [key, setKey] = useState('');
-  return (
-    <div className="modal-backdrop">
-      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="unlock-title" onSubmit={event => { event.preventDefault(); onUnlock(key); }}>
-        <p className="eyebrow">Encrypted transfer</p>
-        <h2 id="unlock-title">Open transfer package</h2>
-        <p>{file.name} needs the key shown on the sending device.</p>
-        <label className="form-field"><span className="field-label">Transfer key</span><input className="number-input transfer-key-input" value={key} onChange={event => setKey(event.target.value)} autoCapitalize="none" autoCorrect="off" required autoFocus /></label>
-        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit">Decrypt and preview</button></div>
-      </form>
-    </div>
-  );
-};
-
-const RoutineTransferCreator = ({ routines, onCancel, onCreate }) => {
-  const [routineId, setRoutineId] = useState(routines[0]?.id || '');
-  return (
-    <div className="modal-backdrop">
-      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="routine-transfer-title" onSubmit={event => event.preventDefault()}>
-        <p className="eyebrow">Routine transfer</p>
-        <h2 id="routine-transfer-title">Choose a routine</h2>
-        <p>The encrypted routine and its history can be sent through your phone's share menu.</p>
-        <label className="form-field"><span className="field-label">Routine</span><select className="number-input" value={routineId} onChange={event => setRoutineId(event.target.value)}>{routines.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-        <div className="button-row modal-actions"><button className="text-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="button" disabled={!routineId} onClick={() => onCreate(routineId)}>Create transfer</button></div>
-      </form>
-    </div>
-  );
-};
-
-const RoutineDestination = ({ transfer, profiles, onCancel, onConfirm }) => {
-  const [destination, setDestination] = useState(profiles[0]?.id || 'new');
-  const [name, setName] = useState(transfer.profileName || 'Imported profile');
-  return (
-    <div className="modal-backdrop">
-      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="routine-destination-title" onSubmit={event => { event.preventDefault(); onConfirm(destination, name.trim()); }}>
-        <p className="eyebrow">Routine received</p>
-        <h2 id="routine-destination-title">Where should {transfer.routine.name} go?</h2>
-        <label className="form-field"><span className="field-label">Profile</span><select className="number-input" value={destination} onChange={event => setDestination(event.target.value)}>{profiles.map(item => <option value={item.id} key={item.id}>Add to {item.name}</option>)}<option value="new">Create a new profile</option></select></label>
-        {destination === 'new' && <label className="form-field"><span className="field-label">New profile name</span><input className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label>}
-        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit">Preview import</button></div>
-      </form>
-    </div>
-  );
-};
-
-export const RoutineCopyDialog = ({ title, eyebrow, defaultName, profiles, selectedProfileId, confirmLabel, onCancel, onConfirm }) => {
-  const [destination, setDestination] = useState(selectedProfileId || profiles[0]?.id || '');
-  const [name, setName] = useState(defaultName);
-  const trimmedName = name.trim();
-  return (
-    <div className="modal-backdrop">
-      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="copy-routine-title" onSubmit={event => { event.preventDefault(); if (destination && trimmedName) onConfirm(destination, trimmedName); }}>
-        <p className="eyebrow">{eyebrow}</p>
-        <h2 id="copy-routine-title">{title}</h2>
-        <label className="form-field"><span className="field-label">Routine name</span><input aria-label="Routine name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label>
-        <label className="form-field"><span className="field-label">Profile</span><select aria-label="Destination profile" className="number-input" value={destination} onChange={event => setDestination(event.target.value)} required>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
-        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit" disabled={!destination || !trimmedName}>{confirmLabel}</button></div>
-      </form>
-    </div>
-  );
-};
-
-const SaveTemplateDialog = ({ routine, onCancel, onConfirm }) => {
-  const [name, setName] = useState(routine.name);
-  const trimmedName = name.trim();
-  return (
-    <div className="modal-backdrop">
-      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="save-template-title" onSubmit={event => { event.preventDefault(); if (trimmedName) onConfirm(trimmedName); }}>
-        <p className="eyebrow">Reusable template</p>
-        <h2 id="save-template-title">Save routine setup</h2>
-        <p>Templates keep the generator setup, not workout progress or exercise-level edits.</p>
-        <label className="form-field"><span className="field-label">Template name</span><input aria-label="Template name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label>
-        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit" disabled={!trimmedName}>Save template</button></div>
-      </form>
-    </div>
   );
 };
 
@@ -508,6 +415,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [persistent, setPersistent] = useState(false);
+  const [profileRoutinesLoaded, setProfileRoutinesLoaded] = useState(false);
+  const [todayRoutinesLoaded, setTodayRoutinesLoaded] = useState(false);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
   const [updateRegistration, setUpdateRegistration] = useState(null);
   const [showAllPending, setShowAllPending] = useState(false);
   const [workoutToDelete, setWorkoutToDelete] = useState(null);
@@ -526,6 +436,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const transferRef = useRef();
   const incomingTransferRef = useRef(false);
   const routinesRef = useRef([]);
+  const profileLoadGeneration = useRef(0);
   const routineWriterRef = useRef();
   if (!routineWriterRef.current) routineWriterRef.current = createSerializedRoutineWriter(save);
   const showWorkout = useCallback(target => {
@@ -538,18 +449,64 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   }, [routines]);
 
   useEffect(() => {
-    Promise.all([getAll('profiles'), getAll('routines'), getAll('templates'), hasPersistentStorage(), get('metadata', 'defaultProfileId')])
-      .then(([savedProfiles, savedRoutines, savedTemplates, isPersistent, savedDefault]) => {
+    loadInitialTrackerRecords({ getAll, get })
+      .then(({ profiles: savedProfiles, routines: startupRoutines, defaultProfileId: savedDefaultId, selectedProfileId: selectedId }) => {
         setProfiles(savedProfiles);
-        setRoutines(savedRoutines);
-        setTemplates(savedTemplates);
-        setDefaultProfileId(savedDefault?.value || null);
-        setSelectedProfileId(initialProfileId(savedProfiles, savedDefault?.value));
-        setPersistent(isPersistent);
+        setRoutines(startupRoutines);
+        setDefaultProfileId(savedDefaultId);
+        setSelectedProfileId(selectedId);
+        setTodayRoutinesLoaded(true);
       })
       .catch(error => setMessage(error.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (loading || !selectedProfileId) return undefined;
+    const generation = ++profileLoadGeneration.current;
+    const selected = profiles.find(item => item.id === selectedProfileId);
+    setTodayRoutinesLoaded(false);
+    setProfileRoutinesLoaded(false);
+    Promise.all(todayRoutineIds(selected)
+      .map(id => get('routines', id)))
+      .then(records => {
+        if (generation !== profileLoadGeneration.current) return;
+        // Merge by id instead of replacing the cache: a slower read must not discard a
+        // routine already updated by an action in this page session.
+        setRoutines(current => mergeRoutineRead(current, records, generation, profileLoadGeneration.current));
+        setTodayRoutinesLoaded(true);
+      })
+      .catch(error => { if (generation === profileLoadGeneration.current) setMessage(error.message); });
+    return () => { profileLoadGeneration.current += 1; };
+  }, [loading, profiles, selectedProfileId]);
+
+  useEffect(() => {
+    if (loading || !selectedProfileId || !trackerLoadPolicy(view).profileRoutines) return;
+    const generation = profileLoadGeneration.current;
+    getAllByIndex('routines', 'profileId', selectedProfileId).then(records => {
+      if (generation !== profileLoadGeneration.current) return;
+      setRoutines(current => {
+        const known = new Map(current.map(item => [item.id, item]));
+        records.forEach(item => {
+          const cached = known.get(item.id);
+          if (!cached || String(item.updatedAt || '') >= String(cached.updatedAt || '')) known.set(item.id, item);
+        });
+        return [...known.values()];
+      });
+      setProfileRoutinesLoaded(true);
+    }).catch(error => setMessage(error.message));
+  }, [loading, selectedProfileId, view]);
+
+  useEffect(() => {
+    if (loading || !trackerLoadPolicy(view).templates || templatesLoaded) return;
+    getAll('templates').then(records => { setTemplates(records); setTemplatesLoaded(true); })
+      .catch(error => setMessage(error.message));
+  }, [loading, templatesLoaded, view]);
+
+  useEffect(() => {
+    if (!trackerLoadPolicy(view).persistence) return;
+    hasPersistentStorage().then(setPersistent).catch(error => setMessage(error.message));
+  }, [view]);
 
   useEffect(() => {
     const handleUpdate = event => setUpdateRegistration(event.detail);
@@ -619,8 +576,20 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     window.setTimeout(() => setMessage(''), 3000);
   };
 
+  const loadAllData = async () => {
+    const [allProfiles, allRoutines, allTemplates] = await Promise.all([
+      getAll('profiles'), getAll('routines'), getAll('templates'),
+    ]);
+    setProfiles(allProfiles);
+    setRoutines(allRoutines);
+    routinesRef.current = allRoutines;
+    setTemplates(allTemplates);
+    setTemplatesLoaded(true);
+    return { profiles: allProfiles, routines: allRoutines, templates: allTemplates };
+  };
+
   const addProfile = async name => {
-    const item = { id: makeId(), name, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const item = { id: makeId(), name, activeWorkoutRoutineId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const shouldMakeDefault = profiles.length === 0;
     await Promise.all([
       save('profiles', item),
@@ -633,10 +602,15 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     setView('today');
   };
 
-  const saveRoutine = async updated => {
+  const publishRoutine = updated => {
     routinesRef.current = routinesRef.current.map(item => item.id === updated.id ? updated : item);
     setRoutines(routinesRef.current);
-    await routineWriterRef.current(updated);
+  };
+
+  const saveRoutine = async (updated, persistOverride, publishAfterCommit = false) => {
+    if (!publishAfterCommit) publishRoutine(updated);
+    await routineWriterRef.current(updated, persistOverride);
+    if (publishAfterCommit) publishRoutine(updated);
   };
 
   const changeSelectedRoutine = transform => {
@@ -732,7 +706,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       flash('Resume your active workout before starting another.');
       return;
     }
-    await changeSelectedRoutine(current => startWorkoutSession(current, target.id));
+    const current = routinesRef.current.find(item => item.id === routine.id) || routine;
+    const updatedRoutine = startWorkoutSession(current, target.id);
+    const updatedProfile = profileWithActiveWorkout(profile, routine.id);
+    await saveRoutine(updatedRoutine, record => applyBatch({
+      puts: { routines: [record], profiles: [updatedProfile] },
+    }), true);
+    setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
   };
 
   const adjustWorkoutSet = async (exerciseId, setId, values) => {
@@ -786,7 +766,15 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const finishActiveWorkout = async () => {
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
     const updated = finishWorkoutSession(current, workout.id);
-    await saveRoutine(updated);
+    const updatedProfile = profileAfterFinishedRoutine(profile, routine.id);
+    const shouldClear = updatedProfile !== profile;
+    await saveRoutine(updated, record => applyBatch({
+      puts: {
+        routines: [record],
+        ...(shouldClear ? { profiles: [updatedProfile] } : {}),
+      },
+    }), true);
+    if (shouldClear) setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
     setWorkoutSummary(updated.workouts.find(item => item.id === workout.id));
     setFinishPrompt(null);
     setWorkoutId(null);
@@ -826,7 +814,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       return;
     }
     if (target.session) {
-      await changeSelectedRoutine(current => reopenWorkoutSession(current, target.id));
+      const current = routinesRef.current.find(item => item.id === routine.id) || routine;
+      const updatedRoutine = reopenWorkoutSession(current, target.id);
+      const updatedProfile = profileWithActiveWorkout(profile, routine.id);
+      await saveRoutine(updatedRoutine, record => applyBatch({
+        puts: { routines: [record], profiles: [updatedProfile] },
+      }), true);
+      setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
       flash('Workout returned to your queue.');
       return;
     }
@@ -852,7 +846,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const importBackupFile = async file => {
     try {
       const backup = parseBackup(await file.text());
-      setImportPlan(createImportPlan(backup, profiles, routines, templates));
+      const local = await loadAllData();
+      setImportPlan(createImportPlan(backup, local.profiles, local.routines, local.templates));
     } catch (error) {
       flash(error.message);
     }
@@ -860,7 +855,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const makeTransfer = async () => {
     try {
-      const transfer = await createTransferPackage(exportBackup(profiles, routines, templates));
+      const local = await loadAllData();
+      const transfer = await createTransferPackage(exportBackup(local.profiles, local.routines, local.templates));
       setCreatedTransfer({
         ...transfer,
         filename: `mcilroy-method-transfer-${new Date().toISOString().slice(0, 10)}.txt`,
@@ -878,7 +874,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       if (payload.format === 'mcilroy-method-routine-transfer' && payload.version === 1 && payload.routine) {
         setReceivedRoutine(payload);
       } else {
-        setImportPlan(createImportPlan(parseBackup(plaintext), profiles, routines, templates));
+        const local = await loadAllData();
+        setImportPlan(createImportPlan(parseBackup(plaintext), local.profiles, local.routines, local.templates));
       }
     } catch (error) {
       flash(error.message);
@@ -947,12 +944,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
-  const chooseRoutineDestination = (destination, name) => {
+  const chooseRoutineDestination = async (destination, name) => {
+    const local = await loadAllData();
     const profileId = destination === 'new' ? makeId() : destination;
     const incomingProfiles = destination === 'new' ? [{ id: profileId, name }] : [];
     const incomingRoutine = { ...receivedRoutine.routine, profileId };
     setReceivedRoutine(null);
-    setImportPlan(createImportPlan({ profiles: incomingProfiles, routines: [incomingRoutine], templates: [] }, profiles, routines, templates));
+    setImportPlan(createImportPlan({ profiles: incomingProfiles, routines: [incomingRoutine], templates: [] }, local.profiles, local.routines, local.templates));
   };
 
   const confirmImport = async () => {
@@ -981,18 +979,23 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const deleteProfile = async () => {
     if (!profile || !window.confirm(`Delete ${profile.name} and every routine stored for this profile?`)) return;
-    const owned = routines.filter(item => item.profileId === profile.id);
+    // The startup cache intentionally contains only Today records. Deletion must query the
+    // index so deferred/archived routines cannot survive as orphaned local data.
+    const owned = await getAllByIndex('routines', 'profileId', profile.id);
     const remaining = profiles.filter(item => item.id !== profile.id);
     const nextDefaultProfileId = profile.id === defaultProfileId ? remaining[0]?.id || null : defaultProfileId;
-    await Promise.all([
-      remove('profiles', profile.id),
-      ...owned.map(item => remove('routines', item.id)),
-      profile.id === defaultProfileId
-        ? (nextDefaultProfileId
-          ? save('metadata', { key: 'defaultProfileId', value: nextDefaultProfileId })
-          : remove('metadata', 'defaultProfileId'))
-        : Promise.resolve(),
-    ]);
+    await applyBatch({
+      puts: profile.id === defaultProfileId && nextDefaultProfileId
+        ? { metadata: [{ key: 'defaultProfileId', value: nextDefaultProfileId }] }
+        : {},
+      deletes: {
+        profiles: [profile.id],
+        routines: owned.map(item => item.id),
+        ...(profile.id === defaultProfileId && !nextDefaultProfileId
+          ? { metadata: ['defaultProfileId'] }
+          : {}),
+      },
+    });
     setProfiles(remaining);
     setDefaultProfileId(nextDefaultProfileId);
     setRoutines(current => current.filter(item => item.profileId !== profile.id));
@@ -1014,7 +1017,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         <div className="header-inner">
           <button className="brand compact-brand" type="button" onClick={() => { setView('today'); setWorkoutId(null); }}><span className="brand-mark">TM</span><span>The McIlroy Method</span></button>
           <div className="profile-switcher">
-            <select aria-label="Current profile" value={profile.id} onChange={event => { setSelectedProfileId(event.target.value); setSelectedRoutineId(null); setWorkoutId(null); }}>
+            <select aria-label="Current profile" value={profile.id} onChange={event => { setTodayRoutinesLoaded(false); setSelectedProfileId(event.target.value); setSelectedRoutineId(null); setWorkoutId(null); }}>
               {profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
             </select>
             <button type="button" aria-label="Add profile" onClick={() => setAddingProfile(true)}>+</button>
@@ -1023,8 +1026,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       </header>}
 
       <main className="app-main">
-        {message && <div className="toast" role="status">{message}</div>}
-        {updateRegistration && <div className="update-banner"><span>A new version is ready.</span><button type="button" onClick={() => updateRegistration.waiting?.postMessage('skip-waiting')}>Update now</button></div>}
+        {(message || updateRegistration) && <Suspense fallback={null}><TrackerNotices message={message} updateRegistration={updateRegistration} /></Suspense>}
 
         {workoutSummary ? (
           <WorkoutSummary workout={workoutSummary} onDone={() => { setWorkoutSummary(null); setView('today'); }} />
@@ -1042,7 +1044,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             onUndo={undoWorkoutSet}
           />
         ) : view === 'builder' ? (
-          <Suspense fallback={<TrackerScreenFallback label="routine builder" />}>
+          !templatesLoaded ? <TrackerScreenFallback label="routine builder" /> : <Suspense fallback={<TrackerScreenFallback label="routine builder" />}>
             <RoutineBuilder
               profile={profile}
               count={profileRoutines.length}
@@ -1064,6 +1066,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
               ? <button className="secondary-button full-button" type="button" onClick={() => reopenCompletedWorkout(workout)}>Return to workout queue</button>
               : <div className="workout-actions"><button className="primary-button complete-button" type="button" onClick={() => startWorkout(workout)}>Start workout</button><button className="danger-button" type="button" onClick={() => setWorkoutToDelete(workout)}>Delete future workout</button></div>}
           </section>
+        ) : view === 'today' && !todayRoutinesLoaded ? (
+          <TrackerScreenFallback label="training log" />
         ) : view === 'today' ? (
           <section className="dashboard">
             <p className="eyebrow">{routine ? routine.name : 'Ready when you are'}</p>
@@ -1085,22 +1089,23 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} archived={archivedRoutines} activeId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, archive: archivePlan, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, restore: restorePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} archived={archivedRoutines} activeId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, archive: archivePlan, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, restore: restorePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
-          <Suspense fallback={<TrackerScreenFallback label="history" />}>
+          !profileRoutinesLoaded ? <TrackerScreenFallback label="history" /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
             <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
           </Suspense>
         ) : view === 'progress' ? (
-          <Suspense fallback={<TrackerScreenFallback label="progress" />}>
+          !profileRoutinesLoaded ? <TrackerScreenFallback label="progress" /> : <Suspense fallback={<TrackerScreenFallback label="progress" />}>
             <ProgressScreen profile={profile} routines={progressRoutines} />
           </Suspense>
         ) : (
-          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} refs={{ import: importRef, transfer: transferRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, planCsv: () => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8'), historyCsv: () => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8'), backup: () => download(exportBackup(profiles, routines, templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`), transfer: makeTransfer, routineTransfer: () => setChoosingRoutineTransfer(true), importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, transferFile: event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
+          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} refs={{ import: importRef, transfer: transferRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, planCsv: () => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8'), historyCsv: () => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8'), backup: async () => { const local = await loadAllData(); download(exportBackup(local.profiles, local.routines, local.templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`); }, transfer: makeTransfer, routineTransfer: async () => { const records = await getAllByIndex('routines', 'profileId', profile.id); setRoutines(current => [...current.filter(item => item.profileId !== profile.id), ...records]); setChoosingRoutineTransfer(true); }, importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, transferFile: event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
         )}
       </main>
 
       {workoutToDelete && <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={() => setWorkoutToDelete(null)} onConfirm={confirmDeleteWorkout}>This removes {workoutToDelete.weekLabel} · {workoutToDelete.name} from this routine. It will not be marked complete or appear in history.</ConfirmationModal>}
       {finishPrompt && <ConfirmationModal title="Finish this workout?" confirmLabel="Finish workout" onCancel={() => setFinishPrompt(null)} onConfirm={finishActiveWorkout}>{finishPrompt.pendingSets ? `${finishPrompt.pendingSets} planned set${finishPrompt.pendingSets === 1 ? '' : 's'} will be recorded as skipped. ` : ''}{finishPrompt.missingRpe ? 'The main-lift RPE is still blank.' : ''}</ConfirmationModal>}
+      <Suspense fallback={null}>
       {importPlan && <ImportPreview plan={importPlan} onCancel={() => setImportPlan(null)} onConfirm={confirmImport} />}
       {createdTransfer && <TransferCreator transfer={createdTransfer} onClose={() => setCreatedTransfer(null)} onShare={sendTransfer} />}
       {transferFile && <TransferUnlock file={transferFile} onCancel={() => setTransferFile(null)} onUnlock={unlockTransfer} />}
@@ -1108,6 +1113,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       {receivedRoutine && <RoutineDestination transfer={receivedRoutine} profiles={profiles} onCancel={() => setReceivedRoutine(null)} onConfirm={chooseRoutineDestination} />}
       {copyRequest && <RoutineCopyDialog title={`Copy ${copyRequest.item.name}`} eyebrow="Copy routine" defaultName={`${copyRequest.item.name} copy`} profiles={profiles} selectedProfileId={selectedProfileId} confirmLabel="Copy routine" onCancel={() => setCopyRequest(null)} onConfirm={confirmRoutineCopy} />}
       {templateSource && <SaveTemplateDialog routine={templateSource} onCancel={() => setTemplateSource(null)} onConfirm={saveRoutineTemplate} />}
+      </Suspense>
       {templateToDelete && <ConfirmationModal title="Delete template?" confirmLabel="Delete template" onCancel={() => setTemplateToDelete(null)} onConfirm={deleteTemplate}>Delete {templateToDelete.name}? Routines already created from it will not be affected.</ConfirmationModal>}
 
       {view !== 'builder' && !workout && !workoutSummary && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => setView(key)} key={key}>{label}</button>)}</nav>}

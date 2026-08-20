@@ -1,7 +1,8 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
-import { canShareTransfer, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, initialProfileId, PlanSetup, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, TransferCreator, WorkoutCard } from './TrackerApp';
+import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, globalDataOperations, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
+import { RoutineCopyDialog, TransferCreator } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
 describe('default profile selection', () => {
@@ -13,6 +14,54 @@ describe('default profile selection', () => {
 
   it('falls back to the first profile when the saved default no longer exists', () => {
     expect(initialProfileId(profiles, 'deleted')).toBe('wife');
+  });
+});
+
+describe('staged tracker loading', () => {
+  it('reads only profiles, default metadata, and the selected Today routines at startup', async () => {
+    const profiles = [
+      { id: 'p1', activeRoutineId: 'r1', activeWorkoutRoutineId: 'r2' },
+      { id: 'p2', activeRoutineId: 'unread' },
+    ];
+    const storage = {
+      getAll: jest.fn().mockResolvedValue(profiles),
+      get: jest.fn((store, key) => Promise.resolve(store === 'metadata'
+        ? { key, value: 'p1' }
+        : { id: key, profileId: 'p1' })),
+    };
+    const result = await loadInitialTrackerRecords(storage);
+    expect(storage.getAll).toHaveBeenCalledTimes(1);
+    expect(storage.getAll).toHaveBeenCalledWith('profiles');
+    expect(storage.get.mock.calls).toEqual([
+      ['metadata', 'defaultProfileId'], ['routines', 'r1'], ['routines', 'r2'],
+    ]);
+    expect(result.routines.map(item => item.id)).toEqual(['r1', 'r2']);
+    expect(todayRoutineIds({ activeRoutineId: 'same', activeWorkoutRoutineId: 'same' })).toEqual(['same']);
+  });
+
+  it('rejects stale profile reads and preserves newer cached records', () => {
+    const current = [{ id: 'r1', updatedAt: '2026-02-01' }];
+    expect(mergeRoutineRead(current, [{ id: 'stale-profile' }], 1, 2)).toBe(current);
+    expect(mergeRoutineRead(current, [{ id: 'r1', updatedAt: '2025-01-01' }, { id: 'r2' }], 2, 2))
+      .toEqual([...current, { id: 'r2' }]);
+  });
+
+  it('defers secondary records and global reads to their owning operations', () => {
+    expect(trackerLoadPolicy('today')).toEqual({ profileRoutines: false, templates: false, persistence: false });
+    expect(trackerLoadPolicy('progress')).toEqual({ profileRoutines: true, templates: false, persistence: false });
+    expect(trackerLoadPolicy('settings')).toEqual({ profileRoutines: false, templates: true, persistence: true });
+    expect([...globalDataOperations]).toEqual(['backup', 'transfer', 'import-plan', 'routine-destination']);
+  });
+
+  it('loads the overlay module independently of TrackerApp', async () => {
+    global.IS_REACT_ACT_ENVIRONMENT = true;
+    const overlays = await import('./components/TrackerOverlays');
+    const div = document.createElement('div');
+    const root = createRoot(div);
+    await act(async () => root.render(<overlays.TrackerNotices message="Saved" updateRegistration={null} />));
+    expect(div.textContent).toContain('Saved');
+    act(() => root.unmount());
+    global.IS_REACT_ACT_ENVIRONMENT = false;
   });
 });
 
@@ -46,6 +95,52 @@ it('continues the routine persistence queue after a failed save', async () => {
   await expect(first).rejects.toThrow('write failed');
   await expect(second).resolves.toBeUndefined();
   expect(persist.mock.calls.map(call => call[1].id)).toEqual(['first', 'second']);
+});
+
+it('allows an ordered routine write to atomically persist its profile lifecycle update', async () => {
+  const normalPersist = jest.fn();
+  const atomicPersist = jest.fn().mockResolvedValue(undefined);
+  const write = createSerializedRoutineWriter(normalPersist);
+  const routine = { id: 'routine-1' };
+  await write(routine, atomicPersist);
+  expect(atomicPersist).toHaveBeenCalledWith(routine);
+  expect(normalPersist).not.toHaveBeenCalled();
+});
+
+it('clears only the matching active workout reference when finishing', () => {
+  const profile = { id: 'p1', activeWorkoutRoutineId: 'r2', unknown: true };
+  expect(profileAfterFinishedRoutine(profile, 'r1')).toBe(profile);
+  expect(profileAfterFinishedRoutine(profile, 'r2', 'now')).toEqual({
+    id: 'p1', activeWorkoutRoutineId: null, unknown: true, updatedAt: 'now',
+  });
+});
+
+it.each(['start', 'reopen', 'finish'])('%s lifecycle state publishes only after commit and recovers in queue order', async action => {
+  const committed = [];
+  const publish = jest.fn((routine, profile) => committed.push([routine.status, profile.activeWorkoutRoutineId]));
+  const persist = jest.fn()
+    .mockRejectedValueOnce(new Error(`${action} failed`))
+    .mockResolvedValueOnce(undefined);
+  const writer = createSerializedRoutineWriter(jest.fn());
+  const failedRoutine = { id: 'r1', status: `${action}-failed` };
+  const failedProfile = { id: 'p1', activeWorkoutRoutineId: action === 'finish' ? null : 'r1' };
+  const recoveredRoutine = { id: 'r1', status: `${action}-recovered` };
+  const recoveredProfile = { id: 'p1', activeWorkoutRoutineId: action === 'finish' ? null : 'r1' };
+
+  const failed = commitRoutineLifecycle({
+    writer, routine: failedRoutine, profile: failedProfile, persist, publish,
+  });
+  const recovered = commitRoutineLifecycle({
+    writer, routine: recoveredRoutine, profile: recoveredProfile, persist, publish,
+  });
+  expect(publish).not.toHaveBeenCalled();
+  await expect(failed).rejects.toThrow(`${action} failed`);
+  expect(publish).not.toHaveBeenCalled();
+  await expect(recovered).resolves.toBeUndefined();
+  expect(committed).toEqual([[`${action}-recovered`, recoveredProfile.activeWorkoutRoutineId]]);
+  expect(persist.mock.calls.map(call => call[0].status)).toEqual([
+    `${action}-failed`, `${action}-recovered`,
+  ]);
 });
 
 it.each([

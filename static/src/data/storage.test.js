@@ -1,4 +1,5 @@
 import { exportBackup, parseBackup } from './storage';
+import { IDBFactory } from 'fake-indexeddb';
 
 describe('portable backups', () => {
   it('round trips profiles, routines, and templates', () => {
@@ -10,8 +11,8 @@ describe('portable backups', () => {
       profiles,
       routines,
       templates,
-      version: 6,
-      dataSchemaVersion: 6,
+      version: 7,
+      dataSchemaVersion: 7,
     });
   });
 
@@ -25,9 +26,10 @@ describe('portable backups', () => {
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
       ...oldBackup,
-      version: 6,
-      dataSchemaVersion: 6,
+      version: 7,
+      dataSchemaVersion: 7,
       templates: [],
+      profiles: [{ id: 'p1', name: 'Alex', activeWorkoutRoutineId: null }],
     });
     expect(oldBackup.version).toBe(1);
   });
@@ -39,7 +41,7 @@ describe('portable backups', () => {
     };
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
-      ...oldBackup, version: 6, dataSchemaVersion: 6, templates: [],
+      ...oldBackup, version: 7, dataSchemaVersion: 7, templates: [],
     });
   });
 
@@ -51,7 +53,7 @@ describe('portable backups', () => {
     };
     const migrated = parseBackup(JSON.stringify(oldBackup));
 
-    expect(migrated).toMatchObject({ version: 6, dataSchemaVersion: 6, unknown: 'retained' });
+    expect(migrated).toMatchObject({ version: 7, dataSchemaVersion: 7, unknown: 'retained' });
     expect(migrated.routines[0].workouts[0].session.exercises[0]).toMatchObject({
       unknown: true, original: null, substitutedAt: null,
       sets: [{ status: 'skipped', skippedAt: null, skipActionId: null }],
@@ -66,6 +68,18 @@ describe('portable backups', () => {
       profiles: [],
       routines: [],
     }))).toThrow('not a supported');
+  });
+
+  it('normalizes dangling current-version active workout references', () => {
+    const backup = {
+      format: 'mcilroy-method-backup', version: 7, dataSchemaVersion: 7,
+      profiles: [{ id: 'p1', activeWorkoutRoutineId: 'missing', unknown: true }],
+      routines: [], templates: [],
+    };
+    expect(parseBackup(JSON.stringify(backup)).profiles).toEqual([
+      { id: 'p1', activeWorkoutRoutineId: null, unknown: true },
+    ]);
+    expect(backup.profiles[0].activeWorkoutRoutineId).toBe('missing');
   });
 
   it('rejects unrelated JSON files', () => {
@@ -100,5 +114,69 @@ describe('IndexedDB connection reuse', () => {
 
     expect(open).toHaveBeenCalledTimes(1);
     Object.defineProperty(window, 'indexedDB', { configurable: true, value: originalIndexedDB });
+  });
+
+  it('queries routines through the profile index', async () => {
+    const originalIndexedDB = window.indexedDB;
+    const getAll = jest.fn(() => ({ result: [{ id: 'r1' }] }));
+    const index = jest.fn(() => ({ getAll }));
+    const open = jest.fn(() => {
+      const database = {
+        close: jest.fn(),
+        transaction: () => {
+          const transaction = { objectStore: () => ({ index }) };
+          Promise.resolve().then(() => transaction.oncomplete());
+          return transaction;
+        },
+      };
+      const request = { result: database };
+      Promise.resolve().then(() => request.onsuccess());
+      return request;
+    });
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: { open } });
+    let isolatedStorage;
+    jest.isolateModules(() => { isolatedStorage = require('./storage'); });
+
+    await expect(isolatedStorage.getAllByIndex('routines', 'profileId', 'p1')).resolves.toEqual([{ id: 'r1' }]);
+    expect(index).toHaveBeenCalledWith('profileId');
+    expect(getAll).toHaveBeenCalledWith('p1');
+    expect(() => isolatedStorage.getAll('unknown')).toThrow('Unknown IndexedDB store');
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: originalIndexedDB });
+  });
+});
+
+describe('atomic IndexedDB batches', () => {
+  let originalIndexedDB;
+  let originalStructuredClone;
+  let isolatedStorage;
+
+  beforeEach(() => {
+    originalIndexedDB = window.indexedDB;
+    originalStructuredClone = global.structuredClone;
+    global.structuredClone = value => JSON.parse(JSON.stringify(value));
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: new IDBFactory() });
+    jest.isolateModules(() => { isolatedStorage = require('./storage'); });
+  });
+
+  afterEach(() => {
+    global.structuredClone = originalStructuredClone;
+    Object.defineProperty(window, 'indexedDB', { configurable: true, value: originalIndexedDB });
+  });
+
+  it('commits records in multiple stores together', async () => {
+    await isolatedStorage.applyBatch({ puts: {
+      profiles: [{ id: 'p1', activeWorkoutRoutineId: 'r1' }],
+      routines: [{ id: 'r1', profileId: 'p1' }],
+    } });
+    await expect(isolatedStorage.get('profiles', 'p1')).resolves.toMatchObject({ activeWorkoutRoutineId: 'r1' });
+    await expect(isolatedStorage.get('routines', 'r1')).resolves.toMatchObject({ profileId: 'p1' });
+  });
+
+  it('aborts every store when a later request is invalid', async () => {
+    await expect(isolatedStorage.applyBatch({ puts: {
+      profiles: [{ id: 'p1' }],
+      routines: [{ profileId: 'p1' }],
+    } })).rejects.toBeTruthy();
+    await expect(isolatedStorage.get('profiles', 'p1')).resolves.toBeUndefined();
   });
 });

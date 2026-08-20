@@ -1,4 +1,4 @@
-export const DATABASE_VERSION = 6;
+export const DATABASE_VERSION = 7;
 
 const effectiveMaxesFor = (inputs, cycleIndex = 0) => ({
   maxSquat: Number(inputs.maxSquat) + (Number(inputs.squatIncrement) || 0) * cycleIndex,
@@ -54,14 +54,37 @@ const createRecordStore = (database, storeName) => {
   }
 };
 
+export const activeWorkoutIdsByProfile = routines => {
+  const newest = new Map();
+  (Array.isArray(routines) ? routines : []).forEach(routine => {
+    if (!routine?.profileId || !routine.workouts?.some(workout => workout.session?.status === 'inProgress')) return;
+    const previous = newest.get(routine.profileId);
+    // Legacy data can contain multiple active sessions. updatedAt is the established
+    // tie-breaker; keep it stable so startup never changes which workout is resumed.
+    if (!previous || String(routine.updatedAt || '').localeCompare(String(previous.updatedAt || '')) > 0) {
+      newest.set(routine.profileId, routine);
+    }
+  });
+  return new Map([...newest].map(([profileId, routine]) => [profileId, routine.id]));
+};
+
+export const addActiveWorkoutReferences = (profiles, routines) => {
+  const activeIds = activeWorkoutIdsByProfile(routines);
+  return Array.isArray(profiles) ? profiles.map(profile => ({
+    ...profile,
+    activeWorkoutRoutineId: activeIds.get(profile.id) || null,
+  })) : profiles;
+};
+
 // Each migration upgrades from the previous numeric version to its key. Keep
 // migrations forever: a returning installation may be several releases old.
 export const databaseMigrations = {
-  1: ({ database }) => {
+  1: ({ database, done }) => {
     createRecordStore(database, 'profiles');
     createRecordStore(database, 'routines');
+    done();
   },
-  2: ({ database, transaction }) => {
+  2: ({ database, transaction, done }) => {
     if (!database.objectStoreNames.contains('metadata')) {
       database.createObjectStore('metadata', { keyPath: 'key' });
     }
@@ -69,66 +92,103 @@ export const databaseMigrations = {
       key: 'dataSchemaVersion',
       value: 2,
     });
+    done();
   },
-  3: ({ database, transaction }) => {
+  3: ({ database, transaction, done }) => {
     const cursorRequest = transaction.objectStore('routines').openCursor();
     cursorRequest.onsuccess = event => {
       const cursor = event.target.result;
-      if (!cursor) return;
+      if (!cursor) {
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 3 });
+        done();
+        return;
+      }
       cursor.update(addEffectiveMaxSnapshots(cursor.value));
       cursor.continue();
     };
-    transaction.objectStore('metadata').put({
-      key: 'dataSchemaVersion',
-      value: 3,
-    });
   },
-  4: ({ transaction }) => {
+  4: ({ transaction, done }) => {
     const cursorRequest = transaction.objectStore('routines').openCursor();
     cursorRequest.onsuccess = event => {
       const cursor = event.target.result;
-      if (!cursor) return;
+      if (!cursor) {
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 4 });
+        done();
+        return;
+      }
       cursor.update(addWorkoutSessions(cursor.value));
       cursor.continue();
     };
-    transaction.objectStore('metadata').put({
-      key: 'dataSchemaVersion',
-      value: 4,
-    });
   },
-  5: ({ database, transaction }) => {
+  5: ({ database, transaction, done }) => {
     createRecordStore(database, 'templates');
     transaction.objectStore('metadata').put({
       key: 'dataSchemaVersion',
       value: 5,
     });
+    done();
   },
-  6: ({ transaction }) => {
+  6: ({ transaction, done }) => {
     const cursorRequest = transaction.objectStore('routines').openCursor();
     cursorRequest.onsuccess = event => {
       const cursor = event.target.result;
-      if (!cursor) return;
+      if (!cursor) {
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 6 });
+        done();
+        return;
+      }
       cursor.update(addSessionActionMetadata(cursor.value));
       cursor.continue();
     };
-    transaction.objectStore('metadata').put({
-      key: 'dataSchemaVersion',
-      value: 6,
-    });
+  },
+  7: ({ transaction, done }) => {
+    const routinesStore = transaction.objectStore('routines');
+    if (!routinesStore.indexNames.contains('profileId')) {
+      routinesStore.createIndex('profileId', 'profileId', { unique: false });
+    }
+    const routines = [];
+    const routineCursor = routinesStore.openCursor();
+    routineCursor.onsuccess = event => {
+      const cursor = event.target.result;
+      if (cursor) {
+        routines.push(cursor.value);
+        cursor.continue();
+        return;
+      }
+      const activeIds = activeWorkoutIdsByProfile(routines);
+      const profileCursor = transaction.objectStore('profiles').openCursor();
+      profileCursor.onsuccess = profileEvent => {
+        const profile = profileEvent.target.result;
+        if (!profile) {
+          transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 7 });
+          done();
+          return;
+        }
+        profile.update({
+          ...profile.value,
+          activeWorkoutRoutineId: activeIds.get(profile.value.id) || null,
+        });
+        profile.continue();
+      };
+    };
   },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
-  for (let version = oldVersion + 1; version <= newVersion; version += 1) {
+  const run = version => {
+    if (version > newVersion) return;
     const migrate = databaseMigrations[version];
     if (!migrate) {
       throw new Error(`Missing IndexedDB migration for version ${version}.`);
     }
-    migrate({ database, transaction });
-  }
+    // Cursor migrations must finish before the next migration starts. In particular,
+    // v7 derives profile pointers from the fully migrated v3/v4/v6 routine records.
+    migrate({ database, transaction, done: () => run(version + 1) });
+  };
+  run(oldVersion + 1);
 };
 
-export const BACKUP_VERSION = 6;
+export const BACKUP_VERSION = 7;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -167,6 +227,12 @@ export const backupMigrations = {
     routines: Array.isArray(backup.routines)
       ? backup.routines.map(addSessionActionMetadata)
       : backup.routines,
+  }),
+  7: backup => ({
+    ...backup,
+    version: 7,
+    dataSchemaVersion: 7,
+    profiles: addActiveWorkoutReferences(backup.profiles, backup.routines),
   }),
 };
 
