@@ -1,6 +1,25 @@
 'use strict';
 
 const { performance } = require('perf_hooks');
+const fs = require('fs');
+const path = require('path');
+const babel = require('@babel/core');
+
+// Benchmarks execute the same ES modules shipped by CRA. Keeping this small loader here
+// avoids maintaining benchmark-only copies whose apparent speed can drift from production.
+process.env.BABEL_ENV = 'test';
+process.env.NODE_ENV = 'test';
+const sourceRoot = path.resolve(__dirname, '..', 'src');
+const originalJavaScriptLoader = require.extensions['.js'];
+require.extensions['.js'] = (module, filename) => {
+  if (!filename.startsWith(sourceRoot)) return originalJavaScriptLoader(module, filename);
+  const transformed = babel.transformSync(fs.readFileSync(filename, 'utf8'), {
+    filename,
+    presets: [require.resolve('babel-preset-react-app')],
+    sourceMaps: false,
+  });
+  return module._compile(transformed.code, filename);
+};
 const {
   PROGRESS_HISTORY_SIZES,
   buildActiveRoutine,
@@ -8,6 +27,10 @@ const {
   buildCompletedRoutines,
   buildProgressHistory,
 } = require('./performance-fixtures');
+const { buildProgressFacts, summarizeProgressFacts } = require('../src/data/progress');
+const { serializedRecordsEqual } = require('../src/data/recordComparison');
+const { DATA_TASKS, runDataTask, streamDataTask } = require('../src/data/dataTaskHandlers');
+const { adjustSessionSet } = require('../src/data/routines');
 
 const time = (name, operation) => {
   const before = process.memoryUsage().heapUsed;
@@ -27,29 +50,35 @@ time('cold Today data (active routine)', () => JSON.parse(JSON.stringify(buildAc
 [1, 5, 10].forEach(years => time(`${years}-year completed history fixture`, () => buildCompletedRoutines(years)));
 PROGRESS_HISTORY_SIZES.forEach(size => time(`progress preprocessing (${size})`, () => {
   const routines = buildProgressHistory(size);
-  return routines[0].workouts.reduce((total, workout) => total + workout.session.exercises
-    .flatMap(exercise => exercise.sets)
-    .reduce((volume, set) => volume + Number(set.actualWeight) * Number(set.actualReps), 0), 0);
+  const facts = buildProgressFacts(routines);
+  return summarizeProgressFacts(facts, { range: 'all', now: new Date('2085-01-01T00:00:00Z') });
 }));
 
 const inputBurst = time('10-character active-set burst', () => {
   const routine = buildActiveRoutine();
   let draft = '';
   for (let index = 0; index < 10; index += 1) draft += String(index % 10);
-  const serialized = JSON.stringify({ routine, draft });
-  return { routineTransformations: 1, indexedDbTransactions: 1, bytesWritten: Buffer.byteLength(serialized) };
+  const workout = routine.workouts.find(item => item.session?.status === 'inProgress');
+  const exercise = workout.session.exercises[0];
+  const set = exercise.sets[0];
+  const adjusted = adjustSessionSet(routine, workout.id, exercise.exerciseId, set.id, { actualWeight: draft });
+  const serialized = JSON.stringify(adjusted);
+  return { routineTransformations: adjusted === routine ? 0 : 1, indexedDbTransactions: adjusted === routine ? 0 : 1, bytesWritten: Buffer.byteLength(serialized) };
 });
 report('  routine transformations', inputBurst.routineTransformations);
 report('  IndexedDB transactions', inputBurst.indexedDbTransactions);
 report('  bytes written', inputBurst.bytesWritten);
 
 const pair = time('large backup fixture (5000)', () => buildBackupPair(5000));
-time('import comparison (identical)', () => JSON.stringify(pair.original) === JSON.stringify(pair.identical));
-time('import comparison (one nested set)', () => JSON.stringify(pair.original) === JSON.stringify(pair.changed));
-time('pretty backup serialization', () => JSON.stringify(pair.original, null, 2));
-time('compact transfer serialization', () => JSON.stringify(pair.original));
-time('history CSV-sized row generation', () => pair.original.routines[0].workouts.flatMap(workout => (
-  workout.session.exercises.flatMap(exercise => exercise.sets.map(set => [workout.id, exercise.movement, set.actualWeight, set.actualReps]))
-)));
+time('import comparison (identical)', () => serializedRecordsEqual(pair.original, pair.identical));
+time('import comparison (one nested set)', () => serializedRecordsEqual(pair.original, pair.changed));
+const taskPayload = { profiles: pair.original.profiles, routines: pair.original.routines, templates: pair.original.templates };
+time('pretty backup serialization', () => runDataTask(DATA_TASKS.SERIALIZE_BACKUP, taskPayload));
+time('compact transfer serialization', () => runDataTask(DATA_TASKS.SERIALIZE_TRANSFER, pair.original));
+time('history CSV worker streaming', () => {
+  let bytes = 0;
+  streamDataTask(DATA_TASKS.HISTORY_CSV, { routine: pair.original.routines[0] }, chunk => { bytes += Buffer.byteLength(chunk); });
+  return bytes;
+});
 console.log('* Heap is the positive before/after delta, useful for comparisons rather than an absolute peak.');
 console.log('Benchmarks report trends only; functional budgets are enforced by tests and check:bundle.');

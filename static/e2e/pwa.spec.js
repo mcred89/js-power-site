@@ -10,6 +10,130 @@ test.beforeEach(async ({ request }) => {
   if (usesLocalReleaseFixtures) await request.get('/__smoke/release/reset');
 });
 
+test('standalone tracker excludes calculator-only entry requests', async ({ page }) => {
+  const scripts = [];
+  page.on('request', request => {
+    if (request.resourceType() === 'script') scripts.push(request.url());
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Who is training?' })).toBeVisible();
+  const sources = await Promise.all(scripts.map(async url => {
+    const response = await page.request.get(`${url}.map`);
+    return response.ok() ? response.json().then(map => map.sources || []) : [];
+  }));
+  expect(sources.flat().some(source => /react-router|MaxesForm|CalculatorWebsite/.test(source))).toBe(false);
+});
+
+test('PWA coalesces typed drafts and folds an immediate action into one durable write', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__routineWrites = 0;
+    const original = IDBDatabase.prototype.transaction;
+    IDBDatabase.prototype.transaction = function instrumentedTransaction(stores, mode, ...rest) {
+      const names = Array.isArray(stores) ? stores : [stores];
+      if (mode === 'readwrite' && names.includes('routines')) window.__routineWrites += 1;
+      return original.call(this, stores, mode, ...rest);
+    };
+  });
+  await createProfile(page, 'Draft Athlete');
+  await createRoutine(page, { name: 'Draft Plan' });
+  await page.getByRole('button', { name: 'Open workout' }).click();
+  await page.getByRole('button', { name: 'Start workout' }).click();
+  const weight = page.getByRole('textbox', { name: 'Weight (lb)' });
+  await page.evaluate(() => { window.__routineWrites = 0; });
+  await weight.fill('1234567890');
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => window.__routineWrites)).toBe(0);
+  await page.waitForTimeout(250);
+  expect(await page.evaluate(() => window.__routineWrites)).toBe(1);
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume workout' }).click();
+  await expect(page.getByRole('textbox', { name: 'Weight (lb)' })).toHaveValue('1234567890');
+
+  await page.evaluate(() => { window.__routineWrites = 0; });
+  await page.getByRole('textbox', { name: 'Reps' }).fill('9876543210');
+  await page.getByRole('button', { name: 'Complete set' }).click();
+  expect(await page.evaluate(() => window.__routineWrites)).toBe(1);
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume workout' }).click();
+  await expect(page.getByText('1/4 sets')).toBeVisible();
+  await page.getByRole('button', { name: 'Undo latest action' }).click();
+  await expect(page.getByRole('textbox', { name: 'Reps' })).toHaveValue('9876543210');
+});
+
+test('PWA bounds long History and Progress DOM while retaining complete metrics', async ({ page }) => {
+  await createProfile(page, 'Long History Athlete');
+  await createRoutine(page, { name: 'Long History Plan' });
+  await page.evaluate(async () => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mcilroy-method', 7);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const routine = await new Promise((resolve, reject) => {
+      const request = database.transaction('routines').objectStore('routines').getAll();
+      request.onsuccess = () => resolve(request.result[0]);
+      request.onerror = () => reject(request.error);
+    });
+    const base = routine.workouts[0];
+    const now = Date.now();
+    routine.workouts = Array.from({ length: 150 }, (_, index) => {
+      const completedAt = new Date(now - (149 - index) * 86400000).toISOString();
+      const exercises = base.exercises.map((exercise, exerciseIndex) => ({
+        exerciseId: exercise.id,
+        movement: exercise.generated.movement,
+        prescription: exercise.generated.prescription,
+        sets: [{
+          id: `set-${index}-${exerciseIndex}`,
+          number: 1,
+          status: 'completed',
+          plannedWeight: exercise.generated.weight,
+          plannedReps: 5,
+          actualWeight: Number(exercise.generated.weight) + index,
+          actualReps: 5,
+          splitSeconds: 60,
+        }],
+      }));
+      return {
+        ...base,
+        id: `history-${index}`,
+        sequence: index + 1,
+        completedAt,
+        session: {
+          status: 'completed',
+          startedAt: new Date(Date.parse(completedAt) - 1800000).toISOString(),
+          completedAt,
+          elapsedSeconds: 1800,
+          primaryExerciseId: exercises[0].exerciseId,
+          rpe: 8,
+          exercises,
+        },
+      };
+    });
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction('routines', 'readwrite');
+      transaction.objectStore('routines').put(routine);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  });
+  await page.reload();
+  await page.getByRole('button', { name: 'History' }).click();
+  await expect(page.locator('.history-workout')).toHaveCount(25);
+  await page.getByRole('button', { name: 'Show 25 older workouts' }).click();
+  await expect(page.locator('.history-workout')).toHaveCount(50);
+  await page.locator('.history-workout').first().getByRole('button').click();
+  await page.getByRole('button', { name: 'Back' }).click();
+  await expect(page.locator('.history-workout')).toHaveCount(50);
+
+  await page.getByRole('button', { name: 'Progress' }).click();
+  await page.getByLabel('Time range').selectOption('all');
+  await expect(page.locator('.progress-metric').filter({ hasText: 'Workouts' }).locator('strong')).toHaveText('150');
+  await expect(page.locator('.chart-point')).toHaveCount(120);
+  await expect(page.locator('.chart-data summary')).toHaveText('View all 150 data points');
+  await expect(page.locator('.chart-data tbody tr')).toHaveCount(0);
+});
+
 test('PWA tracks an autosaved workout session, history, and max correction', async ({ page }) => {
   await createProfile(page);
   await createRoutine(page);
