@@ -28,7 +28,7 @@ const App = () => {
   }
 
   return (
-    <Suspense fallback={<div className="loading-screen">Opening calculator…</div>}>
+    <Suspense fallback={<div className="loading-screen">Loading…</div>}>
       <CalculatorWebsite appearance={appearance} onAppearanceChange={setAppearance} />
     </Suspense>
   );

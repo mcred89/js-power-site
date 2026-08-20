@@ -38,52 +38,75 @@ const dateKey = value => {
   return `${year}-${month}-${day}`;
 };
 
-const rangeStart = (range, now, completed) => {
-  if (range === 'all') {
-    const first = completed.map(item => item.completedAt).sort()[0];
-    return first ? startOfDay(first) : startOfDay(now);
-  }
-  const days = range === '30d' ? 30 : range === '1y' ? 365 : 90;
-  const start = startOfDay(now);
-  start.setDate(start.getDate() - (days - 1));
-  return start;
-};
-
 const primaryExerciseFor = workout => workout.session?.exercises?.find(exercise => (
   exercise.exerciseId === workout.session.primaryExerciseId
 )) || workout.session?.exercises?.[0];
 
 const completedSets = exercise => (exercise?.sets || []).filter(set => set.status === 'completed');
 
-const scopedWorkouts = (routines, routineId) => routines
-  .filter(routine => routineId === 'all' || routine.id === routineId)
-  .flatMap(routine => routine.workouts || [])
-  .filter(workout => workout.completedAt)
-  .sort((a, b) => a.completedAt.localeCompare(b.completedAt));
-
-const weekBuckets = (workouts, start, now) => {
-  const buckets = [];
-  const cursor = startOfWeek(start);
-  const last = startOfWeek(now);
-  while (cursor <= last) {
-    buckets.push({ key: dateKey(cursor), start: new Date(cursor), workouts: 0, volume: 0 });
-    cursor.setDate(cursor.getDate() + 7);
-  }
-  const byKey = new Map(buckets.map(bucket => [bucket.key, bucket]));
-  workouts.forEach(workout => {
-    const bucket = byKey.get(dateKey(startOfWeek(workout.completedAt)));
-    if (!bucket) return;
-    bucket.workouts += 1;
-    bucket.volume += (workout.session?.exercises || []).reduce((workoutTotal, exercise) => (
+// Facts are deliberately independent of the selected filters. Keep expensive session
+// traversal here so changing a range or lift remains proportional to workout count.
+export const buildProgressFacts = routines => (routines || []).flatMap(routine => (
+  (routine.workouts || []).filter(workout => workout.completedAt).map(workout => {
+    const primaryExercise = primaryExerciseFor(workout);
+    const lift = normalizeMainLift(primaryExercise?.movement);
+    const splits = completedSets(primaryExercise)
+      .map(set => numeric(set.splitSeconds))
+      .filter(value => value !== null && value >= 0)
+      .sort((a, b) => a - b);
+    let previous = 0;
+    const intervals = splits.map(split => {
+      const interval = Math.max(0, split - previous);
+      previous = split;
+      return interval;
+    });
+    const estimates = completedSets(primaryExercise)
+      .map(set => estimatedOneRepMax(set.actualWeight, set.actualReps))
+      .filter(value => value !== null);
+    const duration = numeric(workout.session?.elapsedSeconds);
+    const completedAt = workout.completedAt;
+    const day = dateKey(completedAt);
+    const weekStart = startOfWeek(completedAt);
+    const volume = (workout.session?.exercises || []).reduce((workoutTotal, exercise) => (
       workoutTotal + completedSets(exercise).reduce((exerciseTotal, set) => {
         const weight = numeric(set.actualWeight);
         const reps = numeric(set.actualReps);
         return exerciseTotal + (weight !== null && reps !== null && weight > 0 && reps > 0 ? weight * reps : 0);
       }, 0)
     ), 0);
-  });
-  return buckets;
+    return {
+      routineId: routine.id,
+      workoutId: workout.id,
+      completedAt,
+      dayKey: day,
+      weekKey: dateKey(weekStart),
+      volume,
+      lift,
+      e1rm: estimates.length ? Math.max(...estimates) : null,
+      duration: workout.session?.status === 'completed' && duration !== null && duration >= 0 ? duration : null,
+      completedSetSplits: splits,
+      setIntervals: intervals,
+      timingEligible: workout.session?.status === 'completed' && Boolean(lift),
+    };
+  })
+)).sort((a, b) => a.completedAt.localeCompare(b.completedAt));
+
+const rangeStart = (range, now, facts) => {
+  if (range === 'all') return facts.length ? startOfDay(facts[0].completedAt) : startOfDay(now);
+  const days = range === '30d' ? 30 : range === '1y' ? 365 : 90;
+  const start = startOfDay(now);
+  start.setDate(start.getDate() - (days - 1));
+  return start;
 };
+
+const emptyTiming = () => MAIN_LIFTS.map(lift => ({
+  lift,
+  workoutCount: 0,
+  durationTotal: 0,
+  durationCount: 0,
+  intervalTotal: 0,
+  intervalCount: 0,
+}));
 
 const streaksFor = buckets => {
   let longest = 0;
@@ -92,7 +115,6 @@ const streaksFor = buckets => {
     running = bucket.workouts ? running + 1 : 0;
     longest = Math.max(longest, running);
   });
-
   let index = buckets.length - 1;
   if (index >= 0 && buckets[index].workouts === 0) index -= 1;
   let current = 0;
@@ -103,79 +125,117 @@ const streaksFor = buckets => {
   return { current, longest };
 };
 
-const e1rmForWorkout = workout => {
-  const exercise = primaryExerciseFor(workout);
-  const lift = normalizeMainLift(exercise?.movement);
-  if (!lift) return null;
-  const estimates = completedSets(exercise)
-    .map(set => estimatedOneRepMax(set.actualWeight, set.actualReps))
-    .filter(value => value !== null);
-  if (!estimates.length) return null;
-  return { lift, value: Math.max(...estimates), completedAt: workout.completedAt, workoutId: workout.id };
-};
-
-const average = values => values.length
-  ? values.reduce((total, value) => total + value, 0) / values.length
-  : null;
-
-const timingFor = workouts => MAIN_LIFTS.map(lift => {
-  const matching = workouts.map(workout => {
-    const exercise = primaryExerciseFor(workout);
-    if (normalizeMainLift(exercise?.movement) !== lift || workout.session?.status !== 'completed') return null;
-    const splits = completedSets(exercise)
-      .map(set => numeric(set.splitSeconds))
-      .filter(value => value !== null && value >= 0)
-      .sort((a, b) => a - b);
-    let previous = 0;
-    const intervals = splits.map(split => {
-      const interval = Math.max(0, split - previous);
-      previous = split;
-      return interval;
-    });
-    const duration = numeric(workout.session.elapsedSeconds);
-    return { duration: duration !== null && duration >= 0 ? duration : null, intervals };
-  }).filter(Boolean);
-  return {
-    lift,
-    workoutCount: matching.length,
-    averageWorkoutSeconds: average(matching.map(item => item.duration).filter(value => value !== null)),
-    averageSetIntervalSeconds: average(matching.flatMap(item => item.intervals)),
-  };
-});
-
-export const summarizeProgress = (
-  routines,
+export const summarizeProgressFacts = (
+  facts,
   { range = '90d', routineId = 'all', lift = 'Squat', now = new Date() } = {},
 ) => {
-  const scoped = scopedWorkouts(routines, routineId);
+  const scoped = facts.filter(fact => routineId === 'all' || fact.routineId === routineId);
   const start = rangeStart(range, now, scoped);
   const end = new Date(now);
-  const ranged = scoped.filter(workout => {
-    const completedAt = new Date(workout.completedAt);
-    return completedAt >= start && completedAt <= end;
-  });
-  const buckets = weekBuckets(ranged, start, end);
-  const streaks = streaksFor(buckets);
-  const rangeEstimates = ranged.map(e1rmForWorkout).filter(Boolean);
-  const lifetimeEstimates = scoped.map(e1rmForWorkout).filter(item => item?.lift === lift);
-  const selectedEstimates = rangeEstimates.filter(item => item.lift === lift);
-  const personalRecord = lifetimeEstimates.reduce((best, item) => (
-    !best || item.value > best.value ? item : best
-  ), null);
-  const activeWeeks = buckets.filter(bucket => bucket.workouts > 0).length;
+  const buckets = [];
+  const cursor = startOfWeek(start);
+  const last = startOfWeek(end);
+  while (cursor <= last) {
+    buckets.push({ key: dateKey(cursor), start: new Date(cursor), workouts: 0, volume: 0 });
+    cursor.setDate(cursor.getDate() + 7);
+  }
+  const bucketByKey = new Map(buckets.map(bucket => [bucket.key, bucket]));
+  const timing = emptyTiming();
+  const timingByLift = new Map(timing.map(item => [item.lift, item]));
+  const e1rmSeries = [];
+  let personalRecord = null;
+  let completedWorkouts = 0;
+  let totalVolume = 0;
 
+  // One pass supplies lifetime PR and every range aggregate; the PR intentionally
+  // considers scoped facts outside the selected date range.
+  scoped.forEach(fact => {
+    if (fact.lift === lift && fact.e1rm !== null && (!personalRecord || fact.e1rm > personalRecord.value)) {
+      personalRecord = { lift, value: fact.e1rm, completedAt: fact.completedAt, workoutId: fact.workoutId };
+    }
+    const completedDate = new Date(fact.completedAt);
+    if (completedDate < start || completedDate > end) return;
+    completedWorkouts += 1;
+    totalVolume += fact.volume;
+    const bucket = bucketByKey.get(fact.weekKey);
+    if (bucket) {
+      bucket.workouts += 1;
+      bucket.volume += fact.volume;
+    }
+    if (fact.lift === lift && fact.e1rm !== null) {
+      e1rmSeries.push({ lift, value: fact.e1rm, completedAt: fact.completedAt, workoutId: fact.workoutId });
+    }
+    if (fact.timingEligible) {
+      const item = timingByLift.get(fact.lift);
+      item.workoutCount += 1;
+      if (fact.duration !== null) {
+        item.durationTotal += fact.duration;
+        item.durationCount += 1;
+      }
+      fact.setIntervals.forEach(interval => {
+        item.intervalTotal += interval;
+        item.intervalCount += 1;
+      });
+    }
+  });
+  const activeWeeks = buckets.filter(bucket => bucket.workouts > 0).length;
   return {
-    completedWorkouts: ranged.length,
-    totalVolume: buckets.reduce((total, bucket) => total + bucket.volume, 0),
+    completedWorkouts,
+    totalVolume,
     weekly: buckets,
     consistency: {
       activeWeeks,
       totalWeeks: buckets.length,
       activeWeekRate: buckets.length ? activeWeeks / buckets.length : 0,
-      ...streaks,
+      ...streaksFor(buckets),
     },
-    e1rmSeries: selectedEstimates,
+    e1rmSeries,
     personalRecord,
-    timing: timingFor(ranged),
+    timing: timing.map(item => ({
+      lift: item.lift,
+      workoutCount: item.workoutCount,
+      averageWorkoutSeconds: item.durationCount ? item.durationTotal / item.durationCount : null,
+      averageSetIntervalSeconds: item.intervalCount ? item.intervalTotal / item.intervalCount : null,
+    })),
   };
+};
+
+export const summarizeProgress = (routines, options) => summarizeProgressFacts(buildProgressFacts(routines), options);
+
+export const sampleProgressSeries = (points, limit = 120) => {
+  if (points.length <= limit) return points;
+  const required = new Set([0, points.length - 1]);
+  let minimum = 0;
+  let maximum = 0;
+  points.forEach((point, index) => {
+    if (point.value < points[minimum].value) minimum = index;
+    if (point.value > points[maximum].value) maximum = index;
+  });
+  required.add(minimum);
+  required.add(maximum);
+  const remaining = limit - required.size;
+  const candidates = [];
+  const bucketCount = Math.max(1, Math.ceil(remaining / 2));
+  for (let bucket = 0; bucket < bucketCount; bucket += 1) {
+    const from = Math.floor(bucket * points.length / bucketCount);
+    const to = Math.floor((bucket + 1) * points.length / bucketCount);
+    let localMinimum = from;
+    let localMaximum = from;
+    for (let index = from + 1; index < to; index += 1) {
+      if (points[index].value < points[localMinimum].value) localMinimum = index;
+      if (points[index].value > points[localMaximum].value) localMaximum = index;
+    }
+    candidates.push(localMinimum, localMaximum);
+  }
+  candidates.forEach(index => {
+    if (required.size < limit) required.add(index);
+  });
+  // Fill any capacity lost to duplicate extrema, retaining chronological coverage.
+  for (let index = 0; required.size < limit && index < points.length; index += 1) required.add(index);
+  const seenWorkoutIds = new Set();
+  return [...required].sort((a, b) => a - b).map(index => points[index]).filter(point => {
+    if (seenWorkoutIds.has(point.workoutId)) return false;
+    seenWorkoutIds.add(point.workoutId);
+    return true;
+  });
 };

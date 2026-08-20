@@ -1,4 +1,11 @@
-import { estimatedOneRepMax, normalizeMainLift, summarizeProgress } from './progress';
+import {
+  buildProgressFacts,
+  estimatedOneRepMax,
+  normalizeMainLift,
+  sampleProgressSeries,
+  summarizeProgress,
+  summarizeProgressFacts,
+} from './progress';
 
 const workout = ({
   id,
@@ -90,4 +97,55 @@ it('averages workout duration and primary-lift set intervals', () => {
 
   expect(squat.averageWorkoutSeconds).toBe(750);
   expect(squat.averageSetIntervalSeconds).toBe(90);
+});
+
+it('builds immutable sorted facts and produces the same summary through either API', () => {
+  const routines = [routine('one', [
+    workout({ id: 'later', completedAt: '2026-03-09T00:30:00-05:00', lift: 'Press', sets: [{ weight: 'bad', reps: 5, split: 90 }] }),
+    workout({ id: 'earlier', completedAt: '2026-03-08T00:30:00-06:00', sets: [{ weight: 100, reps: 5, split: 50 }, { weight: 100, reps: 5, split: 120 }] }),
+  ])];
+  const before = JSON.stringify(routines);
+  const facts = buildProgressFacts(routines);
+  const options = { range: 'all', lift: 'Squat', now: new Date('2026-03-10T12:00:00-05:00') };
+
+  expect(facts.map(fact => fact.workoutId)).toEqual(['earlier', 'later']);
+  expect(facts[0]).toMatchObject({ routineId: 'one', dayKey: '2026-03-08', volume: 1000, lift: 'Squat', completedSetSplits: [50, 120], setIntervals: [50, 70] });
+  expect(facts[1].e1rm).toBeNull();
+  expect(summarizeProgressFacts(facts, options)).toEqual(summarizeProgress(routines, options));
+  expect(JSON.stringify(routines)).toBe(before);
+});
+
+it('preserves all range, routine, lift, invalid-value, and legacy result fields', () => {
+  const routines = [
+    routine('one', [
+      workout({ id: 'old-pr', completedAt: '2024-01-01T12:00:00.000Z', sets: [{ weight: 400, reps: 1, split: 20 }] }),
+      workout({ id: 'invalid', completedAt: '2026-08-15T12:00:00.000Z', sets: [{ weight: Infinity, reps: 5, split: -5 }] }),
+      workout({ id: 'legacy', completedAt: '2026-08-16T12:00:00.000Z', legacy: true }),
+    ]),
+    routine('two', [workout({ id: 'press', completedAt: '2026-08-17T12:00:00.000Z', lift: 'Press', sets: [{ weight: 100, reps: 5, split: 30 }] })]),
+  ];
+  const facts = buildProgressFacts(routines);
+  const result = summarizeProgressFacts(facts, { range: '30d', routineId: 'one', lift: 'Squat', now: new Date('2026-08-18T12:00:00.000Z') });
+
+  expect(result).toMatchObject({ completedWorkouts: 2, totalVolume: 0 });
+  expect(result.personalRecord.workoutId).toBe('old-pr');
+  expect(result.e1rmSeries).toEqual([]);
+  expect(result.timing.find(item => item.lift === 'Squat')).toMatchObject({ workoutCount: 1, averageSetIntervalSeconds: null });
+});
+
+it('samples long series within the cap while retaining chronological extrema and endpoints', () => {
+  const points = Array.from({ length: 1000 }, (_, index) => ({
+    workoutId: `workout-${index}`,
+    completedAt: new Date(2020, 0, index + 1).toISOString(),
+    value: index === 333 ? -100 : index === 777 ? 10000 : 200 + Math.sin(index) * 20,
+  }));
+  const sampled = sampleProgressSeries(points);
+
+  expect(sampled.length).toBeLessThanOrEqual(120);
+  expect(sampled[0]).toBe(points[0]);
+  expect(sampled[sampled.length - 1]).toBe(points[points.length - 1]);
+  expect(sampled).toContain(points[333]);
+  expect(sampled).toContain(points[777]);
+  expect(new Set(sampled.map(point => point.workoutId)).size).toBe(sampled.length);
+  expect(sampled.map(point => points.indexOf(point))).toEqual([...sampled].map(point => points.indexOf(point)).sort((a, b) => a - b));
 });

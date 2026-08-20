@@ -1,6 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { formatDuration } from './WorkoutSession';
-import { MAIN_LIFTS, summarizeProgress } from '../data/progress';
+import {
+  buildProgressFacts,
+  MAIN_LIFTS,
+  sampleProgressSeries,
+  summarizeProgressFacts,
+} from '../data/progress';
 
 const RANGE_OPTIONS = [
   ['30d', '30 days'],
@@ -11,36 +16,43 @@ const RANGE_OPTIONS = [
 
 const formatWeight = value => `${Math.round(value).toLocaleString()} lb`;
 const formatVolume = value => `${Math.round(value).toLocaleString()} lb`;
-const formatDate = value => new Intl.DateTimeFormat('en-US', {
+const fullDateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
   year: 'numeric',
-}).format(new Date(value));
-
-const weekLabel = value => new Intl.DateTimeFormat('en-US', {
+});
+const shortDateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
-}).format(value);
+});
+const formatDate = value => fullDateFormatter.format(new Date(value));
+
+const weekLabel = value => shortDateFormatter.format(value);
 
 const LineChart = ({ points, lift }) => {
+  const [tableExpanded, setTableExpanded] = useState(false);
   if (!points.length) return <div className="progress-empty">No tracked {lift.toLowerCase()} sets in this range.</div>;
-  const width = Math.max(600, 56 + (points.length - 1) * 72);
+  // Calculations and the accessible table keep the complete series; only bound the
+  // expensive SVG point groups so long-lived profiles cannot grow the chart DOM forever.
+  const renderedPoints = sampleProgressSeries(points);
+  const width = Math.max(600, 56 + (renderedPoints.length - 1) * 72);
   const height = 220;
   const padding = 28;
-  const values = points.map(point => point.value);
+  const values = renderedPoints.map(point => point.value);
   const minimum = Math.min(...values);
   const maximum = Math.max(...values);
+  const best = points.reduce((value, point) => Math.max(value, point.value), points[0].value);
   const spread = maximum - minimum || Math.max(maximum * 0.1, 1);
-  const coordinates = points.map((point, index) => ({
+  const coordinates = renderedPoints.map((point, index) => ({
     ...point,
-    x: points.length === 1 ? width / 2 : padding + index * ((width - padding * 2) / (points.length - 1)),
+    x: renderedPoints.length === 1 ? width / 2 : padding + index * ((width - padding * 2) / (renderedPoints.length - 1)),
     y: height - padding - ((point.value - minimum) / spread) * (height - padding * 2),
   }));
 
   return (
     <div className="chart-wrap">
       <div className="chart-scroll">
-        <svg className="line-chart" style={{ minWidth: `${width}px` }} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${lift} estimated max trend: ${points.map(point => `${formatDate(point.completedAt)}, ${formatWeight(point.value)}`).join('; ')}`}>
+        <svg className="line-chart" style={{ minWidth: `${width}px` }} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${lift} estimated max trend, ${points.length} workouts, ${formatDate(points[0].completedAt)} to ${formatDate(points[points.length - 1].completedAt)}, starting at ${formatWeight(points[0].value)}, ending at ${formatWeight(points[points.length - 1].value)}, best ${formatWeight(best)}`}>
           <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
           {coordinates.length > 1 && <polyline points={coordinates.map(point => `${point.x},${point.y}`).join(' ')} />}
           {coordinates.map(point => (
@@ -52,6 +64,12 @@ const LineChart = ({ points, lift }) => {
         </svg>
       </div>
       <div className="chart-range"><span>{formatDate(points[0].completedAt)}</span><span>{formatDate(points[points.length - 1].completedAt)}</span></div>
+      <details className="chart-data" onToggle={event => setTableExpanded(event.currentTarget.open)}>
+        <summary>View all {points.length} data points</summary>
+        {tableExpanded && <table><thead><tr><th>Date</th><th>Estimated max</th></tr></thead><tbody>{points.map(point => (
+          <tr key={point.workoutId}><td>{formatDate(point.completedAt)}</td><td>{formatWeight(point.value)}</td></tr>
+        ))}</tbody></table>}
+      </details>
     </div>
   );
 };
@@ -80,12 +98,15 @@ export const ProgressDashboard = ({ profile, routines, now }) => {
   // Capture "now" once per mounted dashboard. A default `new Date()` in the parameters
   // invalidated the expensive history summary whenever an unrelated parent state changed.
   const currentTime = useMemo(() => now || new Date(), [now]);
-  const result = useMemo(() => summarizeProgress(routines, {
+  // Routine identity changes only when loaded records change, so filter controls reuse
+  // the session facts instead of repeatedly walking every exercise and completed set.
+  const facts = useMemo(() => buildProgressFacts(routines), [routines]);
+  const result = useMemo(() => summarizeProgressFacts(facts, {
     range,
     routineId,
     lift,
     now: currentTime,
-  }), [routines, range, routineId, lift, currentTime]);
+  }), [facts, range, routineId, lift, currentTime]);
 
   return (
     <section className="section-page progress-page">
