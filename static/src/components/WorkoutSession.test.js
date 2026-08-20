@@ -59,6 +59,22 @@ const renderSession = (overrides = {}, value = workout) => {
   return { button, div, edit, props, root };
 };
 
+it('does not offer undo for finish-generated skips without an action timestamp', () => {
+  const finishedSkip = {
+    ...workout,
+    session: {
+      ...workout.session,
+      exercises: [{
+        ...workout.session.exercises[0],
+        sets: [{ id: 'finish-skip', number: 1, status: 'skipped', skippedAt: null }],
+      }],
+    },
+  };
+  const { div, root } = renderSession({}, finishedSkip);
+  expect(Array.from(div.querySelectorAll('button')).find(button => button.textContent === 'Undo latest action').disabled).toBe(true);
+  act(() => root.unmount());
+});
+
 it('formats stopwatch durations', () => {
   expect(formatDuration(75)).toBe('1:15');
   expect(formatDuration(3670)).toBe('1:01:10');

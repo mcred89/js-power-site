@@ -267,6 +267,58 @@ describe('tracked routines', () => {
     expect(visibleExercise(routine.workouts[1].exercises[0]).movement).toBe('Deadlift');
   });
 
+  it('preserves snapshots, exercise identities, overrides, sessions, gaps, and unknown sequences', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const completed = routine.workouts[0];
+    const future = routine.workouts[3];
+    routine = setWorkoutComplete(routine, completed.id, true);
+    routine = updateExercise(routine, future.id, future.exercises[0].id, {
+      movement: 'Paused squat',
+      weight: '377',
+    });
+    routine = startWorkoutSession(routine, future.id, '2026-08-18T12:00:00.000Z');
+    routine = substituteSessionExercise(routine, future.id, future.exercises[0].id, {
+      movement: 'Belt squat', weight: '300', setCount: '2', reps: '8',
+    }, '2026-08-18T12:01:00.000Z');
+    routine = deleteFutureWorkout(routine, routine.workouts[1].id);
+    const activeBefore = routine.workouts.find(item => item.id === future.id);
+    const completedBefore = routine.workouts.find(item => item.id === completed.id);
+    const unknown = { ...routine.workouts[2], id: 'imported-workout', sequence: 9999 };
+    routine = { ...routine, workouts: [...routine.workouts, unknown] };
+
+    const corrected = correctMaxes(routine, {
+      maxSquat: '650', maxPress: '250', maxDead: '700',
+    });
+    const activeAfter = corrected.workouts.find(item => item.id === future.id);
+
+    expect(corrected.workouts.find(item => item.id === completed.id)).toBe(completedBefore);
+    expect(corrected.workouts.find(item => item.id === unknown.id)).toBe(unknown);
+    expect(activeAfter.exercises[0].id).toBe(activeBefore.exercises[0].id);
+    expect(activeAfter.exercises[0].overrides).toEqual({ movement: 'Paused squat', weight: '377' });
+    expect(activeAfter.session).toBe(activeBefore.session);
+    expect(activeAfter.session.exercises[0].movement).toBe('Belt squat');
+    expect(corrected.workouts.map(item => item.sequence)).not.toContain(2);
+  });
+
+  it('corrects every matching workout in a long chained mesocycle', () => {
+    const microCycles = Array.from({ length: 40 }, (_, index) => ({
+      duration: index % 2 ? '5 weeks' : '3 weeks',
+      volume: index % 3 ? 'Low' : 'High',
+    }));
+    const routine = createRoutine('profile-1', 'Long plan', { ...inputs, mesoMode: true, microCycles });
+    const corrected = correctMaxes(routine, {
+      maxSquat: '650', maxPress: '250', maxDead: '700',
+    });
+
+    expect(corrected.workouts).toHaveLength(routine.workouts.length);
+    expect(corrected.workouts[corrected.workouts.length - 1].sequence).toBe(routine.workouts.length);
+    expect(corrected.workouts.every((workout, index) => (
+      workout.exercises.every((exercise, exerciseIndex) => (
+        exercise.id === routine.workouts[index].exercises[exerciseIndex].id
+      ))
+    ))).toBe(true);
+  });
+
   it('exports the stored plan with exercise overrides and workout status', () => {
     let routine = createRoutine('profile-1', 'Test, "plan"', inputs);
     const workout = routine.workouts[0];

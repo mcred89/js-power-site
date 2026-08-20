@@ -619,21 +619,28 @@ export const clearExerciseOverrides = (routine, workoutId, exerciseId) => ({
 export const correctMaxes = (routine, maxes) => {
   const inputs = { ...routine.inputs, ...maxes };
   const regenerated = createRoutine(routine.profileId, routine.name, inputs);
+  // Sequence is the persisted identity of a generated workout. Index it once so long,
+  // chained mesocycles remain O(W); gaps from user deletions must not shift later plans.
+  const generatedBySequence = [null, ...regenerated.workouts];
 
   return {
     ...routine,
     inputs,
     updatedAt: now(),
     workouts: routine.workouts.map(workout => {
-      const generatedWorkout = regenerated.workouts.find(item => item.sequence === workout.sequence);
+      const generatedWorkout = generatedBySequence[workout.sequence];
       if (workout.completedAt || !generatedWorkout) {
+        // Completed prescriptions are historical snapshots. Unknown sequences can come from
+        // older/imported data and must also survive rather than being guessed by array position.
         return workout;
       }
       return {
         ...workout,
-        effectiveMaxes: { ...generatedWorkout.effectiveMaxes },
+        effectiveMaxes: generatedWorkout.effectiveMaxes,
         exercises: generatedWorkout.exercises.map((exercise, exerciseIndex) => ({
           ...exercise,
+          // Exercise position is stable within a generated workout. Retain persisted IDs and
+          // explicit overrides so corrections do not break session links or user edits.
           id: workout.exercises[exerciseIndex]?.id || exercise.id,
           overrides: workout.exercises[exerciseIndex]?.overrides || {},
         })),

@@ -11,21 +11,6 @@ export const formatDuration = value => {
     : `${minutes}:${String(remainder).padStart(2, '0')}`;
 };
 
-const progressFor = session => {
-  const sets = session.exercises.flatMap(exercise => exercise.sets);
-  return {
-    completed: sets.filter(set => set.status === 'completed').length,
-    total: sets.length,
-  };
-};
-
-const currentExerciseIndex = session => {
-  const index = session.exercises.findIndex(exercise => (
-    exercise.sets.some(set => set.status === 'pending')
-  ));
-  return index === -1 ? 0 : index;
-};
-
 // Isolate the one-second clock update from the session controls. Keeping this state in the
 // parent caused every set, stepper, and action button to reconcile once per second.
 const SessionClock = ({ session }) => {
@@ -130,7 +115,33 @@ export const ActiveWorkoutSession = ({
   onUndo,
 }) => {
   const session = workout.session;
-  const [exerciseIndex, setExerciseIndex] = useState(() => currentExerciseIndex(session));
+  const [completedCount, totalCount, canUndo, pending] = useMemo(() => {
+    const nextPending = [];
+    let nextCompleted = 0;
+    let nextTotal = 0;
+    let nextCanUndo = false;
+    // Performance invariant: all set-derived render state comes from this single traversal.
+    // Finish-generated skips intentionally have no skippedAt and therefore remain non-reversible.
+    session.exercises.forEach(item => {
+      let firstPending = null;
+      let pendingCount = 0;
+      item.sets.forEach(set => {
+        nextTotal += 1;
+        if (set.status === 'completed') {
+          nextCompleted += 1;
+          nextCanUndo = true;
+        } else if (set.status === 'pending') {
+          pendingCount += 1;
+          if (!firstPending) firstPending = set;
+        } else if (set.status === 'skipped' && set.skippedAt) {
+          nextCanUndo = true;
+        }
+      });
+      nextPending.push([firstPending, pendingCount]);
+    });
+    return [nextCompleted, nextTotal, nextCanUndo, nextPending];
+  }, [session]);
+  const [exerciseIndex, setExerciseIndex] = useState(() => Math.max(0, pending.findIndex(item => item[0])));
   const [substituting, setSubstituting] = useState(false);
   const [drafts, setDrafts] = useState({});
   const draftsRef = useRef({});
@@ -143,10 +154,7 @@ export const ActiveWorkoutSession = ({
   useScreenWakeLock(true);
 
   const exercise = session.exercises[exerciseIndex];
-  const progress = progressFor(session);
-  const currentSet = exercise.sets.find(set => set.status === 'pending');
-  const reversibleSets = session.exercises.flatMap(item => item.sets)
-    .filter(set => set.status === 'completed' || (set.status === 'skipped' && set.skippedAt));
+  const currentSet = pending[exerciseIndex][0];
 
   const cancelDraftTimer = useCallback(setId => {
     const timer = draftTimersRef.current.get(setId);
@@ -199,7 +207,7 @@ export const ActiveWorkoutSession = ({
   };
 
   const consumesOrContinuesDraft = target => (
-    target instanceof Element && Boolean(target.closest('button, .session-stepper input'))
+    target instanceof Element && target.closest('button, .session-stepper input')
   );
 
   const markInternalPointer = event => {
@@ -239,9 +247,7 @@ export const ActiveWorkoutSession = ({
 
   const completeSet = () => {
     if (!currentSet) return;
-    const hasMoreHere = exercise.sets.some(set => (
-      set.status === 'pending' && set.id !== currentSet.id
-    ));
+    const hasMoreHere = pending[exerciseIndex][1] > 1;
     onCompleteSet(exercise.exerciseId, currentSet.id, takeDraft(currentSet.id)?.values);
     if (!hasMoreHere && exerciseIndex < session.exercises.length - 1) {
       setExerciseIndex(exerciseIndex + 1);
@@ -250,7 +256,7 @@ export const ActiveWorkoutSession = ({
 
   const skipSet = () => {
     if (!currentSet) return;
-    const hasMoreHere = exercise.sets.some(set => set.status === 'pending' && set.id !== currentSet.id);
+    const hasMoreHere = pending[exerciseIndex][1] > 1;
     onSkipSet(exercise.exerciseId, currentSet.id, takeDraft(currentSet.id)?.values);
     if (!hasMoreHere && exerciseIndex < session.exercises.length - 1) setExerciseIndex(exerciseIndex + 1);
   };
@@ -266,7 +272,7 @@ export const ActiveWorkoutSession = ({
       <div className="session-topbar">
         <button className="text-button" type="button" onClick={() => { flushAllDrafts(); onLeave(); }}>← Leave</button>
         <div className="session-clock"><span>Workout time</span><SessionClock session={session} /></div>
-        <span className="session-progress">{progress.completed}/{progress.total} sets</span>
+        <span className="session-progress">{completedCount}/{totalCount} sets</span>
       </div>
 
       <p className="eyebrow">{workout.weekLabel} · {workout.name}</p>
@@ -305,7 +311,7 @@ export const ActiveWorkoutSession = ({
       )}
 
       <div className="session-footer-actions">
-        <button className="secondary-button" type="button" disabled={!reversibleSets.length} onClick={() => { flushAllDrafts(); onUndo(); }}>Undo latest action</button>
+        <button className="secondary-button" type="button" disabled={!canUndo} onClick={() => { flushAllDrafts(); onUndo(); }}>Undo latest action</button>
         <button className="secondary-button" type="button" disabled={!currentSet} onClick={skipExercise}>Skip exercise</button>
         <button className="secondary-button" type="button" disabled={!currentSet} onClick={() => { flushAllDrafts(); setSubstituting(true); }}>Substitute</button>
         <button className="primary-button" type="button" onClick={() => { flushAllDrafts(); onFinish(); }}>Finish workout</button>
