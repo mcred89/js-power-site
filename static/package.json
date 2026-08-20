@@ -13,6 +13,8 @@
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
+    "check:bundle": "node scripts/check-bundle-budget.js",
+    "benchmark": "node scripts/performance-benchmarks.js",
     "deploy": "bash scripts/deploy.sh",
     "deploy:dry-run": "bash scripts/deploy.sh --dry-run",
     "playwright:install": "playwright install chromium",
