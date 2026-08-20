@@ -1,5 +1,5 @@
 const { expect, test } = require('./fixtures');
-const { fillMaxes, selectVolume } = require('./helpers');
+const { fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
 
 test('normal website generates, edits, exports, and copies a routine', async ({ page }) => {
   await page.goto('/');
@@ -7,6 +7,7 @@ test('normal website generates, edits, exports, and copies a routine', async ({ 
   await expect(page.getByText('Who is training?')).toHaveCount(0);
   await fillMaxes(page);
   await selectVolume(page, 'Low');
+  await selectWeakPoints(page);
   await page.getByLabel('Include three descending back-off sets').check();
   await page.getByRole('button', { name: /Generate plan/ }).click();
 
@@ -26,6 +27,7 @@ test('normal website supports short high-volume strongman routines', async ({ pa
   await page.goto('/');
   await fillMaxes(page);
   await selectVolume(page, 'High');
+  await selectWeakPoints(page, { pressWeakPoint: 'Triceps', deadliftWeakPoint: 'Glutes' });
   await page.getByLabel('3 weeks', { exact: true }).check();
   await page.getByLabel('Include a dedicated Strongman day').check();
   await page.getByLabel('Add a Strongman event to Press day').check();
@@ -42,6 +44,7 @@ test('normal website supports short high-volume strongman routines', async ({ pa
 test('normal website supports chained mesocycles with increasing maxes', async ({ page }) => {
   await page.goto('/');
   await fillMaxes(page);
+  await selectWeakPoints(page, { deadliftWeakPoint: 'Hamstrings' });
   await page.getByLabel('Build a mesocycle from multiple cycles').check();
   await page.locator('.cycle-row').nth(0).getByRole('combobox', { name: '' }).first().selectOption('3 weeks');
   await page.locator('.cycle-row').nth(1).getByRole('combobox', { name: '' }).last().selectOption('High');

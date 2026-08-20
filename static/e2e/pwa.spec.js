@@ -1,5 +1,5 @@
 const { expect, test } = require('./fixtures');
-const { createProfile, createRoutine, fillMaxes, selectVolume } = require('./helpers');
+const { createProfile, createRoutine, fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
 const usesLocalReleaseFixtures = !process.env.SMOKE_BASE_URL;
 
 // Only the intentional failed runtime-image request is expected to reach the
@@ -65,7 +65,7 @@ test('PWA bounds long History and Progress DOM while retaining complete metrics'
   await createRoutine(page, { name: 'Long History Plan' });
   await page.evaluate(async () => {
     const database = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('mcilroy-method', 7);
+      const request = indexedDB.open('mcilroy-method', 8);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -216,6 +216,7 @@ test('PWA supports multiple profiles, routines, downloads, and backup import pre
   await page.getByLabel('Routine name').fill('Second Plan');
   await fillMaxes(page, { squat: '300', press: '175', deadlift: '390' });
   await selectVolume(page, 'High');
+  await selectWeakPoints(page);
   await page.getByRole('button', { name: /Generate plan/ }).click();
   await page.getByRole('button', { name: 'Plans' }).click();
   await expect(page.locator('.plan-card')).toHaveCount(2);
