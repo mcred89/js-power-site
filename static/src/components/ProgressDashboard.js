@@ -73,16 +73,19 @@ const Metric = ({ label, value, detail }) => (
   <div className="progress-metric"><small>{label}</small><strong>{value}</strong>{detail && <span>{detail}</span>}</div>
 );
 
-export const ProgressDashboard = ({ profile, routines, now = new Date() }) => {
+export const ProgressDashboard = ({ profile, routines, now }) => {
   const [range, setRange] = useState('90d');
   const [routineId, setRoutineId] = useState('all');
   const [lift, setLift] = useState('Squat');
+  // Capture "now" once per mounted dashboard. A default `new Date()` in the parameters
+  // invalidated the expensive history summary whenever an unrelated parent state changed.
+  const currentTime = useMemo(() => now || new Date(), [now]);
   const result = useMemo(() => summarizeProgress(routines, {
     range,
     routineId,
     lift,
-    now,
-  }), [routines, range, routineId, lift, now]);
+    now: currentTime,
+  }), [routines, range, routineId, lift, currentTime]);
 
   return (
     <section className="section-page progress-page">

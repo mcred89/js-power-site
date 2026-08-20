@@ -1,8 +1,10 @@
-import { deflate, inflate } from 'pako';
-
 export const TRANSFER_FORMAT = 'mcilroy-method-encrypted-transfer';
 export const TRANSFER_VERSION = 1;
 export const TRANSFER_LIFETIME_MS = 30 * 60 * 1000;
+
+// Compression is only used while creating or opening a transfer. Loading pako on demand
+// keeps this optional feature out of the startup bundle for the calculator and tracker.
+const loadCompression = () => import('pako');
 
 const bytesToBase64 = bytes => {
   let binary = '';
@@ -41,11 +43,14 @@ export const createTransferPackage = async (backup, currentTime = Date.now(), op
     ...(options.compress ? { compression: 'deflate' } : {}),
   };
   const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt']);
+  const plaintext = options.compress
+    ? (await loadCompression()).deflate(backup)
+    : new TextEncoder().encode(backup);
   const ciphertext = await crypto.subtle.encrypt({
     name: 'AES-GCM',
     iv,
     additionalData: new TextEncoder().encode(transferHeader(transfer)),
-  }, key, options.compress ? deflate(backup) : new TextEncoder().encode(backup));
+  }, key, plaintext);
   return {
     key: bytesToBase64(keyBytes),
     contents: JSON.stringify({ ...transfer, ciphertext: bytesToBase64(new Uint8Array(ciphertext)) }, null, 2),
@@ -79,7 +84,7 @@ export const openTransferPackage = async (contents, suppliedKey, currentTime = D
     }, key, base64ToBytes(transfer.ciphertext));
     const plaintextBytes = new Uint8Array(plaintext);
     return transfer.compression === 'deflate'
-      ? new TextDecoder().decode(inflate(plaintextBytes))
+      ? new TextDecoder().decode((await loadCompression()).inflate(plaintextBytes))
       : new TextDecoder().decode(plaintextBytes);
   } catch (error) {
     throw new Error('The transfer key is incorrect or the package has been changed.');
