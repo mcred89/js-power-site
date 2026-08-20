@@ -11,8 +11,8 @@ describe('portable backups', () => {
       profiles,
       routines,
       templates,
-      version: 7,
-      dataSchemaVersion: 7,
+      version: 8,
+      dataSchemaVersion: 8,
     });
   });
 
@@ -26,8 +26,8 @@ describe('portable backups', () => {
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
       ...oldBackup,
-      version: 7,
-      dataSchemaVersion: 7,
+      version: 8,
+      dataSchemaVersion: 8,
       templates: [],
       profiles: [{ id: 'p1', name: 'Alex', activeWorkoutRoutineId: null }],
     });
@@ -41,7 +41,7 @@ describe('portable backups', () => {
     };
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
-      ...oldBackup, version: 7, dataSchemaVersion: 7, templates: [],
+      ...oldBackup, version: 8, dataSchemaVersion: 8, templates: [],
     });
   });
 
@@ -53,7 +53,7 @@ describe('portable backups', () => {
     };
     const migrated = parseBackup(JSON.stringify(oldBackup));
 
-    expect(migrated).toMatchObject({ version: 7, dataSchemaVersion: 7, unknown: 'retained' });
+    expect(migrated).toMatchObject({ version: 8, dataSchemaVersion: 8, unknown: 'retained' });
     expect(migrated.routines[0].workouts[0].session.exercises[0]).toMatchObject({
       unknown: true, original: null, substitutedAt: null,
       sets: [{ status: 'skipped', skippedAt: null, skipActionId: null }],

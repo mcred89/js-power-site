@@ -1,4 +1,13 @@
-export const DATABASE_VERSION = 7;
+export const DATABASE_VERSION = 8;
+
+export const addAccessoryWeakPoints = routine => ({
+  ...routine,
+  inputs: routine.inputs ? {
+    ...routine.inputs,
+    pressWeakPoint: routine.inputs.pressWeakPoint || '',
+    deadliftWeakPoint: routine.inputs.deadliftWeakPoint || '',
+  } : routine.inputs,
+});
 
 const effectiveMaxesFor = (inputs, cycleIndex = 0) => ({
   maxSquat: Number(inputs.maxSquat) + (Number(inputs.squatIncrement) || 0) * cycleIndex,
@@ -172,6 +181,28 @@ export const databaseMigrations = {
       };
     };
   },
+  8: ({ transaction, done }) => {
+    let storesRemaining = 2;
+    const finishStore = () => {
+      storesRemaining -= 1;
+      if (storesRemaining === 0) {
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 8 });
+        done();
+      }
+    };
+    ['routines', 'templates'].forEach(storeName => {
+      const cursorRequest = transaction.objectStore(storeName).openCursor();
+      cursorRequest.onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) {
+          finishStore();
+          return;
+        }
+        cursor.update(addAccessoryWeakPoints(cursor.value));
+        cursor.continue();
+      };
+    });
+  },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
@@ -188,7 +219,7 @@ export const runDatabaseMigrations = (database, transaction, oldVersion, newVers
   run(oldVersion + 1);
 };
 
-export const BACKUP_VERSION = 7;
+export const BACKUP_VERSION = 8;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -233,6 +264,17 @@ export const backupMigrations = {
     version: 7,
     dataSchemaVersion: 7,
     profiles: addActiveWorkoutReferences(backup.profiles, backup.routines),
+  }),
+  8: backup => ({
+    ...backup,
+    version: 8,
+    dataSchemaVersion: 8,
+    routines: Array.isArray(backup.routines)
+      ? backup.routines.map(addAccessoryWeakPoints)
+      : backup.routines,
+    templates: Array.isArray(backup.templates)
+      ? backup.templates.map(addAccessoryWeakPoints)
+      : backup.templates,
   }),
 };
 

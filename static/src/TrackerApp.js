@@ -409,6 +409,8 @@ export const PlanSetup = ({ routine }) => {
         <dl className="setup-grid">
           <div><dt>Back-off sets</dt><dd>{setupValue(inputs.includeBackoffSets)}</dd></div>
           <div><dt>Dedicated Strongman day</dt><dd>{setupValue(inputs.includeStrongmanDay)}</dd></div>
+          <div><dt>Press weak point</dt><dd>{setupValue(inputs.pressWeakPoint)}</dd></div>
+          <div><dt>Deadlift weak point</dt><dd>{setupValue(inputs.deadliftWeakPoint)}</dd></div>
         </dl>
       </div>
       <div className="setup-section">

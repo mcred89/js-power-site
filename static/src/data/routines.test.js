@@ -35,6 +35,8 @@ const inputs = {
   mesoMode: false,
   includeBackoffSets: false,
   includeStrongmanDay: false,
+  pressWeakPoint: 'Triceps',
+  deadliftWeakPoint: 'Back',
 };
 
 describe('tracked routines', () => {
@@ -144,6 +146,26 @@ describe('tracked routines', () => {
     expect(sets.map(set => set.actualReps)).toEqual([6, '5', '5', '5']);
     expect(sets[1].plannedWeight).toBe(325);
     expect(sets[1].plannedReps).toBe(6);
+  });
+
+  it('starts an accessory at zero and carries its last completed weight forward', () => {
+    let routine = createRoutine('profile-1', 'Test plan', inputs);
+    const firstPress = routine.workouts[1];
+    routine = startWorkoutSession(routine, firstPress.id, '2026-08-18T12:00:00.000Z');
+    const firstAccessory = routine.workouts[1].session.exercises.find(exercise => exercise.movement === 'Tricep extensions');
+    expect(firstAccessory.sets.map(set => set.actualWeight)).toEqual([0, 0, 0]);
+
+    firstAccessory.sets.forEach(set => {
+      set.status = 'completed';
+      set.actualWeight = '35';
+    });
+    routine.workouts[1].completedAt = '2026-08-18T13:00:00.000Z';
+    const nextPress = routine.workouts[4];
+    routine = startWorkoutSession(routine, nextPress.id, '2026-08-25T12:00:00.000Z');
+    const nextAccessory = routine.workouts[4].session.exercises.find(exercise => exercise.movement === 'Tricep extensions');
+
+    expect(nextAccessory.sets.map(set => set.actualWeight)).toEqual(['35', '35', '35']);
+    expect(nextAccessory.sets.map(set => set.plannedWeight)).toEqual(['35', '35', '35']);
   });
 
   it('records stopwatch splits and does not propagate through completed sets', () => {

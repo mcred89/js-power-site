@@ -1,5 +1,6 @@
 import {
   addEffectiveMaxSnapshots,
+  addAccessoryWeakPoints,
   addSessionActionMetadata,
   addActiveWorkoutReferences,
   addWorkoutSessions,
@@ -46,12 +47,12 @@ const migrationDatabase = existingStores => {
 
 describe('IndexedDB migrations', () => {
   it('contains every migration through the current version', () => {
-    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(Object.keys(databaseMigrations).map(Number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
   });
 
   it('creates all stores for a new installation', () => {
     const context = migrationDatabase([]);
-    runDatabaseMigrations(context.database, context.transaction, 0, 7);
+    runDatabaseMigrations(context.database, context.transaction, 0, 8);
 
     expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
     expect(context.puts).toEqual([
@@ -61,15 +62,16 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 5 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 6 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 7 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 8 } },
     ]);
   });
 
   it('upgrades version 1 through every later migration without recreating stores', () => {
     const context = migrationDatabase(['profiles', 'routines']);
-    runDatabaseMigrations(context.database, context.transaction, 1, 7);
+    runDatabaseMigrations(context.database, context.transaction, 1, 8);
 
     expect([...context.stores]).toEqual(['profiles', 'routines', 'metadata', 'templates']);
-    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3, 4, 5, 6, 7]);
+    expect(context.puts.map(entry => entry.value.value)).toEqual([2, 3, 4, 5, 6, 7, 8]);
   });
 
   it('adds templates when upgrading from version 4', () => {
@@ -88,18 +90,18 @@ describe('IndexedDB migrations', () => {
     expect(context.puts).toEqual([{ name: 'metadata', value: { key: 'dataSchemaVersion', value: 6 } }]);
   });
 
-  it.each([1, 2, 3, 4, 5, 6])('supports upgrading a version %i installation to version 7', oldVersion => {
+  it.each([1, 2, 3, 4, 5, 6, 7])('supports upgrading a version %i installation to version 8', oldVersion => {
     const stores = ['profiles', 'routines'];
     if (oldVersion >= 2) stores.push('metadata');
     if (oldVersion >= 5) stores.push('templates');
     const context = migrationDatabase(stores);
-    expect(() => runDatabaseMigrations(context.database, context.transaction, oldVersion, 7)).not.toThrow();
+    expect(() => runDatabaseMigrations(context.database, context.transaction, oldVersion, 8)).not.toThrow();
     expect(context.puts.at(-1)).toEqual({
-      name: 'metadata', value: { key: 'dataSchemaVersion', value: 7 },
+      name: 'metadata', value: { key: 'dataSchemaVersion', value: 8 },
     });
   });
 
-  it.each([1, 2, 3, 4, 5, 6])('upgrades a real version %i database in order', async oldVersion => {
+  it.each([1, 2, 3, 4, 5, 6, 7])('upgrades a real version %i database in order', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `migration-${oldVersion}`;
     await new Promise((resolve, reject) => {
@@ -110,7 +112,14 @@ describe('IndexedDB migrations', () => {
         if (!database.objectStoreNames.contains('routines')) database.createObjectStore('routines', { keyPath: 'id' });
         if (oldVersion >= 2 && !database.objectStoreNames.contains('metadata')) database.createObjectStore('metadata', { keyPath: 'key' });
         if (oldVersion >= 5 && !database.objectStoreNames.contains('templates')) database.createObjectStore('templates', { keyPath: 'id' });
-        request.transaction.objectStore('profiles').put({ id: 'p1', unknown: true });
+        if (oldVersion >= 7) {
+          request.transaction.objectStore('routines').createIndex('profileId', 'profileId', { unique: false });
+        }
+        request.transaction.objectStore('profiles').put({
+          id: 'p1',
+          unknown: true,
+          ...(oldVersion >= 7 ? { activeWorkoutRoutineId: 'r1' } : {}),
+        });
         request.transaction.objectStore('routines').put({
           id: 'r1', profileId: 'p1', updatedAt: '2026-01-01', inputs: {},
           workouts: [{
@@ -122,19 +131,22 @@ describe('IndexedDB migrations', () => {
             }] },
           }],
         });
+        if (oldVersion >= 5) {
+          request.transaction.objectStore('templates').put({ id: 't1', inputs: {}, unknown: true });
+        }
       };
       request.onerror = () => reject(request.error);
       request.onsuccess = () => { request.result.close(); resolve(); };
     });
     const database = await new Promise((resolve, reject) => {
-      const request = indexedDB.open(name, 7);
+      const request = indexedDB.open(name, 8);
       request.onupgradeneeded = event => runDatabaseMigrations(
-        request.result, request.transaction, event.oldVersion, 7,
+        request.result, request.transaction, event.oldVersion, 8,
       );
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
-    const tx = database.transaction(['profiles', 'routines', 'metadata'], 'readonly');
+    const tx = database.transaction(['profiles', 'routines', 'metadata', 'templates'], 'readonly');
     const profile = await new Promise((resolve, reject) => {
       const request = tx.objectStore('profiles').get('p1');
       request.onsuccess = () => resolve(request.result);
@@ -145,21 +157,32 @@ describe('IndexedDB migrations', () => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
+    const template = await new Promise((resolve, reject) => {
+      const request = tx.objectStore('templates').get('t1');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
     expect(tx.objectStore('routines').indexNames.contains('profileId')).toBe(true);
     expect(profile).toMatchObject({ id: 'p1', unknown: true, activeWorkoutRoutineId: 'r1' });
     expect(routine.workouts[0]).toHaveProperty('effectiveMaxes');
     expect(routine.workouts[0].session.exercises[0].sets[0]).toMatchObject({
       skippedAt: null, skipActionId: null,
     });
+    expect(routine.inputs).toMatchObject({ pressWeakPoint: '', deadliftWeakPoint: '' });
+    if (oldVersion >= 5) {
+      expect(template.inputs).toMatchObject({ pressWeakPoint: '', deadliftWeakPoint: '' });
+    } else {
+      expect(template).toBeUndefined();
+    }
     database.close();
   });
 
-  it('creates a real version 7 database with every store and index', async () => {
+  it('creates a real version 8 database with every store and index', async () => {
     const indexedDB = new IDBFactory();
     const database = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('fresh-version-7', 7);
+      const request = indexedDB.open('fresh-version-8', 8);
       request.onupgradeneeded = event => runDatabaseMigrations(
-        request.result, request.transaction, event.oldVersion, 7,
+        request.result, request.transaction, event.oldVersion, 8,
       );
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
@@ -168,6 +191,14 @@ describe('IndexedDB migrations', () => {
     const transaction = database.transaction('routines', 'readonly');
     expect(transaction.objectStore('routines').indexNames.contains('profileId')).toBe(true);
     database.close();
+  });
+
+  it('adds empty weak points without mutating legacy routine inputs', () => {
+    const routine = { inputs: { maxPress: '200', unknown: true } };
+    expect(addAccessoryWeakPoints(routine).inputs).toEqual({
+      maxPress: '200', unknown: true, pressWeakPoint: '', deadliftWeakPoint: '',
+    });
+    expect(routine.inputs.pressWeakPoint).toBeUndefined();
   });
 
   it('adds max snapshots without changing the original routine', () => {

@@ -242,22 +242,36 @@ export const startWorkoutSession = (routine, workoutId, timestamp = now()) => up
   workoutId,
   workout => {
     if (workout.completedAt || workout.session?.status === 'inProgress') return workout;
+    const previousWeightFor = movement => {
+      const previousWorkouts = routine.workouts
+        .filter(item => item.sequence < workout.sequence && item.completedAt && item.session?.exercises)
+        .sort((a, b) => b.sequence - a.sequence);
+      for (const previousWorkout of previousWorkouts) {
+        const previousExercise = previousWorkout.session.exercises.find(item => item.movement === movement);
+        const completedSets = previousExercise?.sets?.filter(set => (
+          set.status === 'completed' && set.actualWeight !== '' && set.actualWeight !== null && set.actualWeight !== undefined
+        ));
+        if (completedSets?.length) return completedSets[completedSets.length - 1].actualWeight;
+      }
+      return 0;
+    };
     const exercises = workout.exercises.map(exercise => {
       const shown = visibleExercise(exercise);
       const parsed = parsePrescription(shown.prescription);
+      const startingWeight = shown.weight === 0 ? previousWeightFor(shown.movement) : shown.weight;
       return {
         exerciseId: exercise.id,
         movement: shown.movement,
         prescription: shown.prescription,
-        plannedWeight: shown.weight,
+        plannedWeight: startingWeight,
         original: null,
         substitutedAt: null,
         sets: Array.from({ length: parsed.setCount }, (_, index) => ({
           id: makeId(),
           number: index + 1,
-          plannedWeight: shown.weight,
+          plannedWeight: startingWeight,
           plannedReps: parsed.plannedReps,
-          actualWeight: shown.weight,
+          actualWeight: startingWeight,
           actualReps: parsed.actualReps,
           status: 'pending',
           completedAt: null,

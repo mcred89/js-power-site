@@ -15,6 +15,17 @@ const backoffSets = [
   { reduction: .2, maxPercent: .5, reps: 12 },
   { reduction: .3, maxPercent: .4, reps: 15 },
 ];
+const accessoryMovements = {
+  Press: {
+    Shoulders: 'Dumbbell overhead press',
+    Triceps: 'Tricep extensions',
+  },
+  Deadlift: {
+    Back: 'Bent over rows',
+    Glutes: 'Hip thrusters',
+    Hamstrings: 'Romanian deadlifts',
+  },
+};
 const getWeekGroups = duration => duration === '3 weeks'
   ? [[0, 1], [2, 3], [4]]
   : [[0], [1], [2], [3], [4]];
@@ -52,7 +63,9 @@ const getExercises = (day, props) => {
       prescription: `1 × ${backoff.reps}`,
     }));
   }
-  if (day.lift !== 'Squat') exercises.push({ movement: 'Accessory Movement', weight: '', prescription: '3 × 5–20' });
+  const weakPoint = props[`${day.eventKey}WeakPoint`];
+  const accessoryMovement = accessoryMovements[day.lift]?.[weakPoint];
+  if (accessoryMovement) exercises.push({ movement: accessoryMovement, weight: 0, prescription: '3 × 5–20' });
   if (day.lift === 'Press') exercises.push({ movement: 'Curls', weight: '', prescription: '3 × 5–20' });
   if (props[`${day.eventKey}EventEnabled`]) exercises.push({
     movement: `Strongman event: ${props[`${day.eventKey}EventMovement`]}`,

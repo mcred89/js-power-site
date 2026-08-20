@@ -41,6 +41,8 @@ describe('routine exports', () => {
     mesoMode: false,
     includeBackoffSets: false,
     includeStrongmanDay: false,
+    pressWeakPoint: 'Shoulders',
+    deadliftWeakPoint: 'Hamstrings',
   };
 
   it('creates a CSV row for each prescribed movement', () => {
@@ -49,6 +51,9 @@ describe('routine exports', () => {
     expect(csv).toContain('"Microcycle","Week","Day","Session","Movement","Weight (lb)","Prescription"');
     expect(csv).toContain('"1","1","1","Squat","Squat","325","4 × 6"');
     expect(csv).toContain('"1","1","2","Press","Curls","","3 × 5–20"');
+    expect(csv).toContain('"1","1","2","Press","Dumbbell overhead press","0","3 × 5–20"');
+    expect(csv).toContain('"1","1","3","Deadlift","Romanian deadlifts","0","3 × 5–20"');
+    expect(csv).not.toContain('"Squat","Accessory');
   });
 
   it('creates structured Markdown with weeks, days, and movements', () => {

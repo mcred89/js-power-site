@@ -24,6 +24,8 @@ const defaultFormState = {
   squatIncrement: '10',
   pressIncrement: '5',
   deadliftIncrement: '10',
+  pressWeakPoint: '',
+  deadliftWeakPoint: '',
   includeStrongmanDay: false,
   includeBackoffSets: false,
   squatEventEnabled: false,
@@ -193,6 +195,10 @@ export class RoutineForm extends Component {
               <RadioOrCheckGroup title="Routine length" setName="duration" controlFunc={this.handleChange} type="radio" options={this.state.durationChoices} selectedValue={this.state.duration} />
             </React.Fragment>
           )}
+          <RadioOrCheckGroup title="Press weak point" setName="pressWeakPoint" controlFunc={this.handleChange} type="radio" options={['Shoulders', 'Triceps']} selectedValue={this.state.pressWeakPoint} />
+          <p className="field-help">Sets the press-day accessory: dumbbell overhead press or tricep extensions.</p>
+          <RadioOrCheckGroup title="Deadlift weak point" setName="deadliftWeakPoint" controlFunc={this.handleChange} type="radio" options={['Back', 'Glutes', 'Hamstrings']} selectedValue={this.state.deadliftWeakPoint} />
+          <p className="field-help">Sets the deadlift-day accessory: bent over rows, hip thrusters, or Romanian deadlifts.</p>
           {this.state.mesoMode && (
             <fieldset className="mesocycle-group">
               <legend className="option-title">Microcycles</legend>
