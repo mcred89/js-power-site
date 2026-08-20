@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { RoutineForm } from './components/RoutineForm';
-import { ActiveWorkoutSession, WorkoutSessionHistory, WorkoutSummary } from './components/WorkoutSession';
-import { ProgressDashboard } from './components/ProgressDashboard';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { WorkoutSessionHistory, WorkoutSummary } from './components/WorkoutSession';
+import { ActiveWorkoutScreen } from './components/EagerTrackerScreens';
 import {
   adjustSessionSet,
   archiveRoutine,
@@ -53,6 +52,15 @@ const navItems = [
   ['progress', 'Progress'],
   ['settings', 'Settings'],
 ];
+
+// Today, workout detail, and the active session stay in this eager graph. Everything reached
+// through secondary navigation is requested on demand and can be added verbatim to precache.
+const RoutineBuilder = lazy(() => import('./components/RoutineBuilderScreen').then(module => ({ default: module.RoutineBuilderScreen })));
+const ProgressScreen = lazy(() => import('./components/ProgressScreen').then(module => ({ default: module.ProgressScreen })));
+const HistoryScreen = lazy(() => import('./components/HistoryScreen').then(module => ({ default: module.HistoryScreen })));
+const PlansScreen = lazy(() => import('./components/PlansScreen').then(module => ({ default: module.PlansScreen })));
+const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(module => ({ default: module.SettingsScreen })));
+const TrackerScreenFallback = ({ label }) => <div className="loading-screen">Opening {label}…</div>;
 
 export const initialProfileId = (profiles, defaultProfileId) => (
   profiles.some(profile => profile.id === defaultProfileId)
@@ -338,25 +346,6 @@ export const templateBuilderInputs = template => ({
   deadliftIncrement: '',
 });
 
-export const RoutineBuilder = ({ profile, count, template, onCreate, onCancel }) => {
-  const [name, setName] = useState(template?.name || `${profile.name}'s plan ${count + 1}`);
-  return (
-    <div>
-      <div className="routine-name-wrap">
-        <label className="form-field">
-          <span className="field-label">Routine name</span>
-          <input className="number-input" value={name} onChange={event => setName(event.target.value)} required />
-        </label>
-      </div>
-      <RoutineForm
-        initialInputs={template ? templateBuilderInputs(template) : undefined}
-        onCancel={onCancel}
-        onCreate={inputs => onCreate(name.trim() || 'Strength plan', inputs)}
-      />
-    </div>
-  );
-};
-
 export const RoutineNameEditor = ({ routine, onSave, label = 'Routine' }) => {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(routine.name);
@@ -500,6 +489,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const incomingTransferRef = useRef(false);
   const routinesRef = useRef([]);
   const routineSaveQueueRef = useRef(Promise.resolve());
+  const showWorkout = useCallback(target => {
+    setWorkoutId(target.id);
+    setEditingWorkout(false);
+  }, []);
 
   useEffect(() => {
     routinesRef.current = routines;
@@ -970,8 +963,6 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     </main>
   );
 
-  const showWorkout = target => { setWorkoutId(target.id); setEditingWorkout(false); };
-
   return (
     <div className="site-shell">
       {workout?.session?.status !== 'inProgress' && <header className="app-header">
@@ -993,7 +984,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         {workoutSummary ? (
           <WorkoutSummary workout={workoutSummary} onDone={() => { setWorkoutSummary(null); setView('today'); }} />
         ) : workout?.session?.status === 'inProgress' ? (
-          <ActiveWorkoutSession
+          <ActiveWorkoutScreen
             workout={workout}
             onAdjust={adjustWorkoutSet}
             onCompleteSet={completeWorkoutSet}
@@ -1006,13 +997,15 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             onUndo={undoWorkoutSet}
           />
         ) : view === 'builder' ? (
-          <RoutineBuilder
-            profile={profile}
-            count={profileRoutines.length}
-            template={builderTemplate}
-            onCreate={addRoutine}
-            onCancel={() => { setBuilderTemplate(null); setView('plans'); }}
-          />
+          <Suspense fallback={<TrackerScreenFallback label="routine builder" />}>
+            <RoutineBuilder
+              profile={profile}
+              count={profileRoutines.length}
+              template={builderTemplate}
+              onCreate={addRoutine}
+              onCancel={() => { setBuilderTemplate(null); setView('plans'); }}
+            />
+          </Suspense>
         ) : workout ? (
           <section className="workout-detail">
             <button className="text-button" type="button" onClick={() => { setWorkoutId(null); setEditingWorkout(false); }}>← Back</button>
@@ -1047,40 +1040,17 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          <section className="section-page">
-            <div className="section-heading"><div><p className="eyebrow">{profile.name}</p><h1>Plans</h1></div><button className="primary-button small-primary" type="button" onClick={() => { setBuilderTemplate(null); setView('builder'); }}>New routine</button></div>
-            {!profileRoutines.length ? <p>No routines yet.</p> : profileRoutines.map(item => (
-              <article className={`plan-card ${item.id === routine?.id ? 'active' : ''}`} key={item.id}>
-                <button className="plan-select" type="button" onClick={() => selectRoutine(item)}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><span>{item.id === routine?.id ? 'Active' : 'Use plan'}</span></button>
-                <div className="plan-actions"><div className="button-row"><RoutineNameEditor routine={item} onSave={name => renameRoutine(item, name)} /><button className="text-button" type="button" onClick={() => setCopyRequest({ type: 'routine', item })}>Copy</button><button className="text-button" type="button" onClick={() => setTemplateSource(item)}>Save as template</button><button className="text-button" type="button" onClick={() => archivePlan(item)}>Archive</button></div></div>
-                {item.id === routine?.id && <MaxCorrection routine={item} onCorrect={maxes => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }} />}
-              </article>
-            ))}
-            {archivedRoutines.length > 0 && <div className="archived-plans"><div><p className="eyebrow">Not in your queue</p><h2>Archived plans</h2></div>{archivedRoutines.map(item => <article className="template-card" key={item.id}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><button className="secondary-button" type="button" onClick={() => restorePlan(item)}>Restore</button></article>)}</div>}
-            <div className="template-library">
-              <div><p className="eyebrow">Reusable setups</p><h2>Templates</h2><p>Templates regenerate a fresh routine from saved generator settings.</p></div>
-              {!templates.length ? <p>No templates yet. Save one from a routine above.</p> : templates.map(item => (
-                <article className="template-card" key={item.id}>
-                  <strong>{item.name}</strong>
-                  <div className="button-row"><button className="primary-button small-primary" type="button" onClick={() => { setBuilderTemplate(item); setView('builder'); }}>Use template</button><RoutineNameEditor routine={item} label="Template" onSave={name => renameTemplate(item, name)} /><button className="text-button danger-text" type="button" onClick={() => setTemplateToDelete(item)}>Delete</button></div>
-                </article>
-              ))}
-            </div>
-          </section>
+          <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} archived={archivedRoutines} activeId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, archive: archivePlan, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, restore: restorePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
-          <section className="section-page"><p className="eyebrow">{routine?.name || profile.name}</p><h1>History</h1>{routine && <PlanSetup routine={routine} />}{completed.length ? completed.map(item => <WorkoutCard workout={item} onOpen={() => showWorkout(item)} key={item.id} />) : <div className="empty-card"><p>Completed workouts will appear here.</p></div>}</section>
+          <Suspense fallback={<TrackerScreenFallback label="history" />}>
+            <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
+          </Suspense>
         ) : view === 'progress' ? (
-          <ProgressDashboard profile={profile} routines={progressRoutines} />
+          <Suspense fallback={<TrackerScreenFallback label="progress" />}>
+            <ProgressScreen profile={profile} routines={progressRoutines} />
+          </Suspense>
         ) : (
-          <section className="section-page settings-page">
-            <p className="eyebrow">This phone</p><h1>Settings & backup</h1>
-            <article className="settings-card"><h2>Default profile</h2><p>Choose the profile that opens automatically when you launch the app.</p><label className="form-field"><span className="field-label">Open with</span><select className="number-input" aria-label="Default profile" value={defaultProfileId || profiles[0].id} onChange={async event => { const id = event.target.value; await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }}>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label></article>
-            <article className="settings-card"><h2>Appearance</h2><p>Follow this device or choose a theme for the app.</p><AppearanceControl appearance={appearance} onChange={onAppearanceChange} /></article>
-            <article className="settings-card"><h2>Offline storage</h2><p>{persistent ? 'Persistent storage is enabled.' : 'Ask Chrome to protect this app from automatic storage cleanup.'}</p>{!persistent && <button className="secondary-button" type="button" onClick={async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }}>Request persistent storage</button>}</article>
-            <article className="settings-card"><h2>CSV downloads</h2><p>{routine ? `Download the active plan, ${routine.name}, or its completed workout history. Exercise edits and completed-workout snapshots are included.` : 'Create a routine before downloading plan or history data.'}</p><div className="button-row"><button className="secondary-button" type="button" disabled={!routine} onClick={() => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8')}>Download plan CSV</button><button className="secondary-button" type="button" disabled={!completed.length} onClick={() => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8')}>Download history CSV</button></div></article>
-            <article className="settings-card"><h2>Backup and transfer</h2><p>Backups are unencrypted files for long-term recovery. Transfers are encrypted, expire after 30 minutes, and move all data or one selected routine without an account.</p><div className="button-row"><button className="secondary-button" type="button" onClick={() => download(exportBackup(profiles, routines, templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`)}>Export backup</button><button className="secondary-button" type="button" onClick={() => importRef.current.click()}>Import backup</button><button className="secondary-button" type="button" onClick={makeTransfer}>Move all data</button><button className="secondary-button" type="button" onClick={() => transferRef.current.click()}>Open received transfer</button><button className="secondary-button" type="button" disabled={!routines.length} onClick={() => setChoosingRoutineTransfer(true)}>Transfer one routine</button><input ref={importRef} className="hidden-input" type="file" accept="application/json,.json" onChange={event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }} /><input ref={transferRef} className="hidden-input" type="file" accept="text/plain,.txt,application/json,.json,.mcilroy-transfer" onChange={event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }} /></div></article>
-            <article className="settings-card danger-card"><h2>Delete profile</h2><p>Deletes {profile.name} and every routine belonging to this profile from this phone.</p><button className="danger-button" type="button" onClick={deleteProfile}>Delete {profile.name}</button></article>
-          </section>
+          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} refs={{ import: importRef, transfer: transferRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, planCsv: () => download(routinePlanToCsv(routine), `${safeFilename(routine.name)}-plan.csv`, 'text/csv;charset=utf-8'), historyCsv: () => download(routineHistoryToCsv(routine), `${safeFilename(routine.name)}-history.csv`, 'text/csv;charset=utf-8'), backup: () => download(exportBackup(profiles, routines, templates), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`), transfer: makeTransfer, routineTransfer: () => setChoosingRoutineTransfer(true), importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, transferFile: event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
         )}
       </main>
 

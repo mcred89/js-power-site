@@ -1,7 +1,8 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
-import { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, PlanSetup, RoutineBuilder, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, templateBuilderInputs, TransferCreator, WorkoutCard } from './TrackerApp';
+import { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, PlanSetup, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, templateBuilderInputs, TransferCreator, WorkoutCard } from './TrackerApp';
+import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
 describe('default profile selection', () => {
   const profiles = [{ id: 'wife' }, { id: 'husband' }];
