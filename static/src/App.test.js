@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import App, { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, isInstalledApp, PlanSetup, RoutineBuilder, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, templateBuilderInputs, TransferCreator, WorkoutCard } from './App';
+import App, { isInstalledApp } from './App';
+import { canShareTransfer, ConfirmationModal, createSharedTransferContents, createTransferFile, initialProfileId, PlanSetup, RoutineBuilder, RoutineCopyDialog, RoutineNameEditor, sharedTransferContents, shareTransfer, templateBuilderInputs, TransferCreator, WorkoutCard } from './TrackerApp';
 
 describe('default profile selection', () => {
   const profiles = [{ id: 'wife' }, { id: 'husband' }];
@@ -181,19 +182,19 @@ it('shows effective maxes on a single-cycle workout card', () => {
   act(() => root.unmount());
 });
 
-it('renders without crashing', () => {
+it('renders without crashing', async () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const div = document.createElement('div');
   const root = createRoot(div);
-  act(() => root.render(<App />));
+  await act(async () => root.render(<App />));
   act(() => root.unmount());
 });
 
-it('shows the calculator in a normal browser tab', () => {
+it('shows the calculator in a normal browser tab', async () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const div = document.createElement('div');
   const root = createRoot(div);
-  act(() => root.render(<App />));
+  await act(async () => root.render(<App />));
 
   expect(div.textContent).toContain('Build your routine');
   expect(div.textContent).not.toContain('Who is training?');

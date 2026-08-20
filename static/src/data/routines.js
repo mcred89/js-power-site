@@ -1,4 +1,4 @@
-import { buildRoutinePlan } from '../components/RoutineGenerator';
+import { buildRoutinePlan } from './routineGeneration';
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
