@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
 import TrackerApp from './TrackerApp';
-import { canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
+import { activateRoutineImport, canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
 import { RoutineCopyDialog, TransferCreator } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
@@ -64,6 +64,22 @@ describe('staged tracker loading', () => {
     expect(todayRoutineIds({ activeRoutineId: 'same', activeWorkoutRoutineId: 'same' })).toEqual(['same']);
   });
 
+  it('recovers Today routines when the selected profile has no usable active pointer', async () => {
+    const storedRoutine = { id: 'r1', profileId: 'p1' };
+    const storage = {
+      getAll: jest.fn().mockResolvedValue([{ id: 'p1', activeRoutineId: 'missing' }]),
+      get: jest.fn((store, key) => Promise.resolve(store === 'metadata'
+        ? { key, value: 'p1' }
+        : undefined)),
+      getAllByIndex: jest.fn().mockResolvedValue([storedRoutine]),
+    };
+
+    const result = await loadInitialTrackerRecords(storage);
+
+    expect(storage.getAllByIndex).toHaveBeenCalledWith('routines', 'profileId', 'p1');
+    expect(result.routines).toEqual([storedRoutine]);
+  });
+
   it('rejects stale profile reads and preserves newer cached records', () => {
     const current = [{ id: 'r1', updatedAt: '2026-02-01' }];
     expect(mergeRoutineRead(current, [{ id: 'stale-profile' }], 1, 2)).toBe(current);
@@ -96,6 +112,31 @@ describe('staged tracker loading', () => {
         routines: [{ key: 'r1', expected: { id: 'r1', local: true } }],
         templates: [],
       },
+    });
+  });
+
+  it('activates a transferred routine on an existing destination profile', () => {
+    const profile = { id: 'p1', name: 'Alex', activeRoutineId: null, updatedAt: 'old' };
+    const plan = activateRoutineImport({ profiles: [], routines: [{
+      type: 'routine', action: 'copy', imported: { id: 'r1' }, result: { id: 'r1' },
+    }], templates: [] }, profile, 'r1', 'new');
+
+    expect(importPlanBatch(plan)).toMatchObject({
+      puts: { profiles: [{ id: 'p1', name: 'Alex', activeRoutineId: 'r1', updatedAt: 'new' }] },
+      conditions: { profiles: [{ key: 'p1', expected: profile }] },
+    });
+  });
+
+  it('activates a transferred routine on its newly imported profile', () => {
+    const profile = { id: 'p1', name: 'Alex' };
+    const plan = activateRoutineImport({ profiles: [{
+      type: 'profile', status: 'new', action: 'copy', imported: profile, result: profile,
+    }], routines: [], templates: [] }, profile, 'r1', 'new');
+
+    expect(plan.profiles[0]).toMatchObject({
+      action: 'copy',
+      imported: { activeRoutineId: 'r1', updatedAt: 'new' },
+      result: { activeRoutineId: 'r1', updatedAt: 'new' },
     });
   });
 

@@ -157,8 +157,16 @@ export const loadInitialTrackerRecords = async storage => {
   ]);
   const selectedProfileId = initialProfileId(profiles, savedDefault?.value);
   const selected = profiles.find(item => item.id === selectedProfileId);
-  const routines = (await Promise.all(todayRoutineIds(selected).map(id => storage.get('routines', id))))
+  const routineIds = todayRoutineIds(selected);
+  let routines = (await Promise.all(routineIds.map(id => storage.get('routines', id))))
     .filter(Boolean);
+  // Older or interrupted writes can leave a profile without a usable active-routine
+  // pointer even though its routines are still intact. Secondary screens query the full
+  // profile index, which previously made Today appear to repair itself after changing tabs.
+  // Keep the fast pointed read for normal startup, but recover from a missing/dangling pointer.
+  if (selected && (!routineIds.length || routines.length !== routineIds.length)) {
+    routines = await storage.getAllByIndex('routines', 'profileId', selected.id);
+  }
   return { profiles, routines, selectedProfileId, defaultProfileId: savedDefault?.value || null };
 };
 
@@ -207,6 +215,39 @@ export const importPlanBatch = plan => ({
     templates: (plan.templates || []).map(item => ({ key: item.imported.id, expected: item.local })),
   },
 });
+
+export const activateRoutineImport = (plan, destinationProfile, routineId, updatedAt = new Date().toISOString()) => {
+  const updatedProfile = {
+    ...destinationProfile,
+    activeRoutineId: routineId,
+    updatedAt,
+  };
+  const plannedProfile = plan.profiles.find(item => item.result.id === destinationProfile.id);
+  if (!plannedProfile) {
+    return {
+      ...plan,
+      routineActivation: { profileId: destinationProfile.id, routineId },
+      profiles: [...plan.profiles, {
+        type: 'profile',
+        status: 'conflict',
+        action: 'merge',
+        imported: updatedProfile,
+        local: destinationProfile,
+        result: updatedProfile,
+      }],
+    };
+  }
+  return {
+    ...plan,
+    routineActivation: { profileId: destinationProfile.id, routineId },
+    profiles: plan.profiles.map(item => item === plannedProfile ? {
+      ...item,
+      action: item.action === 'skip' ? 'merge' : item.action,
+      imported: { ...item.imported, activeRoutineId: routineId, updatedAt },
+      result: { ...item.result, activeRoutineId: routineId, updatedAt },
+    } : item),
+  };
+};
 
 export const profileWithActiveWorkout = (profile, routineId, updatedAt = new Date().toISOString()) => ({
   ...profile,
@@ -491,7 +532,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   }, [routines]);
 
   useEffect(() => {
-    loadInitialTrackerRecords({ getAll, get })
+    loadInitialTrackerRecords({ getAll, get, getAllByIndex })
       .then(({ profiles: savedProfiles, routines: startupRoutines, defaultProfileId: savedDefaultId, selectedProfileId: selectedId }) => {
         setProfiles(savedProfiles);
         setRoutines(startupRoutines);
@@ -1058,12 +1099,16 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const chooseRoutineDestination = async (destination, name) => {
     const local = await loadAllData();
     const profileId = destination === 'new' ? makeId() : destination;
-    const incomingProfiles = destination === 'new' ? [{ id: profileId, name }] : [];
+    const destinationProfile = destination === 'new'
+      ? { id: profileId, name, activeWorkoutRoutineId: null, createdAt: new Date().toISOString() }
+      : local.profiles.find(item => item.id === profileId);
+    const incomingProfiles = destination === 'new' ? [destinationProfile] : [];
     const incomingRoutine = { ...receivedRoutine.routine, profileId };
     setReceivedRoutine(null);
-    setImportPlan(await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, {
+    const plan = await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, {
       backup: { profiles: incomingProfiles, routines: [incomingRoutine], templates: [] }, ...local,
-    }));
+    });
+    setImportPlan(activateRoutineImport(plan, destinationProfile, incomingRoutine.id));
   };
 
   const confirmImport = async () => {
@@ -1095,7 +1140,16 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
           routines: importPlan.routines.map(item => item.imported),
           templates: (importPlan.templates || []).map(item => item.imported),
         };
-        setImportPlan(await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, { backup, ...local }));
+        const replanned = await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, { backup, ...local });
+        const activation = importPlan.routineActivation;
+        setImportPlan(activation
+          ? activateRoutineImport(
+            replanned,
+            local.profiles.find(item => item.id === activation.profileId) ||
+              importPlan.profiles.find(item => item.result.id === activation.profileId).result,
+            activation.routineId,
+          )
+          : replanned);
       }
       flash(error.message);
     } finally {

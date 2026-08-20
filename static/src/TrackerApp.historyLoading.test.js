@@ -117,3 +117,32 @@ it('reuses one complete profile read across Plans, History, and Progress, then r
   act(() => root.unmount());
   global.IS_REACT_ACT_ENVIRONMENT = false;
 });
+
+it('shows an existing routine on Today at startup when its profile pointer is missing', async () => {
+  const storedRoutine = {
+    id: 'routine-1', profileId: 'profile-1', name: 'Recovered plan', updatedAt: '2026-08-20T12:00:00.000Z', inputs: {}, exercises: [],
+    workouts: [{ id: 'workout-1', name: 'Deadlift day', weekLabel: 'Week 1', exercises: [] }],
+  };
+  mockGetAll.mockImplementation(store => Promise.resolve(store === 'profiles'
+    ? [{ id: 'profile-1', name: 'Alex', activeRoutineId: null, activeWorkoutRoutineId: null }]
+    : []));
+  mockGet.mockImplementation((store, key) => Promise.resolve(store === 'metadata'
+    ? { key, value: 'profile-1' }
+    : undefined));
+  mockGetAllByIndex.mockResolvedValue([storedRoutine]);
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement('div');
+  const root = createRoot(container);
+
+  await act(async () => {
+    root.render(<TrackerApp appearance="system" onAppearanceChange={() => {}} />);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  expect(container.textContent).toContain('Your next workout');
+  expect(container.textContent).toContain('Deadlift day');
+  expect(container.textContent).not.toContain('Build your first routine');
+
+  act(() => root.unmount());
+  global.IS_REACT_ACT_ENVIRONMENT = false;
+});
