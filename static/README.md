@@ -28,6 +28,9 @@ npm run test:smoke # test the production build in desktop and PWA modes
 
 ## Deployment
 
+Run deployment commands from the `static/` directory. Linux and macOS use the
+existing Bash script:
+
 ```bash
 # Preview the files that would change without uploading anything
 npm run deploy:dry-run
@@ -36,6 +39,25 @@ npm run deploy:dry-run
 # and run the same browser smoke tests against production
 npm run deploy
 ```
+
+Windows uses the equivalent native PowerShell script and does not require WSL
+or Git Bash:
+
+```powershell
+# Preview the files that would change without uploading anything
+npm run deploy:windows:dry-run
+
+# Test, build, run local browser smoke tests, deploy, wait for CloudFront,
+# and run the same browser smoke tests against production
+npm run deploy:windows
+```
+
+Both scripts implement the same deployment sequence and target. Before using
+either one, install dependencies with `npm install`, install Chromium once with
+`npm run playwright:install`, and configure AWS credentials through the AWS
+CLI's standard credential chain. On Windows, PowerShell script execution policy
+does not need to be changed globally; the npm command applies a process-only
+bypass for this repository script.
 
 Deployment uses the AWS CLI's normal credential chain. No credentials are read
 from or written to this repository. The deploy script targets the existing

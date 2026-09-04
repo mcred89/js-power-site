@@ -220,7 +220,7 @@ test('PWA supports multiple profiles, routines, downloads, and backup import pre
   await page.getByRole('button', { name: /Generate plan/ }).click();
   await page.getByRole('button', { name: 'Plans' }).click();
   await expect(page.locator('.plan-card')).toHaveCount(2);
-  await page.locator('.plan-card').filter({ hasText: 'Primary Plan' }).getByRole('button', { name: /Use plan/ }).click();
+  await page.getByRole('button', { name: 'View Primary Plan' }).click();
 
   await page.getByRole('button', { name: 'Settings' }).click();
   await expect(page.getByRole('button', { name: /QR/i })).toHaveCount(0);

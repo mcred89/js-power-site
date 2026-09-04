@@ -31,6 +31,8 @@ it('renders profile progress and switches main lifts', () => {
   expect(div.querySelector('.strength-progress h2').textContent).toBe('Estimated max');
   expect(div.querySelector('.pr-summary small').textContent).toBe('Lifetime estimated max');
   expect(div.querySelector('.chart-point text').textContent).toBe('350 lb');
+  expect(div.querySelectorAll('.chart-point-final')).toHaveLength(1);
+  expect(div.querySelector('.chart-point-final text').textContent).toBe('350 lb');
   expect(div.textContent).toContain('1,500 lb');
   const deadlift = Array.from(div.querySelectorAll('.lift-tabs button')).find(button => button.textContent === 'Deadlift');
   act(() => deadlift.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -65,6 +67,8 @@ it('caps chart point groups and mounts complete table rows only while expanded',
   });
 
   expect(div.querySelectorAll('.chart-point')).toHaveLength(120);
+  expect(div.querySelectorAll('.chart-point-final')).toHaveLength(1);
+  expect(div.querySelector('.chart-point-final text').textContent).toBe('466 lb');
   expect(div.querySelector('.line-chart').getAttribute('aria-label')).toContain('200 workouts');
   expect(div.querySelectorAll('.chart-data tbody tr')).toHaveLength(0);
   const details = div.querySelector('.chart-data');

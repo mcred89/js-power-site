@@ -2,7 +2,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
 import TrackerApp from './TrackerApp';
-import { activateRoutineImport, canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerLoadPolicy, WorkoutCard } from './TrackerApp';
+import { activateRoutineImport, canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerHistoryState, trackerLoadPolicy, trackerRouteFromHistory, WorkoutCard } from './TrackerApp';
 import { RoutineCopyDialog, TransferCreator } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
@@ -19,6 +19,18 @@ describe('default profile selection', () => {
 
   it('falls back to the first profile when the saved default no longer exists', () => {
     expect(initialProfileId(profiles, 'deleted')).toBe('wife');
+  });
+});
+
+describe('tracker browser history', () => {
+  it('stores and restores an in-app route for Android back navigation', () => {
+    const route = { view: 'history', workoutId: 'workout-1', addingProfile: false };
+    expect(trackerRouteFromHistory(trackerHistoryState(route))).toEqual(route);
+  });
+
+  it('ignores unrelated and invalid browser history entries', () => {
+    expect(trackerRouteFromHistory(null)).toBeNull();
+    expect(trackerRouteFromHistory(trackerHistoryState({ view: 'unknown' }))).toBeNull();
   });
 });
 
@@ -575,6 +587,31 @@ it('confirms or cancels a destructive action in a modal', () => {
   act(() => buttons[1].dispatchEvent(new MouseEvent('click', { bubbles: true })));
 
   expect(onCancel).toHaveBeenCalledTimes(1);
+  expect(onConfirm).toHaveBeenCalledTimes(1);
+  act(() => root.unmount());
+});
+
+it('requires the confirmation text before deleting a plan', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const onConfirm = jest.fn();
+  act(() => root.render(
+    <ConfirmationModal title="Delete this plan?" confirmLabel="Delete plan" requiredText="yes" onCancel={() => {}} onConfirm={onConfirm}>
+      Are you sure? This cannot be undone.
+    </ConfirmationModal>,
+  ));
+
+  const input = div.querySelector('input');
+  const deleteButton = [...div.querySelectorAll('button')].find(button => button.textContent === 'Delete plan');
+  expect(deleteButton.disabled).toBe(true);
+  act(() => {
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, 'YES');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(deleteButton.disabled).toBe(false);
+  act(() => deleteButton.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   expect(onConfirm).toHaveBeenCalledTimes(1);
   act(() => root.unmount());
 });

@@ -17,6 +17,8 @@
     "benchmark": "node scripts/performance-benchmarks.js",
     "deploy": "bash scripts/deploy.sh",
     "deploy:dry-run": "bash scripts/deploy.sh --dry-run",
+    "deploy:windows": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1",
+    "deploy:windows:dry-run": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy.ps1 -DryRun",
     "playwright:install": "playwright install chromium",
     "smoke:serve": "node scripts/smoke-server.js",
     "test:smoke": "playwright test",

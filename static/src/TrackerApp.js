@@ -4,7 +4,6 @@ import { ActiveWorkoutScreen } from './components/EagerTrackerScreens';
 import {
   adjustSessionSet,
   adaptiveStatusForWorkout,
-  archiveRoutine,
   clearExerciseOverrides,
   completeSessionSet,
   correctMaxes,
@@ -15,7 +14,6 @@ import {
   finishWorkoutSession,
   reopenWorkoutSession,
   refreshAdaptiveProgression,
-  restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
   startWorkoutSession,
@@ -63,6 +61,25 @@ const navItems = [
   ['progress', 'Progress'],
   ['settings', 'Settings'],
 ];
+
+const TRACKER_HISTORY_KEY = 'mcilroyTracker';
+const trackerViews = new Set([...navItems.map(([key]) => key), 'builder']);
+
+export const trackerRouteFromHistory = state => {
+  const route = state?.[TRACKER_HISTORY_KEY];
+  if (!route || !trackerViews.has(route.view)) return null;
+  return {
+    view: route.view,
+    workoutId: route.workoutId || null,
+    addingProfile: Boolean(route.addingProfile),
+  };
+};
+
+export const trackerHistoryState = (route, depth = 0) => ({
+  [TRACKER_HISTORY_KEY]: { ...route, depth },
+});
+
+const trackerHistoryDepth = state => state?.[TRACKER_HISTORY_KEY]?.depth || 0;
 
 // Today, workout detail, and the active session stay in this eager graph. Everything reached
 // through secondary navigation is requested on demand and can be added verbatim to precache.
@@ -400,20 +417,25 @@ export const RoutineNameEditor = ({ routine, onSave, label = 'Routine' }) => {
   );
 };
 
-export const ConfirmationModal = ({ title, children, confirmLabel, onCancel, onConfirm }) => (
-  <div className="modal-backdrop" role="presentation" onMouseDown={event => {
-    if (event.target === event.currentTarget) onCancel();
-  }}>
-    <section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
-      <h2 id="confirmation-title">{title}</h2>
-      <p>{children}</p>
-      <div className="button-row modal-actions">
-        <button className="secondary-button" type="button" onClick={onCancel}>Cancel</button>
-        <button className="danger-button" type="button" onClick={onConfirm} autoFocus>{confirmLabel}</button>
-      </div>
-    </section>
-  </div>
-);
+export const ConfirmationModal = ({ title, children, confirmLabel, requiredText, onCancel, onConfirm }) => {
+  const [confirmation, setConfirmation] = useState('');
+  const confirmed = !requiredText || confirmation.trim().toLowerCase() === requiredText.toLowerCase();
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={event => {
+      if (event.target === event.currentTarget) onCancel();
+    }}>
+      <section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
+        <h2 id="confirmation-title">{title}</h2>
+        <p>{children}</p>
+        {requiredText && <label className="form-field confirmation-field"><span className="field-label">Type {requiredText} to confirm</span><input className="number-input" aria-label={`Type ${requiredText} to confirm`} value={confirmation} onChange={event => setConfirmation(event.target.value)} autoFocus /></label>}
+        <div className="button-row modal-actions">
+          <button className="secondary-button" type="button" onClick={onCancel}>Cancel</button>
+          <button className="danger-button" type="button" disabled={!confirmed} onClick={onConfirm} autoFocus={!requiredText}>{confirmLabel}</button>
+        </div>
+      </section>
+    </div>
+  );
+};
 
 const setupValue = value => value === true ? 'Yes' : value === false ? 'No' : value || 'Not set';
 const progressionLabel = mode => ({
@@ -518,9 +540,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [copyRequest, setCopyRequest] = useState(null);
   const [templateSource, setTemplateSource] = useState(null);
   const [templateToDelete, setTemplateToDelete] = useState(null);
+  const [planToDelete, setPlanToDelete] = useState(null);
   const [builderTemplate, setBuilderTemplate] = useState(null);
   const [workoutSummary, setWorkoutSummary] = useState(null);
   const [dataTaskBusy, setDataTaskBusy] = useState(false);
+  const applyingHistoryRef = useRef(false);
   const importRef = useRef();
   const transferRef = useRef();
   const incomingTransferRef = useRef(false);
@@ -535,6 +559,51 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     setWorkoutId(target.id);
     setEditingWorkout(false);
   }, []);
+
+  useEffect(() => {
+    const restoreHistory = event => {
+      const route = trackerRouteFromHistory(event.state);
+      if (!route) return;
+      applyingHistoryRef.current = true;
+      setView(route.view);
+      setWorkoutId(route.workoutId);
+      setAddingProfile(route.addingProfile);
+      setEditingWorkout(false);
+      setWorkoutSummary(null);
+    };
+    window.addEventListener('popstate', restoreHistory);
+    return () => window.removeEventListener('popstate', restoreHistory);
+  }, []);
+
+  useEffect(() => {
+    const route = { view, workoutId, addingProfile };
+    if (applyingHistoryRef.current) {
+      applyingHistoryRef.current = false;
+      return;
+    }
+    const current = trackerRouteFromHistory(window.history.state);
+    if (current && JSON.stringify(current) === JSON.stringify(route)) return;
+    if (current) {
+      window.history.pushState(
+        trackerHistoryState(route, trackerHistoryDepth(window.history.state) + 1),
+        '',
+      );
+    } else {
+      window.history.replaceState(trackerHistoryState(route), '');
+    }
+  }, [addingProfile, view, workoutId]);
+
+  const goBack = fallback => {
+    if (trackerHistoryDepth(window.history.state) > 0) {
+      // Update immediately for button and accessibility activation; popstate then confirms
+      // the same route when the browser completes its asynchronous history traversal.
+      applyingHistoryRef.current = true;
+      fallback();
+      window.history.back();
+      return;
+    }
+    fallback();
+  };
 
   useEffect(() => {
     routinesRef.current = routines;
@@ -644,20 +713,17 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   // Partition once when stored routines change. These lists feed most tracker views, so
   // avoiding three full filter/sort passes also prevents incidental UI state from rescanning
   // a large history while preserving the existing newest-first ordering.
-  const { profileRoutines, archivedRoutines, progressRoutines } = useMemo(() => {
-    const active = [];
-    const archived = [];
+  const { profileRoutines, progressRoutines } = useMemo(() => {
+    const profilePlans = [];
     routines.forEach(item => {
       if (item.profileId !== selectedProfileId) return;
-      (item.archived ? archived : active).push(item);
+      profilePlans.push(item);
     });
     const newestFirst = (left, right) => right.updatedAt.localeCompare(left.updatedAt);
-    active.sort(newestFirst);
-    archived.sort(newestFirst);
+    profilePlans.sort(newestFirst);
     return {
-      profileRoutines: active,
-      archivedRoutines: archived,
-      progressRoutines: [...active, ...archived].sort(newestFirst),
+      profileRoutines: profilePlans,
+      progressRoutines: profilePlans,
     };
   }, [routines, selectedProfileId]);
   const routine = profileRoutines.find(item => item.id === selectedRoutineId) ||
@@ -901,36 +967,31 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     setWorkoutId(null);
   };
 
-  const archivePlan = async item => {
+  const deletePlan = async () => {
+    const item = planToDelete;
+    if (!item) return;
     if (item.workouts.some(day => day.session?.status === 'inProgress')) {
-      flash('Finish the workout in progress before archiving this plan.');
+      setPlanToDelete(null);
+      flash('Finish the workout in progress before deleting this plan.');
       return;
     }
-    const updated = archiveRoutine(item);
     const remaining = profileRoutines.filter(entry => entry.id !== item.id);
     const replacement = remaining[0] || null;
-    // The rendered fallback routine can differ from the durable profile pointer. Only clear
-    // the pointer when the archived record is the one the profile actually selected.
     const profileUpdate = item.id === profile.activeRoutineId
       ? { ...profile, activeRoutineId: replacement?.id || null, updatedAt: new Date().toISOString() }
       : null;
-    await applyBatch({ puts: {
-      routines: [updated],
-      ...(profileUpdate ? { profiles: [profileUpdate] } : {}),
-    } });
-    setRoutines(current => current.map(entry => entry.id === item.id ? updated : entry));
+    await applyBatch({
+      deletes: { routines: [item.id] },
+      puts: profileUpdate ? { profiles: [profileUpdate] } : {},
+    });
+    routinesRef.current = routinesRef.current.filter(entry => entry.id !== item.id);
+    setRoutines(routinesRef.current);
     if (profileUpdate) {
       setProfiles(current => current.map(entry => entry.id === profile.id ? profileUpdate : entry));
-      setSelectedRoutineId(replacement?.id || null);
     }
-    flash(`${item.name} archived.`);
-  };
-
-  const restorePlan = async item => {
-    const updated = restoreRoutine(item);
-    await save('routines', updated);
-    setRoutines(current => current.map(entry => entry.id === item.id ? updated : entry));
-    flash(`${item.name} restored.`);
+    if (item.id === selectedRoutineId) setSelectedRoutineId(replacement?.id || null);
+    setPlanToDelete(null);
+    flash(`${item.name} deleted.`);
   };
 
   const reopenCompletedWorkout = async target => {
@@ -1092,7 +1153,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     if (loading || incomingTransferRef.current ||
         !new URLSearchParams(window.location.search).has('incoming-transfer')) return;
     incomingTransferRef.current = true;
-    window.history.replaceState({}, '', '/');
+    window.history.replaceState(window.history.state, '', '/');
     fetch('/incoming-transfer')
       .then(response => {
         if (!response.ok) throw new Error('The shared transfer could not be opened.');
@@ -1207,7 +1268,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     <>
       {notices}
       <main className="onboarding">
-        {addingProfile && <button className="text-button" type="button" onClick={() => setAddingProfile(false)}>← Back</button>}
+        {addingProfile && <button className="text-button" type="button" onClick={() => goBack(() => setAddingProfile(false))}>← Back</button>}
         <ProfileForm onSave={addProfile} title={profiles.length ? 'Add another person' : 'Who is training?'} />
       </main>
     </>
@@ -1244,7 +1305,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             onAdjust={adjustWorkoutSet}
             onCompleteSet={completeWorkoutSet}
             onFinish={requestFinishWorkout}
-            onLeave={() => setWorkoutId(null)}
+            onLeave={() => goBack(() => setWorkoutId(null))}
             onRpe={setWorkoutRpe}
             onSkipExercise={skipWorkoutExercise}
             onSkipSet={skipWorkoutSet}
@@ -1258,12 +1319,12 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
               count={profileRoutines.length}
               template={builderTemplate}
               onCreate={addRoutine}
-              onCancel={() => { setBuilderTemplate(null); setView('plans'); }}
+              onCancel={() => { setBuilderTemplate(null); goBack(() => setView('plans')); }}
             />
           </Suspense>
         ) : workout ? (
           <section className="workout-detail">
-            <button className="text-button" type="button" onClick={() => { setWorkoutId(null); setEditingWorkout(false); }}>← Back</button>
+            <button className="text-button" type="button" onClick={() => goBack(() => { setWorkoutId(null); setEditingWorkout(false); })}>← Back</button>
             <p className="eyebrow">{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</p>
             <div className="detail-heading"><h1>{workout.name}</h1>{!workout.completedAt && <button className="secondary-button" type="button" onClick={() => setEditingWorkout(!editingWorkout)}>{editingWorkout ? 'Done editing' : 'Edit exercises'}</button>}</div>
             <WorkoutMaxes routine={routine} workout={workout} />
@@ -1297,7 +1358,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} archived={archivedRoutines} activeId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, archive: archivePlan, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, restore: restorePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} PlanSetup={PlanSetup} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="history" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
             <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
@@ -1323,6 +1384,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       {templateSource && <SaveTemplateDialog routine={templateSource} onCancel={() => setTemplateSource(null)} onConfirm={saveRoutineTemplate} />}
       </Suspense>
       {templateToDelete && <ConfirmationModal title="Delete template?" confirmLabel="Delete template" onCancel={() => setTemplateToDelete(null)} onConfirm={deleteTemplate}>Delete {templateToDelete.name}? Routines already created from it will not be affected.</ConfirmationModal>}
+      {planToDelete && <ConfirmationModal title="Delete this plan?" confirmLabel="Delete plan" requiredText="yes" onCancel={() => setPlanToDelete(null)} onConfirm={deletePlan}>Are you sure? Deleting {planToDelete.name} permanently removes its workouts and completion history from this phone. This cannot be undone.</ConfirmationModal>}
 
       {view !== 'builder' && !workout && !workoutSummary && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => setView(key)} key={key}>{label}</button>)}</nav>}
     </div>

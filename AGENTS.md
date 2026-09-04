@@ -63,8 +63,13 @@ Run application commands from `static/`:
   the existing production S3 bucket, removes stale site objects, applies
   no-cache metadata to `index.html`, creates and waits for a CloudFront
   invalidation, and runs Playwright smoke tests against production.
+- On Windows, use `npm run deploy:windows:dry-run` and
+  `npm run deploy:windows` for the equivalent native PowerShell workflows.
+  The existing `deploy:dry-run` and `deploy` commands remain the Linux/macOS
+  Bash workflows.
 
-The deployment implementation is `static/scripts/deploy.sh`. It currently
+The deployment implementations are `static/scripts/deploy.sh` for Linux/macOS
+and `static/scripts/deploy.ps1` for Windows. They currently
 targets the existing production site at `themcilroy.com`; there is no active dev
 bucket. Always run the dry-run first when deployment changes are uncertain.
 Routine deploys must update site contents only and must not invoke CloudFormation

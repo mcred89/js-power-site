@@ -30,13 +30,14 @@ if [[ "$1 $2" == 'cloudfront create-invalidation' ]]; then printf 'mock-invalida
     fs.chmodSync(path.join(binDirectory, 'npm'), 0o755);
     fs.chmodSync(path.join(binDirectory, 'node'), 0o755);
 
-    const result = spawnSync('bash', ['scripts/deploy.sh', ...(dryRun ? ['--dry-run'] : [])], {
+    const bash = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    const result = spawnSync(bash, ['scripts/deploy.sh', ...(dryRun ? ['--dry-run'] : [])], {
       cwd: staticRoot,
       encoding: 'utf8',
       env: {
         ...process.env,
         AWS_MOCK_LOG: awsLog,
-        PATH: `${binDirectory}:${process.env.PATH}`,
+        PATH: `${binDirectory}${path.delimiter}${process.env.PATH}`,
       },
     });
     const calls = fs.readFileSync(awsLog, 'utf8').trim().split('\n')

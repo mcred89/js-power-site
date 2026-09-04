@@ -192,6 +192,9 @@ body { min-width:320px; }
 .confirmation-modal h2 { margin-bottom:10px; }
 .confirmation-modal p { color:var(--muted); line-height:1.6; }
 .modal-actions { justify-content:flex-end; margin-top:24px; }
+.confirmation-field { margin-top:18px; }
+.confirmation-field .number-input { width:100%; }
+.danger-button:disabled { opacity:.45; cursor:not-allowed; }
 .import-preview { width:min(100%,560px); max-height:calc(100vh - 40px); overflow:auto; }
 .import-note { font-size:14px; }
 .import-preview-list { display:grid; gap:20px; margin-top:20px; }
@@ -210,12 +213,27 @@ body { min-width:320px; }
 .section-heading .eyebrow { margin-bottom:8px; }
 .small-primary { width:auto; margin:0; }
 .plan-card { margin-bottom:14px; padding:0; overflow:hidden; box-shadow:none; }
-.plan-card.active { border-color:#a9c0b4; }
+.plan-card.selected { border-color:#a9c0b4; }
+.plan-card.completed { border-color:#c8d5cd; }
 .plan-select { width:100%; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:20px; border:0; color:var(--ink); background:var(--paper); cursor:pointer; text-align:left; }
 .plan-select > span:first-child { display:grid; gap:5px; }
 .plan-select small { color:var(--muted); }
 .plan-select > span:last-child { color:var(--accent); font-size:12px; font-weight:800; }
+.plan-status { padding:5px 9px; border-radius:999px; background:var(--accent-soft); }
+.plan-status.completed { color:#52665b; background:#e8eee9; }
 .plan-actions { padding:0 20px 14px; }
+.completed-plan-details { border-top:1px solid var(--line); }
+.completed-plan-details > summary { padding:15px 20px; color:var(--accent); cursor:pointer; font-weight:800; }
+.completed-plan-contents { display:grid; gap:18px; padding:0 20px 20px; }
+.completed-plan-contents .plan-setup { margin:0; }
+.completed-plan-days { display:grid; gap:10px; }
+.completed-plan-days > h3 { margin:4px 0; font-size:17px; }
+.completed-plan-day { border:1px solid var(--line); border-radius:11px; background:var(--paper); }
+.completed-plan-day > summary { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px; cursor:pointer; }
+.completed-plan-day > summary > span:first-child { display:grid; gap:3px; }
+.completed-plan-day > summary small,.completed-plan-day > summary > span:last-child { color:var(--muted); font-size:12px; }
+.completed-plan-day > .workout-maxes { display:block; padding:0 14px 12px; }
+.completed-plan-day .exercise-list { padding:0 14px 14px; }
 .template-library { display:grid; gap:14px; margin-top:38px; padding-top:30px; border-top:1px solid var(--line); }
 .template-library > div > h2 { margin:4px 0 8px; }
 .template-library > div > p:last-child { color:var(--muted); }
@@ -338,6 +356,7 @@ body { min-width:320px; }
 .line-chart line { stroke:var(--line); stroke-width:2; }
 .line-chart polyline { fill:none; stroke:var(--accent); stroke-linecap:round; stroke-linejoin:round; stroke-width:4; }
 .line-chart circle { fill:var(--paper); stroke:var(--accent); stroke-width:4; }
+.line-chart .chart-point-final circle { fill:var(--accent); }
 .line-chart text { fill:var(--ink); font-size:13px; font-weight:800; paint-order:stroke; stroke:var(--paper); stroke-linejoin:round; stroke-width:4px; }
 .chart-range { display:flex; justify-content:space-between; margin-top:-8px; color:var(--muted); font-size:10px; }
 .chart-data { margin-top:12px; color:var(--muted); font-size:12px; }

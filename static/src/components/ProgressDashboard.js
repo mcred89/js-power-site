@@ -55,8 +55,8 @@ const LineChart = ({ points, lift }) => {
         <svg className="line-chart" style={{ minWidth: `${width}px` }} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${lift} estimated max trend, ${points.length} workouts, ${formatDate(points[0].completedAt)} to ${formatDate(points[points.length - 1].completedAt)}, starting at ${formatWeight(points[0].value)}, ending at ${formatWeight(points[points.length - 1].value)}, best ${formatWeight(best)}`}>
           <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} />
           {coordinates.length > 1 && <polyline points={coordinates.map(point => `${point.x},${point.y}`).join(' ')} />}
-          {coordinates.map(point => (
-            <g className="chart-point" key={point.workoutId}>
+          {coordinates.map((point, index) => (
+            <g className={`chart-point${index === coordinates.length - 1 ? ' chart-point-final' : ''}`} key={point.workoutId}>
               <circle cx={point.x} cy={point.y} r="6"><title>{formatDate(point.completedAt)} · {formatWeight(point.value)}</title></circle>
               <text x={point.x} y={point.y - 13} textAnchor="middle">{formatWeight(point.value)}</text>
             </g>
