@@ -105,7 +105,7 @@ export class RoutineForm extends Component {
   handleSubmit(event) {
     event.preventDefault();
     if (this.props.onCreate) {
-      this.props.onCreate({ ...this.state, ...(this.props.activeStrongman?.status === 'active' ? { includeStrongmanDay: true } : {}) });
+      this.props.onCreate(this.state);
       return;
     }
     this.setState({ needsToFillOutForm: false });
@@ -256,10 +256,9 @@ export class RoutineForm extends Component {
           )}
           <div className="option-group">
             <label className="check-label standalone-check">
-              <input type="checkbox" name="includeStrongmanDay" checked={this.props.activeStrongman?.status === 'active' || this.state.includeStrongmanDay} disabled={this.props.activeStrongman?.status === 'active'} onChange={this.handleCheckbox} />
+              <input type="checkbox" name="includeStrongmanDay" checked={this.state.includeStrongmanDay} onChange={this.handleCheckbox} />
               <span>Include a dedicated Strongman day</span>
             </label>
-            {this.props.activeStrongman?.status === 'active' && <p className="field-help">Event days continue {this.props.activeStrongman.name}. Your events on normal lifting days stay as entered.</p>}
           </div>
           <fieldset className="event-group">
             <legend className="option-title">Strongman events <span className="optional-label">Optional</span></legend>

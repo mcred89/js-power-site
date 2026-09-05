@@ -10,210 +10,6 @@ test.beforeEach(async ({ request }) => {
   if (usesLocalReleaseFixtures) await request.get('/__smoke/release/reset');
 });
 
-test('independent strongman baseline resumes offline and continues through weeks 11–12 after a ten-week strength block', async ({ page, context }) => {
-  await createProfile(page, 'Event Athlete');
-  await expect(page.getByRole('button', { name: 'Build a routine', exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Plan strongman training', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: test.info().outputPath('today-create-plans.png'), fullPage: true });
-  await page.getByRole('button', { name: 'New strongman block' }).click();
-  await page.getByLabel('Block name', { exact: true }).fill('Nationals preparation');
-  await page.getByRole('button', { name: 'Add event', exact: true }).click();
-  await page.getByLabel('Event 1 name', { exact: true }).fill('Sandbag carry');
-  await page.getByLabel('Event 1 family', { exact: true }).selectOption('carry');
-  await page.getByLabel('Event 1 focus', { exact: true }).fill('Improve the pick, retain lighter carries');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: test.info().outputPath('strongman-builder.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Save strongman block', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Next four event days' })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: test.info().outputPath('strongman-block.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Back to training' }).click();
-  await page.getByText('Add plan', { exact: true }).click();
-  await page.getByRole('button', { name: 'Strength routine', exact: true }).click();
-  await fillMaxes(page);
-  await selectWeakPoints(page);
-  await page.getByLabel('Build a mesocycle from multiple cycles').check();
-  await expect(page.getByLabel('Include a dedicated Strongman day')).toBeChecked();
-  await expect(page.getByLabel('Include a dedicated Strongman day')).toBeDisabled();
-  await page.getByLabel('Add a Strongman event to Press day').check();
-  await page.getByLabel('Movement', { exact: true }).fill('Axle clean technique');
-  await page.getByLabel('Sets', { exact: true }).fill('5');
-  await page.getByLabel('Reps', { exact: true }).fill('2');
-  await page.getByRole('button', { name: /Generate plan/ }).click();
-  await expect(page.getByText('Routine created on this phone.')).toBeVisible();
-  await page.evaluate(async () => {
-    const database = await new Promise((resolve, reject) => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-    const records = await new Promise(resolve => { const request = database.transaction('routines').objectStore('routines').getAll(); request.onsuccess = () => resolve(request.result); });
-    const normal = records.find(record => record.kind !== 'strongman');
-    const firstHost = normal.workouts.find(workout => workout.kind === 'eventSlot');
-    normal.workouts = normal.workouts.map(workout => workout.sequence < firstHost.sequence ? { ...workout, completedAt: new Date().toISOString() } : workout);
-    await new Promise((resolve, reject) => { const tx = database.transaction('routines', 'readwrite'); tx.objectStore('routines').put(normal); tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
-    database.close();
-  });
-  await page.reload();
-  await page.getByRole('button', { name: 'Open workout', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Next event session' })).toBeVisible();
-  await page.getByRole('button', { name: 'Start event day', exact: true }).click();
-  await expect(page.getByText('Baseline assessment', { exact: true })).toBeVisible();
-  await page.getByLabel('Block 1 weight', { exact: true }).fill('200');
-  await page.getByLabel('Block 1 distance', { exact: true }).fill('0');
-  await page.getByLabel('Block 1 outcome', { exact: true }).selectOption('unsuccessful');
-  await page.getByRole('button', { name: 'Record attempt', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Recorded attempts' })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: test.info().outputPath('strongman-session.png'), fullPage: true });
-  await context.setOffline(true);
-  await page.reload();
-  await page.getByRole('button', { name: 'Resume workout', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Recorded attempts' })).toBeVisible();
-  await page.getByRole('button', { name: 'Finish event day', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Your next workout' })).toBeVisible();
-  const state = await page.evaluate(async () => {
-    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
-    const records = await new Promise(resolve => { const request = database.transaction('routines').objectStore('routines').getAll(); request.onsuccess = () => resolve(request.result); });
-    database.close();
-    return records;
-  });
-  const normal = state.find(record => record.kind !== 'strongman');
-  const events = state.find(record => record.kind === 'strongman');
-  expect(normal.workouts.filter(workout => workout.kind === 'eventSlot')).toHaveLength(10);
-  expect(events.workouts).toHaveLength(12);
-  expect(normal.workouts.find(workout => workout.kind === 'eventSlot').completedAt).toBeTruthy();
-  expect(events.workouts[0].completedAt).toBeTruthy();
-  expect(events.workouts[0].session.eventBlocks[0].attempts[0]).toMatchObject({ weight: 200, distance: 0, outcome: 'unsuccessful' });
-  expect(events.workouts[1].session).toBeNull();
-  expect(normal.workouts.filter(workout => workout.name === 'Press').every(workout => workout.exercises.some(exercise => exercise.generated.movement === 'Strongman event: Axle clean technique' && exercise.generated.prescription === '5 × 2'))).toBe(true);
-  await context.setOffline(false);
-  // Establish the end-of-block boundary without simulating ten weeks of lifting.
-  // The final two sessions below run through the real UI and persistence path.
-  const finishedStrength = await page.evaluate(async () => {
-    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
-    const records = await new Promise(resolve => { const request = database.transaction('routines').objectStore('routines').getAll(); request.onsuccess = () => resolve(request.result); });
-    const normal = records.find(record => record.kind !== 'strongman');
-    const events = records.find(record => record.kind === 'strongman');
-    const completedAt = new Date().toISOString();
-    normal.workouts = normal.workouts.map(workout => ({ ...workout, completedAt: workout.completedAt || completedAt }));
-    events.workouts = events.workouts.map((workout, index) => index < 10 ? { ...workout, completedAt: workout.completedAt || completedAt } : workout);
-    await new Promise((resolve, reject) => { const tx = database.transaction('routines', 'readwrite'); tx.objectStore('routines').put(normal); tx.objectStore('routines').put(events); tx.oncomplete = resolve; tx.onerror = () => reject(tx.error); });
-    database.close();
-    return normal;
-  });
-  await page.reload();
-  await expect(page.getByRole('heading', { name: 'Routine complete', exact: true })).toBeVisible();
-  for (const week of [11, 12]) {
-    await page.getByRole('button', { name: 'Open standalone event day', exact: true }).click();
-    await expect(page.getByText(new RegExp(`Nationals preparation · Week ${week} of 12`))).toBeVisible();
-    await page.getByRole('button', { name: 'Start event day', exact: true }).click();
-    await page.getByRole('button', { name: 'Finish event day', exact: true }).click();
-  }
-  await expect(page.getByRole('button', { name: 'Open standalone event day', exact: true })).toHaveCount(0);
-  const finished = await page.evaluate(async () => {
-    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
-    const read = store => new Promise(resolve => { const request = database.transaction(store).objectStore(store).getAll(); request.onsuccess = () => resolve(request.result); });
-    const [routines, profiles] = await Promise.all([read('routines'), read('profiles')]);
-    database.close();
-    return { routines, profiles };
-  });
-  expect(finished.routines.find(record => record.kind !== 'strongman')).toEqual(finishedStrength);
-  const completedEvents = finished.routines.find(record => record.kind === 'strongman');
-  expect(completedEvents.status).toBe('complete');
-  expect(completedEvents.workouts.slice(10).every(workout => workout.completedAt && workout.hostRef === null)).toBe(true);
-  expect(finished.profiles[0]).toMatchObject({ activeWorkoutRoutineId: null, activeStrongmanRoutineId: null });
-});
-
-test('Today adds strongman midway through a strength routine without a persistent creation card', async ({ page }) => {
-  await createProfile(page, 'Mid-block Athlete');
-  await createRoutine(page, { name: 'Current strength block' });
-  await expect(page.getByRole('heading', { name: 'Plan strongman training', exact: true })).toHaveCount(0);
-  const original = await page.evaluate(async () => {
-    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
-    const routines = await new Promise(resolve => { const request = database.transaction('routines').objectStore('routines').getAll(); request.onsuccess = () => resolve(request.result); });
-    database.close();
-    return routines[0];
-  });
-  await page.getByText('Add plan', { exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Strength routine', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Strongman block', exact: true })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: test.info().outputPath('today-add-plan.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Strongman block', exact: true }).click();
-  await page.getByLabel('Block name', { exact: true }).fill('Mid-block event training');
-  await page.getByRole('button', { name: 'Add event', exact: true }).click();
-  await page.getByLabel('Event 1 name', { exact: true }).fill('Sandbag carry');
-  await page.getByRole('button', { name: 'Save strongman block', exact: true }).click();
-  await page.getByRole('button', { name: 'Back to training' }).click();
-  await expect(page.getByRole('button', { name: 'Open workout', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'View strongman block', exact: true })).toBeVisible();
-  const current = await page.evaluate(async id => {
-    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
-    const routine = await new Promise(resolve => { const request = database.transaction('routines').objectStore('routines').get(id); request.onsuccess = () => resolve(request.result); });
-    database.close();
-    return routine;
-  }, original.id);
-  expect(current).toEqual(original);
-});
-
-test('imported active event conflicts retain attempts and resume explicitly after the original finishes', async ({ page }) => {
-  await createProfile(page, 'Restoring Athlete');
-  await page.getByRole('button', { name: 'Plans', exact: true }).click();
-  await page.getByRole('button', { name: 'New strongman block' }).click();
-  await page.getByLabel('Block name', { exact: true }).fill('Original preparation');
-  await page.getByRole('button', { name: 'Add event', exact: true }).click();
-  await page.getByLabel('Event 1 name', { exact: true }).fill('Sandbag carry');
-  await page.getByLabel('Event 1 family', { exact: true }).selectOption('carry');
-  await page.getByRole('button', { name: 'Save strongman block', exact: true }).click();
-  await page.getByRole('button', { name: 'Open event day', exact: true }).first().click();
-  await page.getByRole('button', { name: 'Start event day', exact: true }).click();
-  await page.getByLabel('Block 1 weight', { exact: true }).fill('300');
-  await page.getByLabel('Block 1 distance', { exact: true }).fill('0');
-  await page.getByLabel('Block 1 outcome', { exact: true }).selectOption('unsuccessful');
-  await page.getByRole('button', { name: 'Record attempt', exact: true }).click();
-  await page.getByRole('button', { name: 'Leave and resume later' }).click();
-  const backup = await page.evaluate(async () => {
-    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
-    const read = store => new Promise(resolve => { const request = database.transaction(store).objectStore(store).getAll(); request.onsuccess = () => resolve(request.result); });
-    const [routines, profiles, templates] = await Promise.all([read('routines'), read('profiles'), read('templates')]);
-    routines[0].name = 'Restored preparation';
-    const result = { format: 'mcilroy-method-backup', version: database.version, dataSchemaVersion: database.version, routines, profiles, templates };
-    database.close();
-    return result;
-  });
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
-  await page.locator('input[type="file"]').setInputFiles({ name: 'event-backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(backup)) });
-  await page.getByRole('dialog', { name: 'Preview import' }).getByRole('button', { name: 'Import backup', exact: true }).click();
-  await expect(page.getByText(/Import complete:/)).toBeVisible();
-  await page.getByRole('button', { name: 'Plans', exact: true }).click();
-  await page.getByRole('button', { name: 'View Restored preparation (imported copy)', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Recorded attempts', exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Resume paused event day' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Back to training' }).click();
-  await page.getByRole('button', { name: 'Today', exact: true }).click();
-  await page.getByRole('button', { name: 'Resume workout', exact: true }).click();
-  await page.getByRole('button', { name: 'Finish event day', exact: true }).click();
-  await page.getByRole('button', { name: 'Plans', exact: true }).click();
-  await page.getByRole('button', { name: 'View Restored preparation (imported copy)', exact: true }).click();
-  await page.getByRole('button', { name: 'Activate block', exact: true }).click();
-  await page.getByRole('button', { name: 'Resume paused event day', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Recorded attempts', exact: true })).toBeVisible();
-  await expect(page.locator('.strongman-attempts').last()).toContainText('300 lb');
-  await page.screenshot({ path: test.info().outputPath('strongman-resumed-import.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Finish event day', exact: true }).click();
-  const state = await page.evaluate(async () => {
-    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
-    const read = store => new Promise(resolve => { const request = database.transaction(store).objectStore(store).getAll(); request.onsuccess = () => resolve(request.result); });
-    const [routines, profiles] = await Promise.all([read('routines'), read('profiles')]);
-    database.close();
-    return { routines, profiles };
-  });
-  expect(state.routines).toHaveLength(2);
-  state.routines.forEach(routine => {
-    expect(routine.workouts[0].session).toMatchObject({ status: 'completed', runningSince: null });
-    expect(routine.workouts[0].session.eventBlocks[0].attempts[0]).toMatchObject({ weight: 300, distance: 0, outcome: 'unsuccessful' });
-  });
-  expect(state.profiles[0].activeWorkoutRoutineId).toBeNull();
-});
-
 test('standalone tracker excludes calculator-only entry requests', async ({ page }) => {
   const scripts = [];
   page.on('request', request => {
@@ -226,6 +22,155 @@ test('standalone tracker excludes calculator-only entry requests', async ({ page
     return response.ok() ? response.json().then(map => map.sources || []) : [];
   }));
   expect(sources.flat().some(source => /react-router|MaxesForm|CalculatorWebsite/.test(source))).toBe(false);
+});
+
+test('PWA upgrades a version 11 training database while preserving ordinary strongman work and retired records', async ({ page }) => {
+  // Seed before loading the application so its real startup must upgrade IndexedDB.
+  await page.route('**/rollback-seed', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><title>Seed</title>' }));
+  await page.goto('/rollback-seed');
+  const seeded = await page.evaluate(async () => {
+    const timestamp = '2026-09-01T12:00:00.000Z';
+    const profile = {
+      id: 'rollback-profile', name: 'Returning Athlete', createdAt: timestamp,
+      activeRoutineId: 'retired-events', scheduledStrengthRoutineId: 'ordinary-strength',
+      activeStrongmanRoutineId: 'retired-events', activeWorkoutRoutineId: 'retired-events',
+    };
+    const strength = {
+      id: 'ordinary-strength', profileId: profile.id, kind: 'strength', name: 'My regular routine',
+      archived: false, createdAt: timestamp, updatedAt: timestamp,
+      inputs: {
+        maxSquat: '315', maxPress: '185', maxDead: '405', duration: '5 weeks',
+        mainLiftChoice: 'Low', mesoMode: false, maxProgressionMode: 'fixed',
+        includeBackoffSets: false, includeStrongmanDay: true,
+        pressWeakPoint: 'Shoulders', deadliftWeakPoint: 'Back',
+        pressEventEnabled: true, pressEventMovement: 'Axle clean', pressEventSets: '4', pressEventReps: '2',
+      },
+      workouts: [{
+        id: 'ordinary-press', sequence: 1, cycleIndex: 0, cycleLabel: null,
+        weekIndex: 0, weekLabel: 'Week 1', name: 'Press', completedAt: null, session: null,
+        effectiveMaxes: { maxSquat: 315, maxPress: 185, maxDead: 405 },
+        exercises: [{
+          id: 'press-exercise', generated: { movement: 'Press', weight: 120, prescription: '4 × 6' }, overrides: {},
+        }, {
+          id: 'axle-exercise', generated: { movement: 'Axle clean', weight: 0, prescription: '4 × 2' },
+          overrides: { weight: '145' },
+        }],
+      }, {
+        id: 'host-event-slot', sequence: 2, cycleIndex: 0, cycleLabel: null,
+        weekIndex: 0, weekLabel: 'Week 1', name: 'Strongman', kind: 'eventSlot',
+        eventRef: { routineId: 'retired-events', workoutId: 'event-week-one' },
+        completedAt: null, session: null, exercises: [],
+      }],
+    };
+    const retiredRoutine = {
+      id: 'retired-events', profileId: profile.id, kind: 'strongman', name: 'Retired competition block',
+      status: 'active', archived: false, createdAt: timestamp, updatedAt: timestamp,
+      inputs: { weeks: 12, phases: [{ id: 'base', name: 'Base building', weeks: 6 }], events: [] },
+      workouts: [{
+        id: 'event-week-one', eventWeek: 1, name: 'Event week 1', exercises: [], completedAt: null,
+        hostRef: { routineId: strength.id, workoutId: 'host-event-slot' },
+        session: {
+          status: 'inProgress', startedAt: timestamp, runningSince: timestamp, elapsedSeconds: 90,
+          eventBlocks: [{
+            id: 'sandbag-block', movement: 'Sandbag pick', capabilitySnapshot: null,
+            attempts: [{ id: 'pick-attempt', status: 'completed', actual: { load: 250, reps: 1 }, outcome: 'successful' }],
+          }],
+        },
+      }],
+      customNotes: 'Keep this retired session in the backup.',
+    };
+    const retiredTemplate = {
+      id: 'retired-template', kind: 'strongman', name: 'Retired event template',
+      inputs: retiredRoutine.inputs, createdAt: timestamp, updatedAt: timestamp,
+    };
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mcilroy-method', 11);
+      request.onupgradeneeded = () => {
+        ['profiles', 'routines', 'templates'].forEach(name => {
+          const store = request.result.createObjectStore(name, { keyPath: 'id' });
+          if (name === 'routines') store.createIndex('profileId', 'profileId', { unique: false });
+        });
+        request.result.createObjectStore('metadata', { keyPath: 'key' });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(['profiles', 'routines', 'templates', 'metadata'], 'readwrite');
+      transaction.objectStore('profiles').put(profile);
+      transaction.objectStore('routines').put(strength);
+      transaction.objectStore('routines').put(retiredRoutine);
+      transaction.objectStore('templates').put(retiredTemplate);
+      transaction.objectStore('metadata').put({ key: 'defaultProfileId', value: profile.id });
+      transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 11 });
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    const version = database.version;
+    database.close();
+    return { version, profile, strength, retiredRoutine, retiredTemplate };
+  });
+  expect(seeded.version).toBe(11);
+
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Your next workout' })).toBeVisible();
+  await expect(page.locator('.dashboard .eyebrow')).toHaveText('My regular routine');
+  await expect(page.locator('.next-workout')).toContainText('Axle clean');
+  await expect(page.locator('.next-workout')).toContainText('145 lb');
+  await expect(page.getByRole('button', { name: /strongman block|add plan|view block|event session/i })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  await expect(page.locator('.plan-card')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'View My regular routine' })).toBeVisible();
+  await expect(page.locator('.template-card')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /strongman block|add plan|view block|event session/i })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export backup' }).click();
+  const stream = await (await downloaded).createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  const backup = JSON.parse(Buffer.concat(chunks).toString());
+  expect(backup).toMatchObject({ version: 12, dataSchemaVersion: 12 });
+  expect(backup.routines).toHaveLength(1);
+  expect(backup.routines[0].inputs).toEqual(seeded.strength.inputs);
+  expect(backup.routines[0].workouts[0]).toEqual(seeded.strength.workouts[0]);
+  expect(backup.routines[0].workouts[1]).toEqual({
+    ...seeded.strength.workouts[1], kind: undefined, eventRef: undefined,
+    exercises: [{
+      id: 'host-event-slot:strongman-day', generated: { movement: 'Strongman day', weight: '', prescription: '' }, overrides: {},
+    }],
+  });
+  expect(backup.templates).toEqual([]);
+  expect(backup.archives).toEqual([
+    { id: 'routines:retired-events', store: 'routines', record: seeded.retiredRoutine },
+    { id: 'templates:retired-template', store: 'templates', record: seeded.retiredTemplate },
+  ]);
+  expect(backup.profiles[0]).toEqual({
+    ...seeded.profile, activeRoutineId: seeded.strength.id, activeWorkoutRoutineId: null,
+    activeStrongmanRoutineId: undefined, scheduledStrengthRoutineId: undefined,
+  });
+
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Your next workout' })).toBeVisible();
+  await expect(page.locator('.next-workout')).toContainText('Axle clean');
+  const persisted = await page.evaluate(async () => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mcilroy-method');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const archives = await new Promise((resolve, reject) => {
+      const request = database.transaction('archives').objectStore('archives').getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const result = { version: database.version, archives };
+    database.close();
+    return result;
+  });
+  expect(persisted).toEqual({ version: 12, archives: backup.archives });
 });
 
 test('PWA coalesces typed drafts and folds an immediate action into one durable write', async ({ page }) => {

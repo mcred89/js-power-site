@@ -1,10 +1,20 @@
-export const DATABASE_VERSION = 11;
+import { retireStrongmanData } from './retiredStrongman';
+
+export const DATABASE_VERSION = 12;
+
+// These shipped steps remain available for installations that skipped releases.
+export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
+
+export const addTrainingPlanReferences = profile => ({
+  ...profile,
+  activeStrongmanRoutineId: profile.activeStrongmanRoutineId || null,
+  scheduledStrengthRoutineId: Object.prototype.hasOwnProperty.call(profile, 'scheduledStrengthRoutineId')
+    ? profile.scheduledStrengthRoutineId : profile.activeRoutineId || null,
+});
 
 const withEvidenceSnapshot = record => Object.prototype.hasOwnProperty.call(record, 'capabilitySnapshot')
   ? record : { ...record, capabilitySnapshot: null };
 
-// Old history does not identify which checkpoints were associated at the time.
-// Preserve it, but do not infer proof from today's editable practice definitions.
 export const addEventEvidenceSnapshots = record => {
   if (record.kind !== 'strongman') return record;
   const result = { ...record };
@@ -21,15 +31,25 @@ export const addEventEvidenceSnapshots = record => {
   return result;
 };
 
-export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
-
-export const addTrainingPlanReferences = profile => ({
-  ...profile,
-  activeStrongmanRoutineId: profile.activeStrongmanRoutineId || null,
-  scheduledStrengthRoutineId: Object.prototype.hasOwnProperty.call(profile, 'scheduledStrengthRoutineId')
-    ? profile.scheduledStrengthRoutineId
-    : profile.activeRoutineId || null,
-});
+const migrateRecordStores = (transaction, version, transforms, done) => {
+  let remaining = Object.keys(transforms).length;
+  Object.entries(transforms).forEach(([storeName, transform]) => {
+    const request = transaction.objectStore(storeName).openCursor();
+    request.onsuccess = event => {
+      const cursor = event.target.result;
+      if (cursor) {
+        cursor.update(transform(cursor.value));
+        cursor.continue();
+        return;
+      }
+      remaining -= 1;
+      if (!remaining) {
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: version });
+        done();
+      }
+    };
+  });
+};
 
 export const addMaxProgressionMode = record => ({
   ...record,
@@ -118,25 +138,12 @@ export const activeWorkoutIdsByProfile = routines => {
   return new Map([...newest].map(([profileId, routine]) => [profileId, routine.id]));
 };
 
-const migrateRecordStores = (transaction, version, transforms, done) => {
-  const stores = Object.entries(transforms);
-  let remaining = stores.length;
-  stores.forEach(([storeName, transform]) => {
-    const request = transaction.objectStore(storeName).openCursor();
-    request.onsuccess = event => {
-      const cursor = event.target.result;
-      if (cursor) {
-        cursor.update(transform(cursor.value));
-        cursor.continue();
-        return;
-      }
-      remaining -= 1;
-      if (!remaining) {
-        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: version });
-        done();
-      }
-    };
-  });
+export const addActiveWorkoutReferences = (profiles, routines) => {
+  const activeIds = activeWorkoutIdsByProfile(routines);
+  return Array.isArray(profiles) ? profiles.map(profile => ({
+    ...profile,
+    activeWorkoutRoutineId: activeIds.get(profile.id) || null,
+  })) : profiles;
 };
 
 // Each migration upgrades from the previous numeric version to its key. Keep
@@ -203,7 +210,37 @@ export const databaseMigrations = {
   9: ({ transaction, done }) => migrateRecordStores(transaction, 9, { routines: addMaxProgressionMode, templates: addMaxProgressionMode }, done),
   10: ({ transaction, done }) => migrateRecordStores(transaction, 10, { routines: addRoutineKind, templates: addRoutineKind, profiles: addTrainingPlanReferences }, done),
   11: ({ transaction, done }) => migrateRecordStores(transaction, 11, { routines: addEventEvidenceSnapshots, templates: addEventEvidenceSnapshots }, done),
-
+  // Move retired data out of active tables without deleting user history.
+  12: ({ database, transaction, done }) => {
+    createRecordStore(database, 'archives');
+    const archivesStore = transaction.objectStore('archives');
+    if (!archivesStore.indexNames.contains('profileId')) {
+      archivesStore.createIndex('profileId', 'record.profileId', { unique: false });
+    }
+    const records = { profiles: [], routines: [], templates: [], archives: [] };
+    const stores = Object.keys(records);
+    const readStore = index => {
+      if (index === stores.length) {
+        const restored = retireStrongmanData(records, { preferScheduled: true });
+        ['routines', 'templates'].forEach(store => records[store].forEach(record => {
+          if (record.kind === 'strongman') transaction.objectStore(store).delete(record.id);
+        }));
+        stores.forEach(store => restored[store].forEach(record => transaction.objectStore(store).put(record)));
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 12 });
+        done();
+        return;
+      }
+      const store = stores[index];
+      const request = transaction.objectStore(store).openCursor();
+      request.onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) { readStore(index + 1); return; }
+        records[store].push(cursor.value);
+        cursor.continue();
+      };
+    };
+    readStore(0);
+  },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {

@@ -36,8 +36,8 @@ const completedSets = exercise => (exercise?.sets || []).filter(set => set.statu
 
 // Facts are deliberately independent of the selected filters. Keep expensive session
 // traversal here so changing a range or lift remains proportional to workout count.
-export const buildProgressFacts = routines => (routines || []).filter(routine => routine.kind !== 'strongman').flatMap(routine => (
-  (routine.workouts || []).filter(workout => workout.completedAt && workout.kind !== 'eventSlot').map(workout => {
+export const buildProgressFacts = routines => (routines || []).flatMap(routine => (
+  (routine.workouts || []).filter(workout => workout.completedAt).map(workout => {
     const primaryExercise = primaryExerciseFor(workout);
     const lift = normalizeMainLift(primaryExercise?.movement);
     const splits = completedSets(primaryExercise)

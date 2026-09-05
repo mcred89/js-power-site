@@ -1,4 +1,7 @@
-import { DATABASE_VERSION, runDatabaseMigrations } from './storageMigrations';
+import {
+  DATABASE_VERSION,
+  runDatabaseMigrations,
+} from './storageMigrations';
 import { serializedRecordsEqual } from './recordComparison';
 
 const DATABASE_NAME = 'mcilroy-method';
@@ -10,7 +13,7 @@ const DATABASE_NAME = 'mcilroy-method';
 let databasePromise;
 let cachedDatabase;
 
-const STORE_NAMES = new Set(['profiles', 'routines', 'templates', 'metadata']);
+const STORE_NAMES = new Set(['profiles', 'routines', 'templates', 'archives', 'metadata']);
 const validateStoreName = storeName => {
   if (!STORE_NAMES.has(storeName)) throw new Error(`Unknown IndexedDB store: ${storeName}.`);
 };
@@ -90,7 +93,7 @@ export const applyBatch = ({ puts = {}, deletes = {}, conditions = {}, deleteByI
   ])];
   storeNames.forEach(validateStoreName);
   Object.entries(deleteByIndex).forEach(([storeName, removals]) => removals.forEach(({ indexName }) => {
-    if (storeName !== 'routines' || indexName !== 'profileId') {
+    if (!['routines', 'archives'].includes(storeName) || indexName !== 'profileId') {
       throw new Error(`Unknown IndexedDB index: ${storeName}.${indexName}.`);
     }
   }));
@@ -152,23 +155,15 @@ export const applyBatch = ({ puts = {}, deletes = {}, conditions = {}, deleteByI
       checks.forEach(({ storeName, key, expected }) => {
         const request = tx.objectStore(storeName).get(key);
         request.onsuccess = () => {
-          if (settled) return;
           if (!serializedRecordsEqual(request.result, expected)) {
             const conflict = batchConflict();
-            // An abort can synchronously emit request errors in IndexedDB adapters.
-            // Preserve the actual conflict before those generic abort errors arrive.
-            fail(conflict);
             try { tx.abort(); } catch (error) { fail(conflict); }
+            fail(conflict);
             return;
           }
           remainingChecks -= 1;
           // Reads and writes stay in this transaction, closing the preview/confirmation race.
-          if (!remainingChecks) {
-            try { performWrites(); } catch (error) {
-              fail(error);
-              try { tx.abort(); } catch (abortError) { fail(abortError); }
-            }
-          }
+          if (!remainingChecks) performWrites();
         };
         request.onerror = () => {
           try { tx.abort(); } catch (error) { fail(request.error || error); }
@@ -180,6 +175,8 @@ export const applyBatch = ({ puts = {}, deletes = {}, conditions = {}, deleteByI
     }
   }));
 };
+
+export { exportBackup, parseBackup } from './storageBackup';
 
 export const requestPersistentStorage = async () => {
   if (!navigator.storage?.persist) return false;

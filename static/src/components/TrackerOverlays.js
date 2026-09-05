@@ -28,7 +28,11 @@ export const TrackerNotices = ({ message, updateRegistration }) => {
 
 export const ImportPreview = ({ plan, busy, onCancel, onConfirm }) => {
   const summary = importPlanSummary(plan);
-  const sections = [['Profiles', plan.profiles], ['Routines', plan.routines], ['Templates', plan.templates || []]];
+  const sections = [['Profiles', plan.profiles], ['Routines', plan.routines], ['Templates', plan.templates || []],
+    ...(plan.archives?.length ? [['Archived plans', plan.archives.map(item => ({
+      ...item, imported: { ...item.imported, name: item.imported.record?.name || 'Archived plan' },
+    }))]] : []),
+  ];
   return <div className="modal-backdrop"><section className="confirmation-modal import-preview" role="dialog" aria-modal="true" aria-labelledby="import-preview-title"><p className="eyebrow">Backup review</p><h2 id="import-preview-title">Preview import</h2><p>{summary.copy} copied · {summary.skip} skipped · {summary.merge} merged</p><p className="import-note">Merges keep this phone's values and completed workout snapshots, while adding records and workouts found only in the backup.</p><div className="import-preview-list">{sections.map(([title, items]) => <div key={title}><h3>{title}</h3>{!items.length ? <p>None</p> : items.map((item, index) => <div className="import-preview-row" key={`${item.imported.id}-${index}`}><span><strong>{item.imported.name || 'Unnamed'}</strong><small>{item.status}</small></span><b className={`import-action ${item.action}`}>{item.action}</b></div>)}</div>)}</div><div className="button-row modal-actions"><button className="secondary-button" type="button" disabled={busy} onClick={onCancel}>Cancel</button><button className="primary-button" type="button" disabled={busy} onClick={onConfirm}>{busy ? 'Importing…' : 'Import backup'}</button></div></section></div>;
 };
 

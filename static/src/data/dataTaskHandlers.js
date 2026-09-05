@@ -1,6 +1,8 @@
 import { createImportPlan } from './importBackup';
 import { routineHistoryCsvRowIterator, routinePlanCsvRowIterator } from './routineCsv';
-import { exportBackup, parseBackup, normalizeRoutineTransfer } from './storageBackup';
+import { exportBackup, parseBackup } from './storageBackup';
+import { DATABASE_VERSION } from './storageMigrations';
+import { isSupportedRoutine } from './retiredStrongman';
 import { createTransferPackage, openTransferPackage } from './transferPackage';
 import { sharedTransferContents } from './transferUi';
 
@@ -39,6 +41,24 @@ const collectCsvChunks = (rows, size) => {
   return chunks;
 };
 
+const normalizeRoutineTransfer = payload => {
+  if (![1, 2].includes(payload.version) || !payload.routine ||
+      typeof payload.routine !== 'object' || Array.isArray(payload.routine) ||
+      (payload.version === 2 && (!Number.isInteger(payload.schemaVersion) ||
+        payload.schemaVersion < 1 || payload.schemaVersion > DATABASE_VERSION))) {
+    throw new Error('This is not a supported routine transfer.');
+  }
+  if (!isSupportedRoutine(payload.routine)) {
+    throw new Error('Strongman blocks are no longer supported. Use a full backup to preserve this block as archived data.');
+  }
+  const migrated = parseBackup(JSON.stringify({
+    format: 'mcilroy-method-backup',
+    version: payload.version === 1 ? 1 : payload.schemaVersion,
+    profiles: [], routines: [payload.routine], templates: [],
+  }));
+  return { ...payload, version: 2, schemaVersion: DATABASE_VERSION, routine: migrated.routines[0] };
+};
+
 // Task handlers are deliberately environment-neutral: the worker and fallback execute the
 // exact same functions, preventing feature or error-message drift between older browsers.
 export const dataTaskHandlers = {
@@ -49,19 +69,12 @@ export const dataTaskHandlers = {
     return { backup: parseBackup(contents) };
   },
   [DATA_TASKS.PARSE_BACKUP]: ({ contents }) => parseBackup(contents),
-  [DATA_TASKS.PLAN_IMPORT]: ({ backup, profiles, routines, templates }) => createImportPlan(backup, profiles, routines, templates),
-  [DATA_TASKS.SERIALIZE_BACKUP]: ({ profiles, routines, templates }) => exportBackup(profiles, routines, templates),
-  [DATA_TASKS.SERIALIZE_TRANSFER]: payload => JSON.stringify(
-    payload?.format === 'mcilroy-method-routine-transfer' ? normalizeRoutineTransfer(payload) : payload,
+  [DATA_TASKS.PLAN_IMPORT]: ({ backup, profiles, routines, templates, archives }) => createImportPlan(backup, profiles, routines, templates, archives),
+  [DATA_TASKS.SERIALIZE_BACKUP]: ({ profiles, routines, templates, archives }) => exportBackup(profiles, routines, templates, archives),
+  [DATA_TASKS.SERIALIZE_TRANSFER]: payload => JSON.stringify(payload),
+  [DATA_TASKS.CREATE_TRANSFER]: ({ contents, data, currentTime, options }) => (
+    createTransferPackage(contents === undefined ? JSON.stringify(data) : contents, currentTime, options)
   ),
-  [DATA_TASKS.CREATE_TRANSFER]: ({ contents, data, currentTime, options }) => {
-    const payload = contents === undefined ? data : JSON.parse(contents);
-    const normalized = payload?.format === 'mcilroy-method-routine-transfer'
-      ? normalizeRoutineTransfer(payload) : payload;
-    return createTransferPackage(
-      normalized === payload && contents !== undefined ? contents : JSON.stringify(normalized), currentTime, options,
-    );
-  },
   [DATA_TASKS.OPEN_TRANSFER]: ({ contents, key, currentTime }) => openTransferPackage(contents, key, currentTime),
   [DATA_TASKS.OPEN_TRANSFER_PLAN]: async ({ contents, key, currentTime, local }) => {
     const plaintext = await openTransferPackage(contents, key, currentTime);
@@ -69,7 +82,7 @@ export const dataTaskHandlers = {
     if (payload.format === 'mcilroy-method-routine-transfer') {
       return { routine: normalizeRoutineTransfer(payload) };
     }
-    return { plan: createImportPlan(parseBackup(plaintext), local.profiles, local.routines, local.templates) };
+    return { plan: createImportPlan(parseBackup(plaintext), local.profiles, local.routines, local.templates, local.archives) };
   },
   [DATA_TASKS.PLAN_CSV]: ({ routine, chunkSize }) => collectCsvChunks(routinePlanCsvRowIterator(routine), chunkSize),
   [DATA_TASKS.HISTORY_CSV]: ({ routine, chunkSize }) => collectCsvChunks(routineHistoryCsvRowIterator(routine), chunkSize),

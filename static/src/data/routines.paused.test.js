@@ -1,11 +1,15 @@
 import {
   adjustSessionSet,
   completeSessionSet,
+  correctMaxes,
+  createRoutine,
+  reopenWorkoutSession,
+  refreshAdaptiveProgression,
   sessionElapsedSeconds,
   startWorkoutSession,
   substituteSessionExercise,
 } from './routines';
-import { correctMaxes, createRoutine, refreshAdaptiveProgression } from './routinePlanning';
+import { duplicateRoutine } from './routineCopies';
 
 const inputs = {
   maxSquat: '500', maxPress: '225', maxDead: '600', duration: '5 weeks',
@@ -15,6 +19,7 @@ const inputs = {
 const startedAt = '2026-08-18T12:00:00.000Z';
 const resumedAt = '2026-08-20T12:00:00.000Z';
 
+// Version 11 could pause an ordinary workout when a different plan became active.
 const pausedRoutine = (routine, index = 0) => {
   const workoutId = routine.workouts[index].id;
   let changed = startWorkoutSession(routine, workoutId, startedAt);
@@ -60,6 +65,51 @@ it('keeps paused workout prescriptions frozen during explicit max correction', (
   expect(corrected.workouts[0]).toBe(original);
   expect(corrected.workouts[3].effectiveMaxes.maxSquat).toBe(600);
   expect(corrected.workouts[3].exercises[0].generated.weight).toBe(420);
+});
+
+it('reopens a retired completed event slot as a usable freeform strongman day', () => {
+  const routine = createRoutine('profile', 'Strength', inputs);
+  routine.workouts[0] = {
+    ...routine.workouts[0], name: 'Strongman', kind: 'eventSlot', exercises: [],
+    completedAt: '2026-08-18T14:00:00.000Z',
+    eventRef: { routineId: 'retired-block', workoutId: 'retired-event-week' },
+  };
+  const original = JSON.stringify(routine);
+  const workoutId = routine.workouts[0].id;
+  const reopened = reopenWorkoutSession(routine, workoutId, resumedAt);
+
+  expect(reopened.workouts[0]).toMatchObject({ completedAt: null, exercises: [{
+    generated: { movement: 'Strongman day', weight: '', prescription: '' }, overrides: {},
+  }] });
+  expect(reopened.workouts[0]).not.toHaveProperty('kind');
+  expect(reopened.workouts[0]).not.toHaveProperty('eventRef');
+  const started = startWorkoutSession(reopened, workoutId, resumedAt);
+  expect(started.workouts[0].session).toMatchObject({
+    status: 'inProgress', exercises: [{ movement: 'Strongman day', sets: [{ status: 'pending' }] }],
+  });
+  expect(JSON.stringify(routine)).toBe(original);
+});
+
+it('copies a retired completed event slot into a usable freeform strongman day', () => {
+  const routine = createRoutine('profile', 'Strength', inputs);
+  routine.workouts[0] = {
+    ...routine.workouts[0], name: 'Strongman', kind: 'eventSlot', exercises: [],
+    completedAt: '2026-08-18T14:00:00.000Z',
+    eventRef: { routineId: 'retired-block', workoutId: 'retired-event-week' },
+  };
+  const original = JSON.stringify(routine);
+  const copied = duplicateRoutine(routine, 'other-profile', 'Fresh routine');
+
+  expect(copied.workouts[0]).toMatchObject({ completedAt: null, session: null, exercises: [{
+    generated: { movement: 'Strongman day', weight: '', prescription: '' }, overrides: {},
+  }] });
+  expect(copied.workouts[0]).not.toHaveProperty('kind');
+  expect(copied.workouts[0]).not.toHaveProperty('eventRef');
+  const started = startWorkoutSession(copied, copied.workouts[0].id, resumedAt);
+  expect(started.workouts[0].session).toMatchObject({
+    status: 'inProgress', exercises: [{ movement: 'Strongman day', sets: [{ status: 'pending' }] }],
+  });
+  expect(JSON.stringify(routine)).toBe(original);
 });
 
 it('keeps a paused later-cycle snapshot while adaptive progression updates unstarted work', () => {

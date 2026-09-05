@@ -65,7 +65,6 @@ const progressionLabel = mode => ({
 }[mode || 'fixed']);
 
 export const PlanSetup = ({ routine }) => {
-  if (routine.kind === 'strongman') return <div><h3>Strongman block</h3><p>{routine.inputs.weeks} event weeks · {routine.status}</p><p>{routine.inputs.phases.map(phase => `${phase.weeks} ${phase.type}`).join(' / ')}</p></div>;
   const { inputs = {} } = routine;
   const eventLifts = [['squat', 'Squat day'], ['press', 'Press day'], ['deadlift', 'Deadlift day']];
 

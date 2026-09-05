@@ -5,9 +5,12 @@ import {
   adaptiveStatusForWorkout,
   clearExerciseOverrides,
   completeSessionSet,
+  correctMaxes,
+  createRoutine,
   deleteFutureWorkout,
   finishWorkoutSession,
   reopenWorkoutSession,
+  refreshAdaptiveProgression,
   setSessionRpe,
   setWorkoutComplete,
   startWorkoutSession,
@@ -53,7 +56,7 @@ const navItems = [
 ];
 
 const TRACKER_HISTORY_KEY = 'mcilroyTracker';
-const trackerViews = new Set([...navItems.map(([key]) => key), 'builder', 'strongman']);
+const trackerViews = new Set([...navItems.map(([key]) => key), 'builder']);
 
 export const trackerRouteFromHistory = state => {
   const route = state?.[TRACKER_HISTORY_KEY];
@@ -74,11 +77,18 @@ const trackerHistoryDepth = state => state?.[TRACKER_HISTORY_KEY]?.depth || 0;
 // Today, workout detail, and the active session stay in this eager graph. Everything reached
 // through secondary navigation is requested on demand and can be added verbatim to precache.
 const RoutineBuilder = lazy(() => import('./components/RoutineBuilderScreen').then(module => ({ default: module.RoutineBuilderScreen })));
-const StrongmanWorkspace = lazy(() => import('./components/StrongmanWorkspace'));
 const ProgressScreen = lazy(() => import('./components/ProgressScreen').then(module => ({ default: module.ProgressScreen })));
 const HistoryScreen = lazy(() => import('./components/HistoryScreen').then(module => ({ default: module.HistoryScreen })));
+const WorkoutSessionHistory = lazy(() => import('./components/WorkoutSessionHistory').then(module => ({ default: module.WorkoutSessionHistory })));
+const WorkoutSummary = lazy(() => import('./components/WorkoutSessionHistory').then(module => ({ default: module.WorkoutSummary })));
 const PlansScreen = lazy(() => import('./components/PlansScreen').then(module => ({ default: module.PlansScreen })));
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(module => ({ default: module.SettingsScreen })));
+const MaxCorrection = lazy(() => import('./components/PlanControls').then(module => ({ default: module.MaxCorrection })));
+const RoutineNameEditor = lazy(() => import('./components/PlanControls').then(module => ({ default: module.RoutineNameEditor })));
+const PlanSetup = lazy(() => import('./components/PlanControls').then(module => ({ default: module.PlanSetup })));
+const ProfileForm = lazy(() => import('./components/TrackerForms').then(module => ({ default: module.ProfileForm })));
+const ConfirmationDialog = lazy(() => import('./components/TrackerForms').then(module => ({ default: module.ConfirmationModal })));
+const ConfirmationModal = props => <Suspense fallback={null}><ConfirmationDialog {...props} /></Suspense>;
 const loadImportTools = () => import('./data/importBackup');
 const DATA_TASKS = {
   PARSE_BACKUP: 'parse-backup', PLAN_IMPORT: 'plan-import',
@@ -99,8 +109,6 @@ const RoutineDestination = lazy(() => import('./components/TrackerOverlays').the
 const RoutineCopyDialog = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.RoutineCopyDialog })));
 const SaveTemplateDialog = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.SaveTemplateDialog })));
 const TrackerNotices = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TrackerNotices })));
-const WorkoutSessionHistory = lazy(() => import('./components/WorkoutSessionHistory').then(module => ({ default: module.WorkoutSessionHistory })));
-const WorkoutSummary = lazy(() => import('./components/WorkoutSessionHistory').then(module => ({ default: module.WorkoutSummary })));
 const TrackerScreenFallback = ({ label, error, onRetry }) => <div className="loading-screen">
   <p>{error || `Opening ${label}…`}</p>
   {error && <button className="secondary-button" onClick={onRetry}>Retry</button>}
@@ -161,22 +169,7 @@ export const initialProfileId = (profiles, defaultProfileId) => (
 export const todayRoutineIds = profile => [...new Set([
   profile?.activeRoutineId,
   profile?.activeWorkoutRoutineId,
-  profile?.scheduledStrengthRoutineId,
-  profile?.activeStrongmanRoutineId,
 ].filter(Boolean))];
-
-const loadTodayRoutineRecords = async (storage, profileId, routineIds, profileLoaded = false) => {
-  let routines = (await Promise.all(routineIds.map(id => storage.get('routines', id))))
-    .filter(item => item?.profileId === profileId);
-  // Older or interrupted writes can leave a profile without a usable active-routine
-  // pointer even though saved routines exist. Recover these at startup and profile
-  // switches while keeping valid pointers on the fast path.
-  const fullProfile = Boolean(profileId && (!routineIds.length || routines.length !== routineIds.length));
-  if (fullProfile && !profileLoaded) {
-    routines = await storage.getAllByIndex('routines', 'profileId', profileId);
-  }
-  return { routines, fullProfile };
-};
 
 export const loadInitialTrackerRecords = async storage => {
   const [profiles, savedDefault] = await Promise.all([
@@ -184,8 +177,17 @@ export const loadInitialTrackerRecords = async storage => {
   ]);
   const selectedProfileId = initialProfileId(profiles, savedDefault?.value);
   const selected = profiles.find(item => item.id === selectedProfileId);
-  const records = await loadTodayRoutineRecords(storage, selectedProfileId, todayRoutineIds(selected));
-  return { profiles, ...records, selectedProfileId, defaultProfileId: savedDefault?.value || null };
+  const routineIds = todayRoutineIds(selected);
+  let routines = (await Promise.all(routineIds.map(id => storage.get('routines', id))))
+    .filter(Boolean);
+  // Older or interrupted writes can leave a profile without a usable active-routine
+  // pointer even though its routines are still intact. Secondary screens query the full
+  // profile index, which previously made Today appear to repair itself after changing tabs.
+  // Keep the fast pointed read for normal startup, but recover from a missing/dangling pointer.
+  if (selected && (!routineIds.length || routines.length !== routineIds.length)) {
+    routines = await storage.getAllByIndex('routines', 'profileId', selected.id);
+  }
+  return { profiles, routines, selectedProfileId, defaultProfileId: savedDefault?.value || null };
 };
 
 export const mergeRoutineRead = (current, records, requestedGeneration, currentGeneration) => {
@@ -216,25 +218,34 @@ export const createControllerChangeHandler = (initiallyControlled, reloadPage) =
 };
 
 export const trackerLoadPolicy = view => ({
-  profileRoutines: ['plans', 'history', 'progress', 'strongman'].includes(view),
+  profileRoutines: ['plans', 'history', 'progress'].includes(view),
   templates: ['plans', 'builder', 'settings'].includes(view),
   persistence: view === 'settings',
 });
+
+const importConditions = items => items.flatMap(item => [
+  { key: item.imported.id, expected: item.local },
+  ...(item.result.id !== item.imported.id ? [{ key: item.result.id, expected: item.existingResult }] : []),
+]);
 
 export const importPlanBatch = plan => ({
   puts: {
     profiles: plan.profiles.filter(item => item.action !== 'skip').map(item => item.result),
     routines: plan.routines.filter(item => item.action !== 'skip').map(item => item.result),
     templates: (plan.templates || []).filter(item => item.action !== 'skip').map(item => item.result),
+    ...(plan.archives ? { archives: plan.archives.filter(item => item.action !== 'skip').map(item => item.result) } : {}),
   },
   conditions: {
     profiles: plan.profiles.map(item => ({ key: item.imported.id, expected: item.local })),
-    routines: plan.routines.flatMap(item => [{ key: item.imported.id, expected: item.local }, ...(item.result.id !== item.imported.id ? [{ key: item.result.id, expected: undefined }] : [])]),
+    routines: importConditions(plan.routines),
     templates: (plan.templates || []).map(item => ({ key: item.imported.id, expected: item.local })),
+    ...(plan.archives ? { archives: importConditions(plan.archives) } : {}),
   },
 });
 
 export const activateRoutineImport = (plan, destinationProfile, routineId, updatedAt = new Date().toISOString()) => {
+  const sourceRoutineId = routineId;
+  routineId = plan.routines.find(item => item.imported.id === sourceRoutineId)?.result.id || routineId;
   const updatedProfile = {
     ...destinationProfile,
     activeRoutineId: routineId,
@@ -244,7 +255,7 @@ export const activateRoutineImport = (plan, destinationProfile, routineId, updat
   if (!plannedProfile) {
     return {
       ...plan,
-      routineActivation: { profileId: destinationProfile.id, routineId },
+      routineActivation: { profileId: destinationProfile.id, routineId: sourceRoutineId },
       profiles: [...plan.profiles, {
         type: 'profile',
         status: 'conflict',
@@ -257,7 +268,7 @@ export const activateRoutineImport = (plan, destinationProfile, routineId, updat
   }
   return {
     ...plan,
-    routineActivation: { profileId: destinationProfile.id, routineId },
+    routineActivation: { profileId: destinationProfile.id, routineId: sourceRoutineId },
     profiles: plan.profiles.map(item => item === plannedProfile ? {
       ...item,
       action: item.action === 'skip' ? 'merge' : item.action,
@@ -278,26 +289,6 @@ export const profileAfterFinishedRoutine = (profile, routineId, updatedAt = new 
     ? profileWithActiveWorkout(profile, null, updatedAt)
     : profile
 );
-
-const ProfileForm = ({ onSave, title = 'Who is training?' }) => {
-  const [name, setName] = useState('');
-  return (
-    <form className="empty-card profile-form" onSubmit={event => {
-      event.preventDefault();
-      onSave(name.trim());
-      setName('');
-    }}>
-      <p className="eyebrow">Local profile</p>
-      <h1>{title}</h1>
-      <p>Profiles keep routines separate on this phone. Nothing is uploaded.</p>
-      <label className="form-field">
-        <span className="field-label">Name</span>
-        <input className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus />
-      </label>
-      <button className="primary-button" type="submit">Create profile</button>
-    </form>
-  );
-};
 
 const WorkoutExercises = ({ routine, workout, editable, onChange }) => (
   <div className="exercise-list">
@@ -355,26 +346,6 @@ export const templateBuilderInputs = template => ({
   deadliftIncrement: '',
 });
 
-export const ConfirmationModal = ({ title, children, confirmLabel, requiredText, onCancel, onConfirm }) => {
-  const [confirmation, setConfirmation] = useState('');
-  const confirmed = !requiredText || confirmation.trim().toLowerCase() === requiredText.toLowerCase();
-  return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={event => {
-      if (event.target === event.currentTarget) onCancel();
-    }}>
-      <section className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="confirmation-title">
-        <h2 id="confirmation-title">{title}</h2>
-        <p>{children}</p>
-        {requiredText && <label className="form-field confirmation-field"><span className="field-label">Type {requiredText} to confirm</span><input className="number-input" aria-label={`Type ${requiredText} to confirm`} value={confirmation} onChange={event => setConfirmation(event.target.value)} autoFocus /></label>}
-        <div className="button-row modal-actions">
-          <button className="secondary-button" type="button" onClick={onCancel}>Cancel</button>
-          <button className="danger-button" type="button" disabled={!confirmed} onClick={onConfirm} autoFocus={!requiredText}>{confirmLabel}</button>
-        </div>
-      </section>
-    </div>
-  );
-};
-
 const AppearanceControl = ({ appearance, onChange }) => (
   <label className="form-field appearance-control">
     <span className="field-label">Appearance</span>
@@ -421,7 +392,6 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [planToDelete, setPlanToDelete] = useState(null);
   const [builderTemplate, setBuilderTemplate] = useState(null);
   const [workoutSummary, setWorkoutSummary] = useState(null);
-  const [strongmanRequest, setStrongmanRequest] = useState({});
   const [dataTaskBusy, setDataTaskBusy] = useState(false);
   const applyingHistoryRef = useRef(false);
   const importRef = useRef();
@@ -434,15 +404,6 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const routineWriterRef = useRef();
   if (!routineWriterRef.current) routineWriterRef.current = createSerializedRoutineWriter(save);
   const showWorkout = useCallback(target => {
-    const owner = routinesRef.current.find(item => item.workouts.some(day => day.id === target.id));
-    if (target.kind === 'eventSlot' || owner?.kind === 'strongman') {
-      setStrongmanRequest(target.kind === 'eventSlot'
-        ? { hostRoutineId: owner?.id, hostWorkoutId: target.id, ...(target.eventRef ? { planId: target.eventRef.routineId, workoutId: target.eventRef.workoutId } : {}) }
-        : { planId: owner.id, workoutId: target.id });
-      setWorkoutId(null);
-      setView('strongman');
-      return;
-    }
     setWorkoutId(target.id);
     setEditingWorkout(false);
   }, []);
@@ -498,8 +459,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   useEffect(() => {
     loadInitialTrackerRecords({ getAll, get, getAllByIndex })
-      .then(({ profiles: savedProfiles, routines: startupRoutines, fullProfile, defaultProfileId: savedDefaultId, selectedProfileId: selectedId }) => {
-        if (fullProfile) loadedProfileRoutinesFor.current = selectedId;
+      .then(({ profiles: savedProfiles, routines: startupRoutines, defaultProfileId: savedDefaultId, selectedProfileId: selectedId }) => {
         setProfiles(savedProfiles);
         setRoutines(startupRoutines);
         setDefaultProfileId(savedDefaultId);
@@ -518,10 +478,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     if (loading || !selectedProfileId) return undefined;
     const generation = ++todayLoadGeneration.current;
     setTodayRoutinesLoaded(false);
-    loadTodayRoutineRecords({ get, getAllByIndex }, selectedProfileId, todayIds, loadedProfileRoutinesFor.current === selectedProfileId)
-      .then(({ routines: records, fullProfile }) => {
+    Promise.all(todayIds
+      .map(id => get('routines', id)))
+      .then(records => {
         if (generation !== todayLoadGeneration.current) return;
-        if (fullProfile) loadedProfileRoutinesFor.current = selectedProfileId;
         // Merge by id instead of replacing the cache: a slower read must not discard a
         // routine already updated by an action in this page session.
         setRoutines(current => mergeRoutineRead(current, records, generation, todayLoadGeneration.current));
@@ -614,21 +574,15 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       progressRoutines: profilePlans,
     };
   }, [routines, selectedProfileId]);
-  const strengthRoutines = profileRoutines.filter(item => item.kind !== 'strongman');
-  const hasPlans = profileRoutines.length > 0;
-  const routine = strengthRoutines.find(item => item.id === selectedRoutineId) ||
-    strengthRoutines.find(item => item.id === profile?.activeRoutineId) ||
-    strengthRoutines.find(item => item.id === profile?.scheduledStrengthRoutineId) || strengthRoutines[0];
-  const activeStrongman = profileRoutines.find(item => item.id === profile?.activeStrongmanRoutineId && item.status === 'active' && !item.archived);
-  const nextEvent = activeStrongman?.workouts.find(item => !item.completedAt && !item.skippedAt && !item.session);
+  const routine = profileRoutines.find(item => item.id === selectedRoutineId) ||
+    profileRoutines.find(item => item.id === profile?.activeRoutineId) || profileRoutines[0];
   const { workout, pending, completed } = useMemo(() => {
     const nextPending = [];
     const nextCompleted = [];
     let selectedWorkout;
     (routine?.workouts || []).forEach(item => {
       if (item.id === workoutId) selectedWorkout = item;
-      if (item.completedAt) { if (item.kind !== 'eventSlot') nextCompleted.push(item); }
-      else if (!item.skippedAt) nextPending.push(item);
+      (item.completedAt ? nextCompleted : nextPending).push(item);
     });
     // History has always shown the routine's completed snapshots in reverse queue order.
     nextCompleted.reverse();
@@ -652,8 +606,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const loadAllData = async () => {
-    const [allProfiles, allRoutines, allTemplates] = await Promise.all([
-      getAll('profiles'), getAll('routines'), getAll('templates'),
+    const [allProfiles, allRoutines, allTemplates, archives] = await Promise.all([
+      getAll('profiles'), getAll('routines'), getAll('templates'), getAll('archives'),
     ]);
     setProfiles(allProfiles);
     setRoutines(allRoutines);
@@ -661,11 +615,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     setTemplates(allTemplates);
     setTemplatesLoaded(true);
     loadedProfileRoutinesFor.current = null;
-    return { profiles: allProfiles, routines: allRoutines, templates: allTemplates };
+    return { profiles: allProfiles, routines: allRoutines, templates: allTemplates, archives };
   };
 
   const addProfile = async name => {
-    const item = { id: makeId(), name, activeWorkoutRoutineId: null, activeStrongmanRoutineId: null, scheduledStrengthRoutineId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const item = { id: makeId(), name, activeWorkoutRoutineId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const shouldMakeDefault = profiles.length === 0;
     // The first profile and its default pointer are one logical record. Never publish either
     // in React unless the shared IndexedDB transaction commits both of them.
@@ -697,12 +651,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const addRoutine = async (name, inputs) => {
-    const item = activeStrongman
-      ? (await import('./data/strongmanIntegration')).createLinkedStrengthRoutine(profile.id, name, inputs, activeStrongman)
-      : (await import('./data/routinePlanning')).createRoutine(profile.id, name, inputs);
-    let updatedProfile;
-    try { updatedProfile = await (await import('./data/recordActions')).saveCreatedRoutine(item, profile); }
-    catch (error) { flash(error.message); return; }
+    const item = createRoutine(profile.id, name, inputs);
+    const updatedProfile = { ...profile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
+    await applyBatch({ puts: { routines: [item], profiles: [updatedProfile] } });
     setRoutines(current => [...current, item]);
     setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedRoutineId(item.id);
@@ -711,56 +662,23 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     flash('Routine created on this phone.');
   };
 
-  const commitStrongmanChange = async change => {
-    await routineWriterRef.current(change.routines[0], () => applyBatch({
-      puts: { routines: change.routines, ...(change.profile ? { profiles: [change.profile] } : {}) },
-      conditions: change.conditions || {},
-    }));
-    const records = new Map(routinesRef.current.map(item => [item.id, item]));
-    change.routines.forEach(item => records.set(item.id, item));
-    routinesRef.current = [...records.values()];
-    setRoutines(routinesRef.current);
-    if (change.profile) setProfiles(items => items.map(item => item.id === change.profile.id ? change.profile : item));
-  };
-
-  const openStrongman = request => {
-    setStrongmanRequest(request || {});
-    setWorkoutId(null);
-    setView('strongman');
-  };
-
-  const openStrengthBuilder = () => {
-    setBuilderTemplate(null);
-    setView('builder');
-  };
-
   const selectRoutine = async item => {
-    if (item.kind === 'strongman') {
-      setStrongmanRequest({ planId: item.id });
-      setWorkoutId(null);
-      setView('strongman');
-      return;
-    }
-    let updatedProfile;
-    try { updatedProfile = await (await import('./data/recordActions')).patchRecord('profiles', profile.id, { activeRoutineId: item.id, scheduledStrengthRoutineId: item.id }); }
-    catch (error) { flash(error.message); return; }
+    const updatedProfile = { ...profile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
+    await save('profiles', updatedProfile);
     setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedRoutineId(item.id);
   };
 
   const renameRoutine = async (item, name) => {
-    try {
-      await routineWriterRef.current(item, async () => {
-        publishRoutine(await (await import('./data/recordActions')).patchRecord('routines', item.id, { name }));
-      });
-    } catch (error) { flash(error.message); return; }
+    await saveRoutine({ ...item, name, updatedAt: new Date().toISOString() });
     flash('Routine renamed.');
   };
 
   const addCopiedRoutine = async item => {
     const destinationProfile = profiles.find(entry => entry.id === item.profileId);
     if (!destinationProfile) return;
-    const updatedProfile = await (await import('./data/recordActions')).saveCreatedRoutine(item, destinationProfile);
+    const updatedProfile = { ...destinationProfile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
+    await applyBatch({ puts: { routines: [item], profiles: [updatedProfile] } });
     setRoutines(current => [...current, item]);
     setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedProfileId(item.profileId);
@@ -770,14 +688,16 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const confirmRoutineCopy = async (destination, name) => {
-    const item = (await import('./data/routineCopies')).duplicateRoutine(copyRequest.item, destination, name);
-    try { await addCopiedRoutine(item); } catch (error) { flash(error.message); return; }
+    const { duplicateRoutine } = await import('./data/routineCopies');
+    const item = duplicateRoutine(copyRequest.item, destination, name);
+    await addCopiedRoutine(item);
     setCopyRequest(null);
     flash('Routine copied. The original is unchanged.');
   };
 
   const saveRoutineTemplate = async name => {
-    const item = (await import('./data/routineCopies')).createRoutineTemplate(templateSource, name);
+    const { createRoutineTemplate } = await import('./data/routineCopies');
+    const item = createRoutineTemplate(templateSource, name);
     await save('templates', item);
     setTemplates(current => [...current, item]);
     setTemplateSource(null);
@@ -785,9 +705,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const renameTemplate = async (item, name) => {
-    let updated;
-    try { updated = await (await import('./data/recordActions')).patchRecord('templates', item.id, { name }); }
-    catch (error) { flash(error.message); return; }
+    const updated = { ...item, name, updatedAt: new Date().toISOString() };
+    await save('templates', updated);
     setTemplates(current => current.map(entry => entry.id === item.id ? updated : entry));
     flash('Template renamed.');
   };
@@ -810,12 +729,6 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const resumeActiveWorkout = () => {
     if (!activeEntry) return;
-    if (activeEntry.routine.kind === 'strongman') {
-      setStrongmanRequest({ planId: activeEntry.routine.id, workoutId: activeEntry.workout.id });
-      setWorkoutId(null);
-      setView('strongman');
-      return;
-    }
     setSelectedRoutineId(activeEntry.routine.id);
     setWorkoutId(activeEntry.workout.id);
     setEditingWorkout(false);
@@ -830,15 +743,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
     const updatedRoutine = startWorkoutSession(current, target.id);
     const updatedProfile = profileWithActiveWorkout(profile, routine.id);
-    try {
-      await saveRoutine(updatedRoutine, record => applyBatch({
-        puts: { routines: [record], profiles: [updatedProfile] },
-        conditions: { profiles: [{ key: profile.id, expected: profile }], routines: [{ key: current.id, expected: current }] },
-      }), true);
-    } catch (error) {
-      flash(error.name === 'BatchConflictError' ? 'Training changed in another tab. Reload to resume the active workout.' : error.message);
-      return;
-    }
+    await saveRoutine(updatedRoutine, record => applyBatch({
+      puts: { routines: [record], profiles: [updatedProfile] },
+    }), true);
     setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
   };
 
@@ -893,7 +800,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const finishActiveWorkout = async () => {
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
     const finished = finishWorkoutSession(current, workout.id);
-    const adaptive = (await import('./data/routinePlanning')).refreshAdaptiveProgression(finished);
+    const adaptive = refreshAdaptiveProgression(finished);
     const updated = adaptive.routine;
     const updatedProfile = profileAfterFinishedRoutine(profile, routine.id);
     const shouldClear = updatedProfile !== profile;
@@ -918,28 +825,16 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       flash('Finish the workout in progress before deleting this plan.');
       return;
     }
-    let remaining;
-    try { remaining = (await import('./data/strongmanIntegration')).detachLinkedPlan(item, profileRoutines); }
-    catch (error) { setPlanToDelete(null); flash(error.message); return; }
+    const remaining = profileRoutines.filter(entry => entry.id !== item.id);
     const replacement = remaining[0] || null;
-    const profileUpdate = { ...profile,
-      activeRoutineId: item.id === profile.activeRoutineId ? replacement?.id || null : profile.activeRoutineId,
-      scheduledStrengthRoutineId: item.id === profile.scheduledStrengthRoutineId ? null : profile.scheduledStrengthRoutineId,
-      activeStrongmanRoutineId: item.id === profile.activeStrongmanRoutineId ? null : profile.activeStrongmanRoutineId,
-      updatedAt: new Date().toISOString(),
-    };
-    try {
-      await applyBatch({
-        deletes: { routines: [item.id] },
-        puts: { profiles: [profileUpdate], routines: remaining.filter(record => record !== profileRoutines.find(original => original.id === record.id)) },
-        conditions: { profiles: [{ key: profile.id, expected: profile }], routines: profileRoutines.map(record => ({ key: record.id, expected: record })) },
-      });
-    } catch (error) {
-      setPlanToDelete(null);
-      flash(error.name === 'BatchConflictError' ? 'Training changed in another tab. Reload before deleting this plan.' : error.message);
-      return;
-    }
-    routinesRef.current = [...routinesRef.current.filter(entry => entry.profileId !== profile.id), ...remaining];
+    const profileUpdate = item.id === profile.activeRoutineId
+      ? { ...profile, activeRoutineId: replacement?.id || null, updatedAt: new Date().toISOString() }
+      : null;
+    await applyBatch({
+      deletes: { routines: [item.id] },
+      puts: profileUpdate ? { profiles: [profileUpdate] } : {},
+    });
+    routinesRef.current = routinesRef.current.filter(entry => entry.id !== item.id);
     setRoutines(routinesRef.current);
     if (profileUpdate) {
       setProfiles(current => current.map(entry => entry.id === profile.id ? profileUpdate : entry));
@@ -957,17 +852,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     }
     if (target.session) {
       const current = routinesRef.current.find(item => item.id === routine.id) || routine;
-      const updatedRoutine = (await import('./data/routinePlanning')).refreshAdaptiveProgression(reopenWorkoutSession(current, target.id)).routine;
+      const updatedRoutine = refreshAdaptiveProgression(reopenWorkoutSession(current, target.id)).routine;
       const updatedProfile = profileWithActiveWorkout(profile, routine.id);
-      try {
-        await saveRoutine(updatedRoutine, record => applyBatch({
-          puts: { routines: [record], profiles: [updatedProfile] },
-          conditions: { profiles: [{ key: profile.id, expected: profile }], routines: [{ key: current.id, expected: current }] },
-        }), true);
-      } catch (error) {
-        flash(error.name === 'BatchConflictError' ? 'Training changed in another tab. Reload to resume the active workout.' : error.message);
-        return;
-      }
+      await saveRoutine(updatedRoutine, record => applyBatch({
+        puts: { routines: [record], profiles: [updatedProfile] },
+      }), true);
       setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
       flash('Workout returned to your queue.');
       return;
@@ -1138,9 +1027,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       // An import preview describes one user decision. All stores commit together so an
       // invalid record, quota error, or abort cannot leave a partially imported backup.
       await applyBatch(importPlanBatch(importPlan));
-      const profileResults = new Map(importPlan.profiles.map(item => [item.imported.id, item.result]));
-      const routineResults = new Map(importPlan.routines.map(item => [item.imported.id, item.result]));
-      const templateResults = new Map(importPlan.templates.map(item => [item.imported.id, item.result]));
+      const profileResults = new Map(importPlan.profiles.map(item => [item.result.id, item.result]));
+      const routineResults = new Map(importPlan.routines.map(item => [item.result.id, item.result]));
+      const templateResults = new Map(importPlan.templates.map(item => [item.result.id, item.result]));
       setProfiles(current => [...current.filter(item => !profileResults.has(item.id)), ...profileResults.values()]);
       setRoutines(current => [...current.filter(item => !routineResults.has(item.id)), ...routineResults.values()]);
       setTemplates(current => [...current.filter(item => !templateResults.has(item.id)), ...templateResults.values()]);
@@ -1158,6 +1047,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
           profiles: importPlan.profiles.map(item => item.imported),
           routines: importPlan.routines.map(item => item.imported),
           templates: (importPlan.templates || []).map(item => item.imported),
+          archives: (importPlan.archives || []).map(item => item.imported),
         };
         const replanned = await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, { backup, ...local });
         const activation = importPlan.routineActivation;
@@ -1192,7 +1082,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       },
       // Resolve ownership within the same transaction as profile deletion so a routine
       // created concurrently cannot be stranded after an earlier index read.
-      deleteByIndex: { routines: [{ indexName: 'profileId', key: profile.id }] },
+      deleteByIndex: {
+        routines: [{ indexName: 'profileId', key: profile.id }],
+        archives: [{ indexName: 'profileId', key: profile.id }],
+      },
     });
     setProfiles(remaining);
     loadedProfileRoutinesFor.current = null;
@@ -1215,7 +1108,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       {notices}
       <main className="onboarding">
         {addingProfile && <button className="text-button" type="button" onClick={() => goBack(() => setAddingProfile(false))}>← Back</button>}
-        <ProfileForm onSave={addProfile} title={profiles.length ? 'Add another person' : 'Who is training?'} />
+        <Suspense fallback={<TrackerScreenFallback label="profile" />}><ProfileForm onSave={addProfile} title={profiles.length ? 'Add another person' : 'Who is training?'} /></Suspense>
       </main>
     </>
   );
@@ -1232,7 +1125,6 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
               setTodayRoutinesLoaded(false);
               setProfileRoutinesLoaded(false);
               setSelectedProfileId(nextProfileId);
-              setStrongmanRequest({});
               setSelectedRoutineId(null);
               setWorkoutId(null);
             }}>
@@ -1259,15 +1151,12 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             onSubstitute={substituteWorkoutExercise}
             onUndo={undoWorkoutSet}
           />
-        ) : view === 'strongman' ? (
-          !profileRoutinesLoaded ? <TrackerScreenFallback label="strongman plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="strongman plans" />}><StrongmanWorkspace key={`${profile.id}:${JSON.stringify(strongmanRequest)}`} profile={profile} routines={profileRoutines} request={strongmanRequest} onCommit={commitStrongmanChange} onBack={() => { setWorkoutId(null); setView('today'); }} /></Suspense>
         ) : view === 'builder' ? (
           !templatesLoaded ? <TrackerScreenFallback label="routine builder" /> : <Suspense fallback={<TrackerScreenFallback label="routine builder" />}>
             <RoutineBuilder
               profile={profile}
               count={profileRoutines.length}
               template={builderTemplate}
-              activeStrongman={activeStrongman}
               onCreate={addRoutine}
               onCancel={() => { setBuilderTemplate(null); goBack(() => setView('plans')); }}
             />
@@ -1290,30 +1179,28 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         ) : view === 'today' ? (
           <section className="dashboard">
             <p className="eyebrow">{routine ? routine.name : 'Ready when you are'}</p>
-            <div className="today-heading"><h1>{pending.length ? 'Your next workout' : routine ? 'Routine complete' : `Welcome, ${profile.name}`}</h1>{hasPlans && <details className="today-plan-menu"><summary>Add plan</summary><div className="today-plan-options"><button className="text-button" type="button" onClick={openStrengthBuilder}>Strength routine</button><button className="text-button" type="button" onClick={() => openStrongman({ create: true })}>Strongman block</button></div></details>}</div>
-            {activeEntry && <div className="resume-workout"><div><p>Workout in progress</p><strong>{activeEntry.workout.name}</strong></div><button className="primary-button" type="button" onClick={resumeActiveWorkout}>Resume workout</button></div>}
+            <h1>{pending.length ? 'Your next workout' : routine ? 'Routine complete' : `Welcome, ${profile.name}`}</h1>
             {!routine ? (
-              !hasPlans ? <div className="empty-card"><h2>Build your first routine</h2><p>Generate a complete plan and keep it on this phone.</p><button className="primary-button" type="button" onClick={openStrengthBuilder}>Build a routine</button></div> : !activeStrongman && <p>No active routine. Choose a saved plan in Plans or add a new one.</p>
+              <div className="empty-card"><h2>Build your first routine</h2><p>Generate a complete plan and keep it on this phone.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build a routine</button></div>
             ) : pending.length ? (
+              <>
+                {activeEntry && <div className="resume-workout"><div><p>Workout in progress</p><strong>{activeEntry.workout.name}</strong></div><button className="primary-button" type="button" onClick={resumeActiveWorkout}>Resume workout</button></div>}
                 <div className="next-workout">
                   <p>{pending[0].cycleLabel && <>{pending[0].cycleLabel} · </>}{pending[0].weekLabel}</p>
                   <h2>{pending[0].name}</h2>
                   <WorkoutMaxes routine={routine} workout={pending[0]} />
                   <WorkoutExercises routine={routine} workout={pending[0]} editable={false} />
-                  {pending[0].kind === 'eventSlot' && <p>{nextEvent ? `Continues ${activeStrongman.name} · ${nextEvent.weekLabel}` : 'Choose a strongman block or use a manual event day.'}</p>}
                   <button className="primary-button" type="button" onClick={() => showWorkout(pending[0])}>Open workout</button>
                 </div>
-            ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={openStrengthBuilder}>Build another routine</button></div>}
-            {activeStrongman
-              ? <div className="next-workout"><p>Independent strongman block</p><h2>{activeStrongman.name}</h2><p>{nextEvent ? `${nextEvent.weekLabel} · ${nextEvent.phase}` : 'Event session in progress'}</p><button className="secondary-button" type="button" onClick={() => openStrongman({ planId: activeStrongman.id })}>View strongman block</button>{nextEvent && <button className="text-button" type="button" onClick={() => openStrongman({ planId: activeStrongman.id, workoutId: nextEvent.id })}>Open standalone event day</button>}</div>
-              : !hasPlans && <div className="empty-card"><h2>Plan strongman training</h2><p>Build event days for general training or a competition, with their own timeline and priorities.</p><button className="primary-button" type="button" onClick={() => openStrongman({ create: true })}>New strongman block</button></div>}
-            {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
+                {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
+              </>
+            ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, newStrongman: () => openStrongman({ create: true }), select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, correct: async (item, maxes) => { await saveRoutine((await import('./data/routinePlanning')).correctMaxes(item, maxes)); flash('Future workouts updated.'); }, useTemplate: item => { if (item.kind === 'strongman') openStrongman({ create: true, template: item }); else { setBuilderTemplate(item); setView('builder'); } }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} PlanSetup={PlanSetup} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="history" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
-            <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
+            <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
           </Suspense>
         ) : view === 'progress' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="progress" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="progress" />}>

@@ -1,9 +1,10 @@
+import { ConfirmationModal } from './components/TrackerForms';
+import { PlanSetup, RoutineNameEditor } from './components/PlanControls';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
 import TrackerApp from './TrackerApp';
-import { activateRoutineImport, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, profileAfterFinishedRoutine, sharedTransferContents, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerHistoryState, trackerLoadPolicy, trackerRouteFromHistory, WorkoutCard } from './TrackerApp';
-import { PlanSetup, RoutineNameEditor } from './components/PlanControls';
+import { activateRoutineImport, commitRoutineLifecycle, completeWorkoutSetWithDraft, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, profileAfterFinishedRoutine, sharedTransferContents, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerHistoryState, trackerLoadPolicy, trackerRouteFromHistory, WorkoutCard } from './TrackerApp';
 import { RoutineCopyDialog } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 

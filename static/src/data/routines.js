@@ -1,4 +1,6 @@
 import { completedPrimaryEstimate, MAIN_LIFTS } from './estimatedMax';
+import { buildRoutinePlan, MAX_PROGRESSION_MODES } from './routineGeneration';
+import { restoreLegacyEventSlots } from './retiredStrongman';
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -18,6 +20,57 @@ export const visibleExercise = exercise => ({
   weight: exercise.overrides.weight ?? exercise.generated.weight,
   prescription: exercise.overrides.prescription ?? exercise.generated.prescription,
 });
+
+export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) => {
+  let sequence = 0;
+  const workouts = [];
+
+  buildRoutinePlan(inputs, resolvedCycleMaxes).forEach((cycle, cycleIndex) => {
+    cycle.weeks.forEach((week, weekIndex) => {
+      week.forEach(day => {
+        sequence += 1;
+        workouts.push({
+          id: makeId(),
+          sequence,
+          cycleIndex,
+          cycleLabel: inputs.mesoMode ? `Cycle ${cycleIndex + 1}` : null,
+          weekIndex,
+          weekLabel: `Week ${weekIndex + 1}`,
+          name: day.name,
+          effectiveMaxes: { ...cycle.effectiveMaxes },
+          completedAt: null,
+          session: null,
+          exercises: day.exercises.map(exercise => ({
+            id: makeId(),
+            generated: { ...exercise },
+            overrides: {},
+          })),
+        });
+      });
+    });
+  });
+
+  const timestamp = now();
+  return {
+    id: makeId(),
+    profileId,
+    name,
+    inputs: { ...inputs },
+    workouts,
+    archived: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+};
+
+export const createRoutineFromTemplate = (template, profileId, name) => createRoutine(
+  profileId,
+  name,
+  {
+    ...template.inputs,
+    microCycles: template.inputs?.microCycles?.map(cycle => ({ ...cycle })),
+  },
+);
 
 export const archiveRoutine = routine => ({
   ...routine,
@@ -390,7 +443,7 @@ export const finishWorkoutSession = (routine, workoutId, timestamp = now()) => u
   },
 );
 
-export const reopenWorkoutSession = (routine, workoutId, timestamp = now()) => updateWorkout(
+export const reopenWorkoutSession = (routine, workoutId, timestamp = now()) => restoreLegacyEventSlots(updateWorkout(
   routine,
   workoutId,
   workout => {
@@ -415,7 +468,7 @@ export const reopenWorkoutSession = (routine, workoutId, timestamp = now()) => u
       },
     };
   },
-);
+));
 
 export const deleteFutureWorkout = (routine, workoutId) => ({
   ...routine,
@@ -466,7 +519,6 @@ const maxKeyForLift = {
 const roundToNearestFive = value => Math.round(value / 5) * 5;
 
 export const adaptiveCycleMaxes = routine => {
-  if (routine.kind === 'strongman') return [];
   const inputs = routine.inputs || {};
   const cycleCount = inputs.mesoMode ? (inputs.microCycles || []).length : 1;
   const starting = {
@@ -496,11 +548,41 @@ export const adaptiveCycleMaxes = routine => {
   return maxes;
 };
 
+export const refreshAdaptiveProgression = routine => {
+  if (!routine.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE) {
+    return { routine, changed: false };
+  }
+  const cycleMaxes = adaptiveCycleMaxes(routine);
+  const regenerated = createRoutine(routine.profileId, routine.name, routine.inputs, cycleMaxes);
+  const generatedBySequence = new Map(regenerated.workouts.map(workout => [workout.sequence, workout]));
+  let changed = false;
+  const workouts = routine.workouts.map(workout => {
+    const generatedWorkout = generatedBySequence.get(workout.sequence);
+    if (workout.completedAt || ['inProgress', 'paused'].includes(workout.session?.status) || !generatedWorkout) return workout;
+    const next = {
+      ...workout,
+      effectiveMaxes: generatedWorkout.effectiveMaxes,
+      exercises: generatedWorkout.exercises.map((exercise, exerciseIndex) => ({
+        ...exercise,
+        id: workout.exercises[exerciseIndex]?.id || exercise.id,
+        overrides: workout.exercises[exerciseIndex]?.overrides || {},
+      })),
+    };
+    if (JSON.stringify(next.effectiveMaxes) !== JSON.stringify(workout.effectiveMaxes) ||
+        JSON.stringify(next.exercises.map(exercise => exercise.generated)) !==
+          JSON.stringify(workout.exercises.map(exercise => exercise.generated))) changed = true;
+    return next;
+  });
+  return {
+    changed,
+    routine: changed ? { ...routine, workouts, updatedAt: now() } : routine,
+  };
+};
+
 export const adaptiveStatusForWorkout = (routine, workout) => {
-  if (routine?.kind === 'strongman') return null;
-  if (!routine?.inputs?.mesoMode || routine.inputs.maxProgressionMode !== 'adaptive' || !workout?.cycleIndex) return null;
+  if (!routine?.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE || !workout?.cycleIndex) return null;
   const previousIndex = workout.cycleIndex - 1;
-  const previous = routine.workouts.filter(item => item.cycleIndex === previousIndex && item.kind !== 'eventSlot');
+  const previous = routine.workouts.filter(item => item.cycleIndex === previousIndex);
   const allComplete = previous.length > 0 && previous.every(item => item.completedAt);
   const maxes = adaptiveCycleMaxes(routine);
   const improved = Object.keys(maxes[workout.cycleIndex] || {}).some(key => (
@@ -510,3 +592,45 @@ export const adaptiveStatusForWorkout = (routine, workout) => {
   if (improved) return `Adaptive · updated from ${source}`;
   return `Adaptive · ${allComplete ? 'set' : 'projected'} from ${source}`;
 };
+
+export const correctMaxes = (routine, maxes) => {
+  const inputs = { ...routine.inputs, ...maxes };
+  const regenerated = createRoutine(routine.profileId, routine.name, inputs);
+  // Sequence is the persisted identity of a generated workout. Index it once so long,
+  // chained mesocycles remain O(W); gaps from user deletions must not shift later plans.
+  const generatedBySequence = [null, ...regenerated.workouts];
+
+  const corrected = {
+    ...routine,
+    inputs,
+    updatedAt: now(),
+    workouts: routine.workouts.map(workout => {
+      const generatedWorkout = generatedBySequence[workout.sequence];
+      if (workout.completedAt || ['inProgress', 'paused'].includes(workout.session?.status) || !generatedWorkout) {
+        // Started and completed prescriptions are snapshots. Unknown sequences can come from
+        // older/imported data and must also survive rather than being guessed by array position.
+        return workout;
+      }
+      return {
+        ...workout,
+        effectiveMaxes: generatedWorkout.effectiveMaxes,
+        exercises: generatedWorkout.exercises.map((exercise, exerciseIndex) => ({
+          ...exercise,
+          // Exercise position is stable within a generated workout. Retain persisted IDs and
+          // explicit overrides so corrections do not break session links or user edits.
+          id: workout.exercises[exerciseIndex]?.id || exercise.id,
+          overrides: workout.exercises[exerciseIndex]?.overrides || {},
+        })),
+      };
+    }),
+  };
+  return refreshAdaptiveProgression(corrected).routine;
+};
+
+export const cloneImportedRecord = record => ({
+  ...record,
+  id: makeId(),
+  name: `${record.name} (Imported)`,
+  createdAt: now(),
+  updatedAt: now(),
+});

@@ -3,10 +3,14 @@ import {
   adaptiveCycleMaxes,
   archiveRoutine,
   completeSessionSet,
+  correctMaxes,
+  createRoutine,
+  createRoutineFromTemplate,
   deleteFutureWorkout,
   finishWorkoutSession,
   parsePrescription,
   reopenWorkoutSession,
+  refreshAdaptiveProgression,
   restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
@@ -19,8 +23,7 @@ import {
   updateExercise,
   visibleExercise,
 } from './routines';
-import { correctMaxes, createRoutine, refreshAdaptiveProgression } from './routinePlanning';
-import { createRoutineFromTemplate, createRoutineTemplate, duplicateRoutine } from './routineCopies';
+import { createRoutineTemplate, duplicateRoutine } from './routineCopies';
 import { routineHistoryToCsv, routinePlanToCsv } from './routineCsv';
 
 const inputs = {

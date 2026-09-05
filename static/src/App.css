@@ -132,13 +132,6 @@ body { min-width:320px; }
 .onboarding > .text-button { position:fixed; top:24px; left:24px; }
 .empty-card,.next-workout,.settings-card,.plan-card { padding:28px; border:1px solid var(--line); border-radius:20px; background:var(--paper); box-shadow:var(--shadow); }
 .empty-card { width:min(520px,100%); }
-.dashboard > .empty-card,.dashboard > .next-workout { width:100%; margin-bottom:24px; }
-.today-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:24px; }
-.app-main .today-heading h1 { min-width:0; margin:0; }
-.today-plan-menu { position:relative; flex:none; }
-.today-plan-menu summary { padding:10px 0; color:var(--accent); cursor:pointer; font-weight:750; white-space:nowrap; }
-.today-plan-options { position:absolute; right:0; z-index:10; display:grid; gap:8px; width:200px; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--paper); box-shadow:var(--shadow); }
-.today-plan-options button { text-align:left; }
 .empty-card h1 { margin-bottom:12px; }
 .empty-card h2 { margin-bottom:8px; }
 .empty-card p,.settings-card p { color:var(--muted); line-height:1.6; }

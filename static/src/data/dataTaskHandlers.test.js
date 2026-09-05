@@ -1,9 +1,12 @@
 import { DATA_TASKS, runDataTask, streamCsvChunks } from './dataTaskHandlers';
 import { routineHistoryToCsv, routinePlanToCsv } from './routineCsv';
-import { exportBackup } from './storageBackup';
-import { createTransferPackage, openTransferPackage } from './transferPackage';
+import { exportBackup } from './storage';
+import { openTransferPackage } from './transferPackage';
 
-jest.mock('./transferPackage', () => ({ createTransferPackage: jest.fn(), openTransferPackage: jest.fn() }));
+jest.mock('./transferPackage', () => ({
+  ...jest.requireActual('./transferPackage'),
+  openTransferPackage: jest.fn(),
+}));
 
 const routine = {
   id: 'routine-1', name: 'Test, "plan"', workouts: [{
@@ -14,27 +17,8 @@ const routine = {
 };
 
 describe('background data task handlers', () => {
-  it('serializes routine transfers with v2 and schema version 11', () => {
-    const contents = runDataTask(DATA_TASKS.SERIALIZE_TRANSFER, {
-      format: 'mcilroy-method-routine-transfer', version: 1, routine,
-    });
-    expect(JSON.parse(contents)).toMatchObject({ version: 2, schemaVersion: 11, routine: { kind: 'strength' } });
-  });
-  it('normalizes direct routine transfer creation before encrypting it', async () => {
-    createTransferPackage.mockResolvedValue({ contents: 'encrypted' });
-    await runDataTask(DATA_TASKS.CREATE_TRANSFER, { data: {
-      format: 'mcilroy-method-routine-transfer', version: 1, routine,
-    }, currentTime: 123, options: { compress: true } });
-    expect(JSON.parse(createTransferPackage.mock.calls[0][0])).toMatchObject({ version: 2, schemaVersion: 11 });
-    expect(createTransferPackage.mock.calls[0].slice(1)).toEqual([123, { compress: true }]);
-  });
-  it.each([1, 2])('opens version %i routine transfers through the worker path', async version => {
-    openTransferPackage.mockResolvedValue(JSON.stringify({
-      format: 'mcilroy-method-routine-transfer', version, ...(version === 2 ? { schemaVersion: 10 } : {}), routine,
-    }));
-    const opened = await runDataTask(DATA_TASKS.OPEN_TRANSFER_PLAN, { contents: 'encrypted', key: 'key', local: {} });
-    expect(opened.routine).toMatchObject({ version: 2, schemaVersion: 11, routine: { kind: 'strength' } });
-  });
+  beforeEach(() => jest.clearAllMocks());
+
   it('classifies full backups and legacy transfers through the one restore action', () => {
     const backup = exportBackup([], [], []);
     expect(runDataTask(DATA_TASKS.READ_IMPORT_FILE, { contents: backup }).backup.profiles).toEqual([]);
@@ -51,6 +35,54 @@ describe('background data task handlers', () => {
     expect({ ...JSON.parse(generated), exportedAt: null })
       .toEqual({ ...JSON.parse(expected), exportedAt: null });
     expect(generated).toBe(JSON.stringify(JSON.parse(generated), null, 2));
+  });
+
+  it('preserves archived records through backup serialization and import planning', () => {
+    const archived = { id: 'routines:event-1', store: 'routines', record: { id: 'event-1', kind: 'strongman' } };
+    const payload = { profiles: [], routines: [], templates: [], archives: [archived] };
+    const contents = runDataTask(DATA_TASKS.SERIALIZE_BACKUP, payload);
+    const backup = runDataTask(DATA_TASKS.PARSE_BACKUP, { contents });
+    expect(backup.archives).toEqual([archived]);
+    const plan = runDataTask(DATA_TASKS.PLAN_IMPORT, { backup, ...payload });
+    expect(plan.archives[0]).toMatchObject({ action: 'skip', result: archived });
+  });
+
+  it.each([1, 2])('opens version %i strength routine transfers, including deployed schema 11', async version => {
+    const payload = {
+      format: 'mcilroy-method-routine-transfer', version,
+      ...(version === 2 ? { schemaVersion: 11 } : {}),
+      profileName: 'Alex', routine: { ...routine, kind: 'strength' },
+    };
+    openTransferPackage.mockResolvedValue(JSON.stringify(payload));
+    const opened = await runDataTask(DATA_TASKS.OPEN_TRANSFER_PLAN, { contents: 'encrypted', key: 'key', local: {} });
+    expect(opened.routine).toMatchObject({ profileName: 'Alex', routine: { id: routine.id, kind: 'strength' } });
+    expect(opened.routine.routine.workouts[0].exercises).toEqual(routine.workouts[0].exercises);
+  });
+
+  it.each([
+    { version: 1, routine: { id: 'event', kind: 'strongman' } },
+    { version: 2, schemaVersion: 11, routine: { id: 'event', kind: 'strongman' } },
+  ])('clearly rejects retired standalone strongman transfers ($version)', async payload => {
+    openTransferPackage.mockResolvedValue(JSON.stringify({ format: 'mcilroy-method-routine-transfer', ...payload }));
+    await expect(runDataTask(DATA_TASKS.OPEN_TRANSFER_PLAN, { local: {} })).rejects.toThrow('Strongman blocks are no longer supported');
+  });
+
+  it.each([
+    { version: 3, routine },
+    { version: 2, schemaVersion: 99, routine },
+    { version: 2, routine },
+    { version: 1, routine: [] },
+  ])('rejects invalid or future routine transfers', async payload => {
+    openTransferPackage.mockResolvedValue(JSON.stringify({ format: 'mcilroy-method-routine-transfer', ...payload }));
+    await expect(runDataTask(DATA_TASKS.OPEN_TRANSFER_PLAN, { local: {} })).rejects.toThrow('supported routine transfer');
+  });
+
+  it('checks existing archives when opening an encrypted full backup', async () => {
+    const archived = { id: 'routines:event-1', store: 'routines', record: { id: 'event-1', kind: 'strongman' } };
+    const local = { profiles: [], routines: [], templates: [], archives: [archived] };
+    openTransferPackage.mockResolvedValue(exportBackup([], [], [], [archived]));
+    const opened = await runDataTask(DATA_TASKS.OPEN_TRANSFER_PLAN, { local });
+    expect(opened.plan.archives[0]).toMatchObject({ action: 'skip', result: archived });
   });
 
   it('produces bounded chunks with byte-identical CSV output', () => {

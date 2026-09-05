@@ -6,7 +6,6 @@ import {
   summarizeProgress,
   summarizeProgressFacts,
 } from './progress';
-import { completedPrimaryEstimate } from './estimatedMax';
 
 const workout = ({
   id,
@@ -37,15 +36,6 @@ const workout = ({
 });
 
 const routine = (id, workouts) => ({ id, workouts });
-
-it('excludes event plans and host slots from strength volume and max estimates', () => {
-  const completed = workout({ id: 'w1', completedAt: '2026-08-10T12:00:00.000Z' });
-  expect(buildProgressFacts([
-    { id: 's1', kind: 'strength', workouts: [completed, { ...completed, id: 'host', kind: 'eventSlot' }] },
-    { id: 'e1', kind: 'strongman', workouts: [{ ...completed, id: 'event' }] },
-  ]).map(fact => fact.workoutId)).toEqual(['w1']);
-  expect(completedPrimaryEstimate({ ...completed, name: 'Squat', kind: 'eventSlot' })).toBeNull();
-});
 
 it('calculates Epley estimates and recognizes only canonical main lifts', () => {
   expect(estimatedOneRepMax(300, 5)).toBe(350);

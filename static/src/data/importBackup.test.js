@@ -1,84 +1,6 @@
 import { createImportPlan, importPlanSummary, recordsToSave } from './importBackup';
-import { createStrongmanRoutine, defaultStrongmanInputs } from './strongman';
-
-const eventFixture = () => createStrongmanRoutine('p', 'Show', { ...defaultStrongmanInputs(), events: [{
-  id: 'bag', name: 'Bag', practices: [{ id: 'pick', name: 'Pick', recipe: null }], capabilities: [], coverage: [],
-}] });
-
-it('detaches imported conflict history from an unchanged host owned by the original local plan', () => {
-  const local = eventFixture();
-  local.workouts[0].completedAt = '2026-09-01T12:00:00Z';
-  local.workouts[0].session = { status: 'completed', startedAt: '2026-09-01T11:00:00Z', eventBlocks: [] };
-  local.workouts[0].hostRef = { routineId: 'host', workoutId: 'slot' };
-  const host = { id: 'host', kind: 'strength', profileId: 'p', workouts: [{ id: 'slot', exercises: [], completedAt: local.workouts[0].completedAt, eventRef: { routineId: local.id, workoutId: local.workouts[0].id } }] };
-  const plan = createImportPlan({ profiles: [], routines: [host, { ...local, name: 'Imported changes' }] }, [], [host, local]);
-  const imported = plan.routines.find(item => item.imported.id === local.id).result;
-  expect(imported.workouts[0].hostRef).toBeNull();
-  expect(imported.workouts[0].unresolvedHostRef).toMatchObject({ routineId: host.id, workoutId: 'slot', unresolved: true });
-  expect(plan.routines.find(item => item.imported.id === host.id).result).toEqual(host);
-});
-
-it('retains the local active owner and suspends imported conflict attempts with captured elapsed time', () => {
-  const local = eventFixture();
-  local.workouts[0].session = { status: 'inProgress', startedAt: '2026-09-01T11:00:00Z', runningSince: '2026-09-01T11:00:00Z', elapsedSeconds: 7, eventBlocks: [{ id: 'block', attempts: [{ id: 'attempt', weight: 200 }] }] };
-  const profile = { id: 'p', activeWorkoutRoutineId: local.id, activeStrongmanRoutineId: local.id };
-  const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-09-01T11:01:00Z'));
-  const plan = createImportPlan({ profiles: [profile], routines: [{ ...local, name: 'Imported changes' }] }, [profile], [local]);
-  clock.mockRestore();
-  const imported = plan.routines[0].result;
-  expect(imported).toMatchObject({ status: 'paused' });
-  expect(imported.workouts[0].session).toMatchObject({ status: 'paused', runningSince: null, elapsedSeconds: 67, eventBlocks: [{ attempts: [{ weight: 200 }] }] });
-  expect(plan.profiles[0].result.activeWorkoutRoutineId).toBe(local.id);
-  expect(local.workouts[0].session.status).toBe('inProgress');
-});
-
-it('sets the final profile pointer to a newly imported sole active event owner', () => {
-  const imported = eventFixture();
-  imported.workouts[0].session = { status: 'inProgress', startedAt: '2026-09-01T11:00:00Z', elapsedSeconds: 0 };
-  const localProfile = { id: 'p', activeWorkoutRoutineId: null, activeStrongmanRoutineId: null };
-  const plan = createImportPlan({ profiles: [], routines: [imported] }, [localProfile], []);
-  expect(plan.profiles.find(item => item.result.id === 'p').result.activeWorkoutRoutineId).toBe(imported.id);
-});
-
-it('preserves a fully imported reciprocal host graph and pauses extra normal session history', () => {
-  const event = eventFixture();
-  event.workouts[0].hostRef = { routineId: 'host', workoutId: 'slot' };
-  const host = { id: 'host', kind: 'strength', profileId: 'p', workouts: [{ id: 'slot', exercises: [], eventRef: { routineId: event.id, workoutId: event.workouts[0].id } }] };
-  const normal = { id: 'normal', kind: 'strength', profileId: 'p', workouts: [{ id: 'normal-day', exercises: [], session: { status: 'inProgress', runningSince: null, elapsedSeconds: 30,
-    exercises: [{ exerciseId: 'squat', sets: [{ id: 'set', status: 'completed', actualWeight: 300, actualReps: 5 }] }] } }] };
-  event.workouts[0].session = { status: 'inProgress', elapsedSeconds: 0, runningSince: null, eventBlocks: [] };
-  const profile = { id: 'p', activeWorkoutRoutineId: event.id };
-  const plan = createImportPlan({ profiles: [profile], routines: [event, host, normal] }, [], []);
-  expect(plan.routines[0].result.workouts[0].hostRef).toEqual(event.workouts[0].hostRef);
-  expect(plan.routines[1].result.workouts[0].eventRef).toEqual(host.workouts[0].eventRef);
-  expect(plan.routines[2].result.workouts[0].session).toEqual({ ...normal.workouts[0].session, status: 'paused' });
-  expect(plan.profiles[0].result.activeWorkoutRoutineId).toBe(event.id);
-});
 
 describe('backup import planning', () => {
-  it('preserves conflicting event plans as reviewed copies instead of shallow merging components', () => {
-    const local = { id: 'e1', kind: 'strongman', inputs: { events: [{ id: 'local' }] }, workouts: [] };
-    const imported = { ...local, inputs: { events: [{ id: 'incoming' }] }, unknown: true };
-    const plan = createImportPlan({ profiles: [], routines: [imported] }, [], [local]);
-    expect(plan.routines[0]).toMatchObject({ status: 'conflict', action: 'copy', local, imported });
-    expect(plan.routines[0].result.id).not.toBe('e1');
-    expect(plan.routines[0].result.inputs.events).toHaveLength(1);
-    expect(plan.routines[0].result.unknown).toBe(true);
-    expect(local.inputs.events[0].id).toBe('local');
-  });
-
-  it('remaps imported host links to conflict copies without redirecting the existing local host', () => {
-    const originalEvent = { id: 'e1', kind: 'strongman', name: 'Local', inputs: { events: [{ id: 'event1' }] }, workouts: [{ id: 'ew1' }] };
-    const incomingEvent = { ...originalEvent, name: 'Incoming' };
-    const localHost = { id: 's1', kind: 'strength', workouts: [{ id: 'w1', eventRef: { routineId: 'e1', workoutId: 'ew1' } }] };
-    const incomingHost = { ...localHost, workouts: [...localHost.workouts, { id: 'w2', eventRef: { routineId: 'e1', workoutId: 'ew1' } }] };
-    const plan = createImportPlan({ profiles: [], routines: [incomingHost, incomingEvent] }, [], [localHost, originalEvent]);
-    const importedEvent = plan.routines[1].result;
-    const restoredHost = plan.routines[0].result;
-    expect(restoredHost.workouts[0].eventRef).toEqual(localHost.workouts[0].eventRef);
-    expect(restoredHost.workouts[1].eventRef).toEqual({ routineId: importedEvent.id, workoutId: importedEvent.workouts[0].id });
-    expect(incomingHost.workouts[1].eventRef.routineId).toBe('e1');
-  });
   const localProfiles = [{ id: 'p1', name: 'Alex', localOnly: true }];
   const localRoutines = [{
     id: 'r1', profileId: 'p1', name: 'Local plan', workouts: [{ id: 'w1', sequence: 1, completedAt: 'today' }],
@@ -144,5 +66,107 @@ describe('backup import planning', () => {
     expect(plan.templates[0].result).toEqual({
       id: 't1', name: 'Local name', inputs: { maxSquat: '315' }, importedOnly: true,
     });
+  });
+
+  it('preserves conflicting retired blocks as separate opaque archives', () => {
+    const archived = {
+      id: 'routines:event-1', store: 'routines', extension: { source: 'backup' },
+      record: {
+        id: 'event-1', profileId: 'p1', kind: 'strongman', name: 'Show prep',
+        events: [{ id: 'event', attempts: [{ load: 300, unknown: true }] }],
+        workouts: [{ id: 'session', completedAt: 'yesterday' }],
+      },
+    };
+    const local = { ...archived, record: { ...archived.record, name: 'Local prep' } };
+    const backup = { profiles: [], routines: [], templates: [], archives: [archived] };
+    const unchanged = JSON.parse(JSON.stringify({ backup, local }));
+    const plan = createImportPlan(backup, [], [], [], [local]);
+
+    expect(plan.archives[0]).toMatchObject({ type: 'archive', status: 'conflict', action: 'copy', imported: archived, local });
+    expect(plan.archives[0].result.id).not.toBe(archived.id);
+    expect({ ...plan.archives[0].result, id: archived.id }).toEqual(archived);
+    expect(recordsToSave(plan)).toEqual([plan.archives[0].result]);
+    expect(importPlanSummary(plan)).toEqual({ copy: 1, skip: 0, merge: 0 });
+    expect({ backup, local }).toEqual(unchanged);
+  });
+
+  it('skips identical archives and avoids IDs already used by incoming or local records', () => {
+    const archived = { id: 'routines:event-1', store: 'routines', record: { id: 'event-1', kind: 'strongman' } };
+    const occupied = { ...archived, id: `${archived.id}:imported-copy`, record: { ...archived.record, name: 'Other copy' } };
+    const backup = { profiles: [], routines: [], templates: [], archives: [archived, occupied] };
+    const plan = createImportPlan(backup, [], [], [], [
+      { ...archived, record: { ...archived.record, name: 'Local' } }, occupied,
+    ]);
+
+    expect(plan.archives[0].action).toBe('copy');
+    expect(plan.archives[0].result.id).not.toBe(archived.id);
+    expect(plan.archives[0].result.id).not.toBe(occupied.id);
+    expect(plan.archives[1].action).toBe('skip');
+  });
+
+  it('reuses an existing identical conflict copy when importing the same archive again', () => {
+    const archived = { id: 'routines:event-1', store: 'routines', record: { id: 'event-1', kind: 'strongman', name: 'Imported' } };
+    const local = { ...archived, record: { ...archived.record, name: 'Local' } };
+    const backup = { profiles: [], routines: [], templates: [], archives: [archived] };
+    const first = createImportPlan(backup, [], [], [], [local]).archives[0].result;
+    const repeated = createImportPlan(backup, [], [], [], [local, first]);
+
+    expect(repeated.archives[0]).toMatchObject({
+      type: 'archive', action: 'skip', imported: archived, local, existingResult: first, result: first,
+    });
+    expect(recordsToSave(repeated)).toEqual([]);
+    expect(importPlanSummary(repeated)).toEqual({ copy: 0, skip: 1, merge: 0 });
+  });
+
+  it('archives retired records supplied directly to planning before they can merge with strength work', () => {
+    const retired = { id: 'r1', kind: 'strongman', profileId: 'p1', workouts: [{ id: 'event-day' }] };
+    const plan = createImportPlan({ profiles: [], routines: [retired], templates: [] }, [], localRoutines);
+
+    expect(plan.routines).toEqual([]);
+    expect(plan.archives[0]).toMatchObject({ action: 'copy', result: { store: 'routines', record: retired } });
+    expect(recordsToSave(plan)).toEqual([plan.archives[0].result]);
+  });
+
+  it('copies a routine owned by another profile and remaps only incoming profile pointers', () => {
+    const imported = {
+      id: 'r1', profileId: 'p2', name: 'Sam plan', extra: { retained: true },
+      workouts: [{ id: 'w1', session: { status: 'inProgress', elapsedSeconds: 20 } }],
+    };
+    const incomingProfile = { id: 'p2', name: 'Sam', activeRoutineId: 'r1', activeWorkoutRoutineId: 'r1' };
+    const backup = { profiles: [incomingProfile], routines: [imported] };
+    const before = JSON.stringify(backup);
+    const plan = createImportPlan(backup, localProfiles, localRoutines);
+    const copied = plan.routines[0].result;
+
+    expect(plan.routines[0]).toMatchObject({ type: 'routine', status: 'conflict', action: 'copy', local: localRoutines[0] });
+    expect(copied.id).not.toBe(imported.id);
+    expect({ ...copied, id: imported.id }).toEqual(imported);
+    expect(plan.profiles[0].result).toEqual({ ...incomingProfile, activeRoutineId: copied.id, activeWorkoutRoutineId: copied.id });
+    expect(plan.profiles[0].imported).toEqual(incomingProfile);
+    expect(JSON.stringify(backup)).toBe(before);
+
+    const repeated = createImportPlan(backup, [...localProfiles, plan.profiles[0].result], [...localRoutines, copied]);
+    expect(repeated.routines[0]).toMatchObject({ action: 'skip', existingResult: copied, result: copied });
+  });
+
+  it('clears imported active-workout pointers when the local completed snapshot wins the merge', () => {
+    const plan = createImportPlan({
+      profiles: [{ id: 'p1', activeRoutineId: 'r1', activeWorkoutRoutineId: 'r1' }],
+      routines: [{ id: 'r1', profileId: 'p1', workouts: [{ id: 'w1', session: { status: 'inProgress' } }] }],
+    }, localProfiles, localRoutines);
+
+    expect(plan.routines[0].result.workouts).toEqual(localRoutines[0].workouts);
+    expect(plan.profiles[0].result).toMatchObject({ activeRoutineId: 'r1', activeWorkoutRoutineId: null });
+  });
+
+  it('updates an existing profile when a routine-only import adds its resumable session', () => {
+    const profile = { ...localProfiles[0], activeRoutineId: 'r1', activeWorkoutRoutineId: null };
+    const imported = { id: 'r2', profileId: 'p1', workouts: [{ id: 'w2', session: { status: 'inProgress' } }] };
+    const plan = createImportPlan({ profiles: [], routines: [imported] }, [profile], localRoutines);
+
+    expect(plan.profiles).toEqual([expect.objectContaining({
+      action: 'merge', local: profile, imported: profile,
+      result: { ...profile, activeWorkoutRoutineId: imported.id },
+    })]);
   });
 });

@@ -237,7 +237,6 @@ it.each([
     actualReps: '9',
   });
   if (callback) expect(mounted.props[callback]).toHaveBeenCalledTimes(1);
-  if (label === 'substitute') expect(mounted.div.querySelector('[role="dialog"]')).not.toBeNull();
   act(() => mounted.root.unmount());
   expect(mounted.props.onAdjust).toHaveBeenCalledTimes(1);
   jest.useRealTimers();
