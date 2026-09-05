@@ -1,4 +1,35 @@
-export const DATABASE_VERSION = 9;
+export const DATABASE_VERSION = 11;
+
+const withEvidenceSnapshot = record => Object.prototype.hasOwnProperty.call(record, 'capabilitySnapshot')
+  ? record : { ...record, capabilitySnapshot: null };
+
+// Old history does not identify which checkpoints were associated at the time.
+// Preserve it, but do not infer proof from today's editable practice definitions.
+export const addEventEvidenceSnapshots = record => {
+  if (record.kind !== 'strongman') return record;
+  const result = { ...record };
+  if (Array.isArray(record.inputs?.events)) result.inputs = { ...record.inputs, events: record.inputs.events.map(event => ({
+    ...event,
+    ...(Array.isArray(event.coverage) ? { coverage: event.coverage.map(withEvidenceSnapshot) } : {}),
+  })) };
+  if (Array.isArray(record.coverageEvidence)) result.coverageEvidence = record.coverageEvidence.map(withEvidenceSnapshot);
+  if (Array.isArray(record.workouts)) result.workouts = record.workouts.map(workout => ({
+    ...workout,
+    ...(Array.isArray(workout.exercises) ? { exercises: workout.exercises.map(withEvidenceSnapshot) } : {}),
+    ...(Array.isArray(workout.session?.eventBlocks) ? { session: { ...workout.session, eventBlocks: workout.session.eventBlocks.map(withEvidenceSnapshot) } } : {}),
+  }));
+  return result;
+};
+
+export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
+
+export const addTrainingPlanReferences = profile => ({
+  ...profile,
+  activeStrongmanRoutineId: profile.activeStrongmanRoutineId || null,
+  scheduledStrengthRoutineId: Object.prototype.hasOwnProperty.call(profile, 'scheduledStrengthRoutineId')
+    ? profile.scheduledStrengthRoutineId
+    : profile.activeRoutineId || null,
+});
 
 export const addMaxProgressionMode = record => ({
   ...record,
@@ -87,12 +118,25 @@ export const activeWorkoutIdsByProfile = routines => {
   return new Map([...newest].map(([profileId, routine]) => [profileId, routine.id]));
 };
 
-export const addActiveWorkoutReferences = (profiles, routines) => {
-  const activeIds = activeWorkoutIdsByProfile(routines);
-  return Array.isArray(profiles) ? profiles.map(profile => ({
-    ...profile,
-    activeWorkoutRoutineId: activeIds.get(profile.id) || null,
-  })) : profiles;
+const migrateRecordStores = (transaction, version, transforms, done) => {
+  const stores = Object.entries(transforms);
+  let remaining = stores.length;
+  stores.forEach(([storeName, transform]) => {
+    const request = transaction.objectStore(storeName).openCursor();
+    request.onsuccess = event => {
+      const cursor = event.target.result;
+      if (cursor) {
+        cursor.update(transform(cursor.value));
+        cursor.continue();
+        return;
+      }
+      remaining -= 1;
+      if (!remaining) {
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: version });
+        done();
+      }
+    };
+  });
 };
 
 // Each migration upgrades from the previous numeric version to its key. Keep
@@ -113,32 +157,8 @@ export const databaseMigrations = {
     });
     done();
   },
-  3: ({ database, transaction, done }) => {
-    const cursorRequest = transaction.objectStore('routines').openCursor();
-    cursorRequest.onsuccess = event => {
-      const cursor = event.target.result;
-      if (!cursor) {
-        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 3 });
-        done();
-        return;
-      }
-      cursor.update(addEffectiveMaxSnapshots(cursor.value));
-      cursor.continue();
-    };
-  },
-  4: ({ transaction, done }) => {
-    const cursorRequest = transaction.objectStore('routines').openCursor();
-    cursorRequest.onsuccess = event => {
-      const cursor = event.target.result;
-      if (!cursor) {
-        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 4 });
-        done();
-        return;
-      }
-      cursor.update(addWorkoutSessions(cursor.value));
-      cursor.continue();
-    };
-  },
+  3: ({ transaction, done }) => migrateRecordStores(transaction, 3, { routines: addEffectiveMaxSnapshots }, done),
+  4: ({ transaction, done }) => migrateRecordStores(transaction, 4, { routines: addWorkoutSessions }, done),
   5: ({ database, transaction, done }) => {
     createRecordStore(database, 'templates');
     transaction.objectStore('metadata').put({
@@ -147,19 +167,7 @@ export const databaseMigrations = {
     });
     done();
   },
-  6: ({ transaction, done }) => {
-    const cursorRequest = transaction.objectStore('routines').openCursor();
-    cursorRequest.onsuccess = event => {
-      const cursor = event.target.result;
-      if (!cursor) {
-        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 6 });
-        done();
-        return;
-      }
-      cursor.update(addSessionActionMetadata(cursor.value));
-      cursor.continue();
-    };
-  },
+  6: ({ transaction, done }) => migrateRecordStores(transaction, 6, { routines: addSessionActionMetadata }, done),
   7: ({ transaction, done }) => {
     const routinesStore = transaction.objectStore('routines');
     if (!routinesStore.indexNames.contains('profileId')) {
@@ -191,50 +199,11 @@ export const databaseMigrations = {
       };
     };
   },
-  8: ({ transaction, done }) => {
-    let storesRemaining = 2;
-    const finishStore = () => {
-      storesRemaining -= 1;
-      if (storesRemaining === 0) {
-        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 8 });
-        done();
-      }
-    };
-    ['routines', 'templates'].forEach(storeName => {
-      const cursorRequest = transaction.objectStore(storeName).openCursor();
-      cursorRequest.onsuccess = event => {
-        const cursor = event.target.result;
-        if (!cursor) {
-          finishStore();
-          return;
-        }
-        cursor.update(addAccessoryWeakPoints(cursor.value));
-        cursor.continue();
-      };
-    });
-  },
-  9: ({ transaction, done }) => {
-    let storesRemaining = 2;
-    const finishStore = () => {
-      storesRemaining -= 1;
-      if (storesRemaining === 0) {
-        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 9 });
-        done();
-      }
-    };
-    ['routines', 'templates'].forEach(storeName => {
-      const cursorRequest = transaction.objectStore(storeName).openCursor();
-      cursorRequest.onsuccess = event => {
-        const cursor = event.target.result;
-        if (!cursor) {
-          finishStore();
-          return;
-        }
-        cursor.update(addMaxProgressionMode(cursor.value));
-        cursor.continue();
-      };
-    });
-  },
+  8: ({ transaction, done }) => migrateRecordStores(transaction, 8, { routines: addAccessoryWeakPoints, templates: addAccessoryWeakPoints }, done),
+  9: ({ transaction, done }) => migrateRecordStores(transaction, 9, { routines: addMaxProgressionMode, templates: addMaxProgressionMode }, done),
+  10: ({ transaction, done }) => migrateRecordStores(transaction, 10, { routines: addRoutineKind, templates: addRoutineKind, profiles: addTrainingPlanReferences }, done),
+  11: ({ transaction, done }) => migrateRecordStores(transaction, 11, { routines: addEventEvidenceSnapshots, templates: addEventEvidenceSnapshots }, done),
+
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
@@ -251,88 +220,4 @@ export const runDatabaseMigrations = (database, transaction, oldVersion, newVers
   run(oldVersion + 1);
 };
 
-export const BACKUP_VERSION = 9;
-
-// Backup migrations must be pure: never mutate the object parsed from the
-// user's file. This makes failed imports safe and migrations easy to test.
-export const backupMigrations = {
-  2: backup => ({
-    ...backup,
-    version: 2,
-    dataSchemaVersion: 2,
-  }),
-  3: backup => ({
-    ...backup,
-    version: 3,
-    dataSchemaVersion: 3,
-    routines: Array.isArray(backup.routines)
-      ? backup.routines.map(addEffectiveMaxSnapshots)
-      : backup.routines,
-  }),
-  4: backup => ({
-    ...backup,
-    version: 4,
-    dataSchemaVersion: 4,
-    routines: Array.isArray(backup.routines)
-      ? backup.routines.map(addWorkoutSessions)
-      : backup.routines,
-  }),
-  5: backup => ({
-    ...backup,
-    version: 5,
-    dataSchemaVersion: 5,
-    templates: Array.isArray(backup.templates) ? backup.templates : [],
-  }),
-  6: backup => ({
-    ...backup,
-    version: 6,
-    dataSchemaVersion: 6,
-    routines: Array.isArray(backup.routines)
-      ? backup.routines.map(addSessionActionMetadata)
-      : backup.routines,
-  }),
-  7: backup => ({
-    ...backup,
-    version: 7,
-    dataSchemaVersion: 7,
-    profiles: addActiveWorkoutReferences(backup.profiles, backup.routines),
-  }),
-  8: backup => ({
-    ...backup,
-    version: 8,
-    dataSchemaVersion: 8,
-    routines: Array.isArray(backup.routines)
-      ? backup.routines.map(addAccessoryWeakPoints)
-      : backup.routines,
-    templates: Array.isArray(backup.templates)
-      ? backup.templates.map(addAccessoryWeakPoints)
-      : backup.templates,
-  }),
-  9: backup => ({
-    ...backup,
-    version: 9,
-    dataSchemaVersion: 9,
-    routines: Array.isArray(backup.routines)
-      ? backup.routines.map(addMaxProgressionMode)
-      : backup.routines,
-    templates: Array.isArray(backup.templates)
-      ? backup.templates.map(addMaxProgressionMode)
-      : backup.templates,
-  }),
-};
-
-export const migrateBackup = original => {
-  if (!Number.isInteger(original?.version) || original.version < 1 || original.version > BACKUP_VERSION) {
-    throw new Error('This is not a supported McIlroy Method backup.');
-  }
-
-  let backup = original;
-  for (let version = original.version + 1; version <= BACKUP_VERSION; version += 1) {
-    const migrate = backupMigrations[version];
-    if (!migrate) {
-      throw new Error(`Missing backup migration for version ${version}.`);
-    }
-    backup = migrate(backup);
-  }
-  return backup;
-};
+export { BACKUP_VERSION, backupMigrations, migrateBackup } from './storageBackup';

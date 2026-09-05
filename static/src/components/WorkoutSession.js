@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sessionElapsedSeconds } from '../data/routines';
+
+const SubstituteDialog = lazy(() => import('./WorkoutSubstituteDialog'));
 
 export const formatDuration = value => {
   const seconds = Math.max(0, Number(value) || 0);
@@ -51,34 +53,6 @@ export const useScreenWakeLock = active => {
       lock?.release();
     };
   }, [active]);
-};
-
-const SubstituteDialog = ({ exercise, onCancel, onConfirm }) => {
-  const pending = exercise.sets.filter(set => set.status === 'pending');
-  const first = pending[0] || {};
-  const [movement, setMovement] = useState(exercise.movement);
-  const [weight, setWeight] = useState(first.actualWeight ?? exercise.plannedWeight ?? '');
-  const [setCount, setSetCount] = useState(String(Math.max(1, pending.length)));
-  const [reps, setReps] = useState(String(first.actualReps ?? first.plannedReps ?? ''));
-  return (
-    <div className="modal-backdrop">
-      <form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="substitute-title" onSubmit={event => {
-        event.preventDefault();
-        onConfirm({ movement: movement.trim(), weight, setCount, reps });
-      }}>
-        <p className="eyebrow">This workout only</p>
-        <h2 id="substitute-title">Substitute {exercise.movement}</h2>
-        <label className="form-field"><span className="field-label">Movement</span><input className="number-input" value={movement} onChange={event => setMovement(event.target.value)} required autoFocus /></label>
-        <div className="substitute-fields">
-          <label className="form-field"><span className="field-label">Weight (lb)</span><input className="number-input" inputMode="decimal" value={weight} onChange={event => setWeight(event.target.value)} /></label>
-          <label className="form-field"><span className="field-label">Remaining sets</span><input className="number-input" type="number" min="1" max="20" value={setCount} onChange={event => setSetCount(event.target.value)} required /></label>
-          <label className="form-field"><span className="field-label">Reps</span><input className="number-input" inputMode="numeric" value={reps} onChange={event => setReps(event.target.value)} required /></label>
-        </div>
-        <p className="field-help">Completed and skipped sets stay unchanged. Future workouts are not edited.</p>
-        <div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit">Use substitute</button></div>
-      </form>
-    </div>
-  );
 };
 
 const Stepper = ({ label, value, step, onBlur, onChange }) => {
@@ -316,82 +290,7 @@ export const ActiveWorkoutSession = ({
         <button className="secondary-button" type="button" disabled={!currentSet} onClick={() => { flushAllDrafts(); setSubstituting(true); }}>Substitute</button>
         <button className="primary-button" type="button" onClick={() => { flushAllDrafts(); onFinish(); }}>Finish workout</button>
       </div>
-      {substituting && <SubstituteDialog exercise={exercise} onCancel={() => setSubstituting(false)} onConfirm={values => { onSubstitute(exercise.exerciseId, values); setSubstituting(false); }} />}
+      {substituting && <Suspense fallback={<p role="status">Opening substitute options…</p>}><SubstituteDialog exercise={exercise} onCancel={() => setSubstituting(false)} onConfirm={values => { onSubstitute(exercise.exerciseId, values); setSubstituting(false); }} /></Suspense>}
     </section>
-  );
-};
-
-export const WorkoutSummary = ({ workout, onDone }) => {
-  const sets = workout.session.exercises.flatMap(exercise => exercise.sets);
-  const completed = sets.filter(set => set.status === 'completed');
-  const skipped = sets.filter(set => set.status === 'skipped');
-  const volume = completed.reduce((total, set) => {
-    const weight = Number(set.actualWeight);
-    const reps = Number(set.actualReps);
-    return total + (Number.isFinite(weight) && Number.isFinite(reps) ? weight * reps : 0);
-  }, 0);
-  const substitutions = workout.session.exercises.filter(exercise => exercise.original);
-  return (
-    <section className="workout-summary" aria-labelledby="workout-summary-title">
-      <p className="eyebrow">Workout complete</p>
-      <h1 id="workout-summary-title">{workout.name}</h1>
-      <div className="summary-grid">
-        <span><small>Workout time</small><strong>{formatDuration(workout.session.elapsedSeconds)}</strong></span>
-        <span><small>Completed sets</small><strong>{completed.length}</strong></span>
-        <span><small>Skipped sets</small><strong>{skipped.length}</strong></span>
-        <span><small>Volume</small><strong>{Math.round(volume).toLocaleString()} lb</strong></span>
-        <span><small>Main-lift RPE</small><strong>{workout.session.rpe || '—'}</strong></span>
-      </div>
-      {substitutions.length > 0 && <div className="summary-substitutions"><h2>Substitutions</h2>{substitutions.map(exercise => <p key={exercise.exerciseId}>{exercise.original.movement} → {exercise.movement}</p>)}</div>}
-      <button className="primary-button" type="button" onClick={onDone}>Done</button>
-    </section>
-  );
-};
-
-export const WorkoutSessionHistory = ({ workout }) => {
-  const session = workout.session;
-  const intervals = useMemo(() => {
-    const result = new Map();
-    let previous = 0;
-    session.exercises.flatMap(exercise => exercise.sets)
-      .filter(set => set.status === 'completed')
-      .sort((a, b) => a.splitSeconds - b.splitSeconds)
-      .forEach(set => {
-        result.set(set.id, set.splitSeconds - previous);
-        previous = set.splitSeconds;
-      });
-    return result;
-  }, [session]);
-
-  return (
-    <div className="session-history">
-      <div className="history-summary">
-        <span><small>Workout time</small><strong>{formatDuration(session.elapsedSeconds)}</strong></span>
-        <span><small>Main-lift RPE</small><strong>{session.rpe || '—'}</strong></span>
-      </div>
-      {session.exercises.map(exercise => (
-        <section className="history-exercise" key={exercise.exerciseId}>
-          <h2>{exercise.movement}</h2>
-          {exercise.original && <p className="substitution-note">Substituted for {exercise.original.movement}</p>}
-          <p>{exercise.prescription || 'Open work'}</p>
-          <div className="history-set-list">
-            {exercise.sets.map(set => (
-              <div className={`history-set ${set.status}`} key={set.id}>
-                <strong>Set {set.number}</strong>
-                {set.status === 'completed' ? (
-                  <>
-                    <span>{set.actualWeight !== '' ? `${set.actualWeight} lb` : 'Open weight'} × {set.actualReps !== '' ? `${set.actualReps} reps` : 'open reps'}</span>
-                    <small>Split {formatDuration(set.splitSeconds)} · Interval {formatDuration(intervals.get(set.id))}</small>
-                    {(String(set.actualWeight) !== String(set.plannedWeight) || String(set.actualReps) !== String(set.plannedReps)) && (
-                      <small>Plan: {set.plannedWeight !== '' ? `${set.plannedWeight} lb` : 'open weight'} × {set.plannedReps || 'open reps'}</small>
-                    )}
-                  </>
-                ) : <span>Skipped</span>}
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
   );
 };

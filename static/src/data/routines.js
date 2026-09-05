@@ -1,5 +1,4 @@
 import { completedPrimaryEstimate, MAIN_LIFTS } from './estimatedMax';
-import { buildRoutinePlan, MAX_PROGRESSION_MODES } from './routineGeneration';
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -19,179 +18,6 @@ export const visibleExercise = exercise => ({
   weight: exercise.overrides.weight ?? exercise.generated.weight,
   prescription: exercise.overrides.prescription ?? exercise.generated.prescription,
 });
-
-export const escapeCsv = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-
-const planHeader = [
-  'Routine', 'Microcycle', 'Week', 'Workout', 'Session', 'Movement', 'Weight (lb)',
-  'Prescription', 'Status', 'Completed at',
-];
-
-// Workers consume these iterators one row at a time. Keep the synchronous array exports
-// below for compatibility, but do not make background downloads retain the entire CSV.
-export function* routinePlanCsvRowIterator(routine) {
-  yield planHeader.map(escapeCsv).join(',');
-  for (const workout of routine.workouts) {
-    for (const exercise of workout.exercises) {
-      const shown = visibleExercise(exercise);
-      yield [routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence,
-        workout.name, shown.movement, shown.weight, shown.prescription,
-        workout.completedAt ? 'Completed' : 'Planned', workout.completedAt]
-        .map(escapeCsv).join(',');
-    }
-  }
-}
-
-export const routinePlanCsvRows = routine => [...routinePlanCsvRowIterator(routine)];
-export const routinePlanToCsv = routine => routinePlanCsvRows(routine).join('\n');
-
-const formatSeconds = seconds => seconds === null || seconds === undefined ? '' : seconds;
-
-export function* routineHistoryCsvRowIterator(routine) {
-  yield [
-    'Routine', 'Microcycle', 'Week', 'Workout', 'Session', 'Started at', 'Completed at',
-    'Total seconds', 'Movement', 'Substituted for', 'Set', 'Set status', 'Planned weight (lb)',
-    'Planned reps', 'Actual weight (lb)', 'Actual reps', 'RPE', 'Split seconds',
-    'Interval seconds',
-  ].map(escapeCsv).join(',');
-
-  for (const workout of routine.workouts.filter(item => item.completedAt)) {
-    if (!workout.session?.exercises) {
-      for (const exercise of workout.exercises) {
-        const shown = visibleExercise(exercise);
-        yield [
-          routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence, workout.name,
-          '', workout.completedAt, '', shown.movement, '', '', 'Legacy completed', shown.weight,
-          shown.prescription, '', '', '', '', '',
-        ].map(escapeCsv).join(',');
-      }
-      continue;
-    }
-
-    const intervals = new Map();
-    let previousSplit = 0;
-    workout.session.exercises.flatMap(exercise => exercise.sets)
-      .filter(set => set.status === 'completed')
-      .sort((a, b) => a.splitSeconds - b.splitSeconds)
-      .forEach(set => {
-        intervals.set(set.id, set.splitSeconds - previousSplit);
-        previousSplit = set.splitSeconds;
-      });
-    for (const sessionExercise of workout.session.exercises) {
-      for (const set of sessionExercise.sets) {
-        const interval = intervals.has(set.id) ? intervals.get(set.id) : '';
-        yield [
-          routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence, workout.name,
-          workout.session.startedAt, workout.completedAt, formatSeconds(workout.session.elapsedSeconds),
-          sessionExercise.movement, sessionExercise.original?.movement || '', set.number, set.status, set.plannedWeight, set.plannedReps,
-          set.actualWeight, set.actualReps,
-          sessionExercise.exerciseId === workout.session.primaryExerciseId ? workout.session.rpe : '',
-          formatSeconds(set.splitSeconds), interval,
-        ].map(escapeCsv).join(',');
-      }
-    }
-  }
-
-}
-
-export const routineHistoryCsvRows = routine => [...routineHistoryCsvRowIterator(routine)];
-
-export const routineHistoryToCsv = routine => routineHistoryCsvRows(routine).join('\n');
-
-export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) => {
-  let sequence = 0;
-  const workouts = [];
-
-  buildRoutinePlan(inputs, resolvedCycleMaxes).forEach((cycle, cycleIndex) => {
-    cycle.weeks.forEach((week, weekIndex) => {
-      week.forEach(day => {
-        sequence += 1;
-        workouts.push({
-          id: makeId(),
-          sequence,
-          cycleIndex,
-          cycleLabel: inputs.mesoMode ? `Cycle ${cycleIndex + 1}` : null,
-          weekIndex,
-          weekLabel: `Week ${weekIndex + 1}`,
-          name: day.name,
-          effectiveMaxes: { ...cycle.effectiveMaxes },
-          completedAt: null,
-          session: null,
-          exercises: day.exercises.map(exercise => ({
-            id: makeId(),
-            generated: { ...exercise },
-            overrides: {},
-          })),
-        });
-      });
-    });
-  });
-
-  const timestamp = now();
-  return {
-    id: makeId(),
-    profileId,
-    name,
-    inputs: { ...inputs },
-    workouts,
-    archived: false,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-};
-
-export const duplicateRoutine = (routine, profileId, name) => {
-  const timestamp = now();
-  return {
-    ...routine,
-    id: makeId(),
-    profileId,
-    name,
-    inputs: {
-      ...routine.inputs,
-      microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
-    },
-    workouts: routine.workouts.map(workout => ({
-      ...workout,
-      id: makeId(),
-      completedAt: null,
-      session: null,
-      effectiveMaxes: workout.effectiveMaxes ? { ...workout.effectiveMaxes } : workout.effectiveMaxes,
-      exercises: workout.exercises.map(exercise => ({
-        ...exercise,
-        id: makeId(),
-        generated: { ...exercise.generated },
-        overrides: { ...exercise.overrides },
-      })),
-    })),
-    archived: false,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-};
-
-export const createRoutineTemplate = (routine, name) => {
-  const timestamp = now();
-  return {
-    id: makeId(),
-    name,
-    inputs: {
-      ...routine.inputs,
-      microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
-    },
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  };
-};
-
-export const createRoutineFromTemplate = (template, profileId, name) => createRoutine(
-  profileId,
-  name,
-  {
-    ...template.inputs,
-    microCycles: template.inputs?.microCycles?.map(cycle => ({ ...cycle })),
-  },
-);
 
 export const archiveRoutine = routine => ({
   ...routine,
@@ -243,6 +69,15 @@ export const startWorkoutSession = (routine, workoutId, timestamp = now()) => up
   workoutId,
   workout => {
     if (workout.completedAt || workout.session?.status === 'inProgress') return workout;
+    if (workout.session?.status === 'paused') return {
+      ...workout,
+      session: {
+        ...workout.session,
+        status: 'inProgress',
+        runningSince: timestamp,
+        stoppedAt: null,
+      },
+    };
     const previousWeightFor = movement => {
       const previousWorkouts = routine.workouts
         .filter(item => item.sequence < workout.sequence && item.completedAt && item.session?.exercises)
@@ -631,6 +466,7 @@ const maxKeyForLift = {
 const roundToNearestFive = value => Math.round(value / 5) * 5;
 
 export const adaptiveCycleMaxes = routine => {
+  if (routine.kind === 'strongman') return [];
   const inputs = routine.inputs || {};
   const cycleCount = inputs.mesoMode ? (inputs.microCycles || []).length : 1;
   const starting = {
@@ -660,41 +496,11 @@ export const adaptiveCycleMaxes = routine => {
   return maxes;
 };
 
-export const refreshAdaptiveProgression = routine => {
-  if (!routine.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE) {
-    return { routine, changed: false };
-  }
-  const cycleMaxes = adaptiveCycleMaxes(routine);
-  const regenerated = createRoutine(routine.profileId, routine.name, routine.inputs, cycleMaxes);
-  const generatedBySequence = new Map(regenerated.workouts.map(workout => [workout.sequence, workout]));
-  let changed = false;
-  const workouts = routine.workouts.map(workout => {
-    const generatedWorkout = generatedBySequence.get(workout.sequence);
-    if (workout.completedAt || workout.session?.status === 'inProgress' || !generatedWorkout) return workout;
-    const next = {
-      ...workout,
-      effectiveMaxes: generatedWorkout.effectiveMaxes,
-      exercises: generatedWorkout.exercises.map((exercise, exerciseIndex) => ({
-        ...exercise,
-        id: workout.exercises[exerciseIndex]?.id || exercise.id,
-        overrides: workout.exercises[exerciseIndex]?.overrides || {},
-      })),
-    };
-    if (JSON.stringify(next.effectiveMaxes) !== JSON.stringify(workout.effectiveMaxes) ||
-        JSON.stringify(next.exercises.map(exercise => exercise.generated)) !==
-          JSON.stringify(workout.exercises.map(exercise => exercise.generated))) changed = true;
-    return next;
-  });
-  return {
-    changed,
-    routine: changed ? { ...routine, workouts, updatedAt: now() } : routine,
-  };
-};
-
 export const adaptiveStatusForWorkout = (routine, workout) => {
-  if (!routine?.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE || !workout?.cycleIndex) return null;
+  if (routine?.kind === 'strongman') return null;
+  if (!routine?.inputs?.mesoMode || routine.inputs.maxProgressionMode !== 'adaptive' || !workout?.cycleIndex) return null;
   const previousIndex = workout.cycleIndex - 1;
-  const previous = routine.workouts.filter(item => item.cycleIndex === previousIndex);
+  const previous = routine.workouts.filter(item => item.cycleIndex === previousIndex && item.kind !== 'eventSlot');
   const allComplete = previous.length > 0 && previous.every(item => item.completedAt);
   const maxes = adaptiveCycleMaxes(routine);
   const improved = Object.keys(maxes[workout.cycleIndex] || {}).some(key => (
@@ -704,45 +510,3 @@ export const adaptiveStatusForWorkout = (routine, workout) => {
   if (improved) return `Adaptive · updated from ${source}`;
   return `Adaptive · ${allComplete ? 'set' : 'projected'} from ${source}`;
 };
-
-export const correctMaxes = (routine, maxes) => {
-  const inputs = { ...routine.inputs, ...maxes };
-  const regenerated = createRoutine(routine.profileId, routine.name, inputs);
-  // Sequence is the persisted identity of a generated workout. Index it once so long,
-  // chained mesocycles remain O(W); gaps from user deletions must not shift later plans.
-  const generatedBySequence = [null, ...regenerated.workouts];
-
-  const corrected = {
-    ...routine,
-    inputs,
-    updatedAt: now(),
-    workouts: routine.workouts.map(workout => {
-      const generatedWorkout = generatedBySequence[workout.sequence];
-      if (workout.completedAt || workout.session?.status === 'inProgress' || !generatedWorkout) {
-        // Completed prescriptions are historical snapshots. Unknown sequences can come from
-        // older/imported data and must also survive rather than being guessed by array position.
-        return workout;
-      }
-      return {
-        ...workout,
-        effectiveMaxes: generatedWorkout.effectiveMaxes,
-        exercises: generatedWorkout.exercises.map((exercise, exerciseIndex) => ({
-          ...exercise,
-          // Exercise position is stable within a generated workout. Retain persisted IDs and
-          // explicit overrides so corrections do not break session links or user edits.
-          id: workout.exercises[exerciseIndex]?.id || exercise.id,
-          overrides: workout.exercises[exerciseIndex]?.overrides || {},
-        })),
-      };
-    }),
-  };
-  return refreshAdaptiveProgression(corrected).routine;
-};
-
-export const cloneImportedRecord = record => ({
-  ...record,
-  id: makeId(),
-  name: `${record.name} (Imported)`,
-  createdAt: now(),
-  updatedAt: now(),
-});

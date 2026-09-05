@@ -3,9 +3,8 @@ import { createRoot } from 'react-dom/client';
 import {
   ActiveWorkoutSession,
   formatDuration,
-  WorkoutSessionHistory,
-  WorkoutSummary,
 } from './WorkoutSession';
+import { WorkoutSessionHistory, WorkoutSummary } from './WorkoutSessionHistory';
 
 const workout = {
   name: 'Squat',
@@ -225,12 +224,12 @@ it.each([
   ['undo', 'Undo latest action', 'onUndo'],
   ['substitute', 'Substitute', null],
   ['finish confirmation', 'Finish workout', 'onFinish'],
-])('flushes a restoration-equivalent payload before %s', (label, buttonLabel, callback) => {
+])('flushes a restoration-equivalent payload before %s', async (label, buttonLabel, callback) => {
   jest.useFakeTimers();
   const mounted = renderSession();
   mounted.edit('Weight (lb)', '231');
   mounted.edit('Reps', '9');
-  act(() => mounted.button(buttonLabel).click());
+  await act(async () => mounted.button(buttonLabel).click());
 
   expect(mounted.props.onAdjust).toHaveBeenCalledTimes(1);
   expect(mounted.props.onAdjust).toHaveBeenCalledWith('e1', 's2', {
@@ -238,6 +237,7 @@ it.each([
     actualReps: '9',
   });
   if (callback) expect(mounted.props[callback]).toHaveBeenCalledTimes(1);
+  if (label === 'substitute') expect(mounted.div.querySelector('[role="dialog"]')).not.toBeNull();
   act(() => mounted.root.unmount());
   expect(mounted.props.onAdjust).toHaveBeenCalledTimes(1);
   jest.useRealTimers();

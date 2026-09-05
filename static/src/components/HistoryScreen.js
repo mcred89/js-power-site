@@ -1,10 +1,11 @@
 import React, { memo, useLayoutEffect, useRef, useState } from 'react';
+import { PlanSetup as DefaultPlanSetup } from './PlanControls';
 
 const HISTORY_PAGE_SIZE = 25;
 let historySession = { key: null, count: HISTORY_PAGE_SIZE };
 
 // Keep the completed-workout list outside overlay and notification render traffic.
-export const HistoryScreen = memo(({ eyebrow, routine, completed, PlanSetup, WorkoutCard, onOpen, onScreenRender }) => {
+export const HistoryScreen = memo(({ eyebrow, routine, completed, PlanSetup = DefaultPlanSetup, WorkoutCard, onOpen, onScreenRender }) => {
   // Routine IDs are globally unique, so this also changes whenever a profile switch selects
   // that profile's routine. The empty key cannot retain expansion because it has no history.
   const historyKey = routine?.id || '';

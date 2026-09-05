@@ -1,6 +1,27 @@
 const { expect, test } = require('./fixtures');
 const { fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
 
+test('website previews an independent strongman block without creating local routines', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Strongman block', exact: true }).click();
+  await page.getByLabel('Block name', { exact: true }).fill('Twelve week event preparation');
+  await page.getByRole('button', { name: 'Add event', exact: true }).click();
+  await page.getByLabel('Event 1 name', { exact: true }).fill('Sandbag carry');
+  await page.getByLabel('Event 1 family', { exact: true }).selectOption('carry');
+  await page.getByRole('button', { name: 'Preview strongman block', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Twelve week event preparation' })).toBeVisible();
+  await expect(page.getByText('12 event weeks · independent of your strength routine')).toBeVisible();
+  await expect(page.getByText('Unsaved preview', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sandbag carry · Set up today').first()).toBeVisible();
+  expect(await page.evaluate(async () => (await indexedDB.databases()).filter(database => database.name === 'mcilroy-method'))).toHaveLength(0);
+  await page.getByRole('button', { name: 'Strength routine', exact: true }).click();
+  await fillMaxes(page);
+  await selectVolume(page, 'Low');
+  await selectWeakPoints(page);
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await expect(page.getByRole('heading', { name: '5 weeks. 15 sessions.' })).toBeVisible();
+});
+
 test('normal website generates, edits, exports, and copies a routine', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Build your routine' })).toBeVisible();

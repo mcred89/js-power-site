@@ -1,4 +1,6 @@
 import { serializedRecordsEqual } from './recordComparison';
+import { cloneStrongmanRoutine, remapStrongmanReferences } from './strongmanTransfer';
+import { reconcileImportGraph } from './importGraph';
 
 const mergeRecord = (local, imported) => ({ ...imported, ...local });
 
@@ -16,13 +18,20 @@ const mergeRoutine = (local, imported) => {
   };
 };
 
-const planStore = (importedRecords, localRecords, type) => {
+const planStore = (importedRecords, localRecords, type, idMap) => {
   const localById = new Map(localRecords.map(record => [record.id, record]));
   return importedRecords.map(imported => {
     const local = localById.get(imported.id);
     if (!local) return { type, status: 'new', action: 'copy', imported, result: imported };
     if (serializedRecordsEqual(local, imported)) {
       return { type, status: 'duplicate', action: 'skip', imported, local, result: local };
+    }
+    if ((type === 'routine' || type === 'template') && (local.kind === 'strongman' || imported.kind === 'strongman')) {
+      return {
+        type, status: 'conflict', action: 'copy', imported, local,
+        reason: 'Event plan components conflict. Keep the imported plan as a separate copy.',
+        result: cloneStrongmanRoutine(imported, { preserveHistory: true, idMap, name: `${imported.name || 'Event plan'} (imported copy)` }),
+      };
     }
     return {
       type,
@@ -35,11 +44,27 @@ const planStore = (importedRecords, localRecords, type) => {
   });
 };
 
-export const createImportPlan = (backup, profiles, routines, templates = []) => ({
-  profiles: planStore(backup.profiles, profiles, 'profile'),
-  routines: planStore(backup.routines, routines, 'routine'),
-  templates: planStore(backup.templates || [], templates, 'template'),
-});
+export const createImportPlan = (backup, profiles, routines, templates = []) => {
+  const idMap = new Map();
+  const plan = {
+    profiles: planStore(backup.profiles, profiles, 'profile', idMap),
+    routines: planStore(backup.routines, routines, 'routine', idMap),
+    templates: planStore(backup.templates || [], templates, 'template', idMap),
+  };
+  if (idMap.size) Object.keys(plan).forEach(store => {
+    plan[store] = plan[store].map(item => {
+      if (item.action === 'skip') return item;
+      // Rebuild strength/profile merges from the imported half only: existing local
+      // references still belong to the original, never to its conflict copy.
+      const incoming = remapStrongmanReferences(item.imported, idMap);
+      const result = item.action === 'merge'
+        ? (item.type === 'routine' ? mergeRoutine(item.local, incoming) : mergeRecord(item.local, incoming))
+        : remapStrongmanReferences(item.result, idMap);
+      return { ...item, result };
+    });
+  });
+  return reconcileImportGraph(plan, profiles, routines);
+};
 
 const planItems = plan => [...plan.profiles, ...plan.routines, ...(plan.templates || [])];
 

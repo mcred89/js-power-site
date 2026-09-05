@@ -1,6 +1,6 @@
 import { createImportPlan } from './importBackup';
-import { routineHistoryCsvRowIterator, routinePlanCsvRowIterator } from './routines';
-import { exportBackup, parseBackup } from './storage';
+import { routineHistoryCsvRowIterator, routinePlanCsvRowIterator } from './routineCsv';
+import { exportBackup, parseBackup, normalizeRoutineTransfer } from './storageBackup';
 import { createTransferPackage, openTransferPackage } from './transferPackage';
 import { sharedTransferContents } from './transferUi';
 
@@ -51,16 +51,23 @@ export const dataTaskHandlers = {
   [DATA_TASKS.PARSE_BACKUP]: ({ contents }) => parseBackup(contents),
   [DATA_TASKS.PLAN_IMPORT]: ({ backup, profiles, routines, templates }) => createImportPlan(backup, profiles, routines, templates),
   [DATA_TASKS.SERIALIZE_BACKUP]: ({ profiles, routines, templates }) => exportBackup(profiles, routines, templates),
-  [DATA_TASKS.SERIALIZE_TRANSFER]: payload => JSON.stringify(payload),
-  [DATA_TASKS.CREATE_TRANSFER]: ({ contents, data, currentTime, options }) => (
-    createTransferPackage(contents === undefined ? JSON.stringify(data) : contents, currentTime, options)
+  [DATA_TASKS.SERIALIZE_TRANSFER]: payload => JSON.stringify(
+    payload?.format === 'mcilroy-method-routine-transfer' ? normalizeRoutineTransfer(payload) : payload,
   ),
+  [DATA_TASKS.CREATE_TRANSFER]: ({ contents, data, currentTime, options }) => {
+    const payload = contents === undefined ? data : JSON.parse(contents);
+    const normalized = payload?.format === 'mcilroy-method-routine-transfer'
+      ? normalizeRoutineTransfer(payload) : payload;
+    return createTransferPackage(
+      normalized === payload && contents !== undefined ? contents : JSON.stringify(normalized), currentTime, options,
+    );
+  },
   [DATA_TASKS.OPEN_TRANSFER]: ({ contents, key, currentTime }) => openTransferPackage(contents, key, currentTime),
   [DATA_TASKS.OPEN_TRANSFER_PLAN]: async ({ contents, key, currentTime, local }) => {
     const plaintext = await openTransferPackage(contents, key, currentTime);
     const payload = JSON.parse(plaintext);
-    if (payload.format === 'mcilroy-method-routine-transfer' && payload.version === 1 && payload.routine) {
-      return { routine: payload };
+    if (payload.format === 'mcilroy-method-routine-transfer') {
+      return { routine: normalizeRoutineTransfer(payload) };
     }
     return { plan: createImportPlan(parseBackup(plaintext), local.profiles, local.routines, local.templates) };
   },

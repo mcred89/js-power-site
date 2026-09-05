@@ -54,3 +54,27 @@ it('shows active and completed plan states with delete actions', () => {
   expect([...div.querySelectorAll('button')].filter(button => button.textContent === 'Delete')).toHaveLength(2);
   act(() => root.unmount());
 });
+
+it('uses explicit strongman enrollment status and treats resolved skips as completed', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const routines = ['active', 'paused', 'saved', 'complete'].map(status => ({ id: status, kind: 'strongman', name: `${status} block`, status, workouts: [{ id: `${status}-day`, name: 'Strongman', completedAt: null, exercises: [] }] }));
+  routines.push({ id: 'skipped', kind: 'strongman', name: 'Resolved block', status: 'active', workouts: [{ id: 'skipped-day', name: 'Strongman', skippedAt: 'now', exercises: [] }] });
+  act(() => root.render(<PlansScreen profile={{ name: 'Alex' }} routines={routines} templates={[]} actions={actions} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} PlanSetup={PlanSetup} />));
+  expect([...div.querySelectorAll('.plan-status')].map(badge => badge.textContent)).toEqual(['Active', 'Paused', 'Saved', 'Completed', 'Completed']);
+  expect(div.querySelector('[aria-label="View paused block"]').closest('.plan-card').classList.contains('active')).toBe(false);
+  act(() => root.unmount());
+});
+
+it('uses the accepted event units and per-hand meaning in completed plan details', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const routines = [{ id: 'events', kind: 'strongman', name: 'Carry block', status: 'complete', workouts: [{ id: 'event-day', name: 'Strongman', completedAt: 'now', exercises: [{ id: 'carry', generated: { movement: 'Farmer carry', weight: 90, prescription: '2 × 20 m', event: { sets: 2, weight: 90, weightUnit: 'kg', loadMeaning: 'per-hand', distance: 20, distanceUnit: 'm' } }, overrides: {} }] }] }];
+  act(() => root.render(<PlansScreen profile={{ name: 'Alex' }} routines={routines} templates={[]} actions={actions} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} PlanSetup={PlanSetup} />));
+  expect(div.textContent).toContain('90 kg per hand');
+  expect(div.textContent).toContain('20 m');
+  expect(div.textContent).not.toContain('90 lb');
+  act(() => root.unmount());
+});

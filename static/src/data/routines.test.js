@@ -3,18 +3,10 @@ import {
   adaptiveCycleMaxes,
   archiveRoutine,
   completeSessionSet,
-  correctMaxes,
-  createRoutine,
-  createRoutineFromTemplate,
-  createRoutineTemplate,
   deleteFutureWorkout,
-  duplicateRoutine,
   finishWorkoutSession,
   parsePrescription,
   reopenWorkoutSession,
-  refreshAdaptiveProgression,
-  routineHistoryToCsv,
-  routinePlanToCsv,
   restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
@@ -27,6 +19,9 @@ import {
   updateExercise,
   visibleExercise,
 } from './routines';
+import { correctMaxes, createRoutine, refreshAdaptiveProgression } from './routinePlanning';
+import { createRoutineFromTemplate, createRoutineTemplate, duplicateRoutine } from './routineCopies';
+import { routineHistoryToCsv, routinePlanToCsv } from './routineCsv';
 
 const inputs = {
   maxSquat: '500',

@@ -18,7 +18,7 @@ export const estimatedOneRepMax = (weight, reps) => {
 };
 
 export const completedPrimaryEstimate = workout => {
-  if (!workout?.completedAt || !workout.session?.exercises) return null;
+  if (!workout?.completedAt || workout.kind === 'eventSlot' || workout.kind === 'strongman' || workout.kind === 'event' || !workout.session?.exercises) return null;
   const primary = workout.session.exercises.find(exercise => (
     exercise.exerciseId === workout.session.primaryExerciseId
   )) || workout.session.exercises[0];

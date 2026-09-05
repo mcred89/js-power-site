@@ -1,0 +1,28 @@
+.strongman-builder,.strongman-details,.strongman-session { display:grid; gap:22px; }
+.strongman-builder h2,.strongman-details h2,.strongman-session h2 { margin:0 0 10px; }
+.strongman-builder h3,.strongman-details h3,.strongman-session h3 { margin:0 0 12px; }
+.strongman-card { min-width:0; padding:22px; border:1px solid var(--line); border-radius:16px; background:var(--paper); }
+.strongman-card > p,.strongman-help { color:var(--muted); font-size:14px; line-height:1.6; }
+.strongman-card > :last-child { margin-bottom:0; }
+.strongman-card summary { cursor:pointer; color:var(--accent); font-weight:750; }
+.strongman-card details[open] > summary { margin-bottom:16px; }
+.strongman-inset { margin-top:16px; padding-top:18px; border-top:1px solid var(--line); }
+.strongman-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+.strongman-measurements { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.strongman-row { display:flex; flex-wrap:wrap; align-items:center; gap:12px; }
+.strongman-row.spread { justify-content:space-between; }
+.strongman-card .number-input { background:var(--canvas); border-color:var(--line); }
+.strongman-card .field-label { color:var(--ink); }
+.strongman-card .primary-button { margin-top:16px; }
+.strongman-card .form-field { margin-top:12px; min-width:0; }
+.strongman-error { padding:14px; border:1px solid #b15546; border-radius:10px; color:var(--ink); background:var(--paper); }
+.strongman-badge { display:inline-block; padding:5px 9px; border-radius:7px; font-size:12px; font-weight:750; background:var(--accent-soft); color:var(--accent); }
+.strongman-attempts { padding-left:22px; color:var(--muted); font-size:14px; line-height:1.7; }
+.strongman-phase { display:grid; grid-template-columns:2fr 1fr auto; gap:10px; align-items:end; margin-bottom:12px; }
+.strongman-coverage { width:100%; border-collapse:collapse; font-size:13px; }
+.strongman-coverage td,.strongman-coverage th { padding:10px 4px; text-align:left; border-bottom:1px solid var(--line); }
+.strongman-coverage th { color:var(--muted); font-size:12px; }
+.strongman-phase-list { display:flex; flex-wrap:wrap; gap:8px; padding:0; list-style:none; }
+.strongman-phase-list li { padding:8px 11px; border-radius:8px; background:var(--canvas); font-size:13px; }
+.strongman-card button:disabled { opacity:.5; cursor:default; }
+@media(max-width:480px) { .strongman-card{padding:18px}.strongman-grid{grid-template-columns:1fr}.strongman-measurements{grid-template-columns:repeat(2,minmax(0,1fr))}.strongman-phase{grid-template-columns:1fr 1fr}.strongman-phase .text-button{grid-column:1/-1;text-align:left} }

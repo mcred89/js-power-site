@@ -1,6 +1,9 @@
 import { DATA_TASKS, runDataTask, streamCsvChunks } from './dataTaskHandlers';
-import { routineHistoryToCsv, routinePlanToCsv } from './routines';
-import { exportBackup } from './storage';
+import { routineHistoryToCsv, routinePlanToCsv } from './routineCsv';
+import { exportBackup } from './storageBackup';
+import { createTransferPackage, openTransferPackage } from './transferPackage';
+
+jest.mock('./transferPackage', () => ({ createTransferPackage: jest.fn(), openTransferPackage: jest.fn() }));
 
 const routine = {
   id: 'routine-1', name: 'Test, "plan"', workouts: [{
@@ -11,6 +14,27 @@ const routine = {
 };
 
 describe('background data task handlers', () => {
+  it('serializes routine transfers with v2 and schema version 11', () => {
+    const contents = runDataTask(DATA_TASKS.SERIALIZE_TRANSFER, {
+      format: 'mcilroy-method-routine-transfer', version: 1, routine,
+    });
+    expect(JSON.parse(contents)).toMatchObject({ version: 2, schemaVersion: 11, routine: { kind: 'strength' } });
+  });
+  it('normalizes direct routine transfer creation before encrypting it', async () => {
+    createTransferPackage.mockResolvedValue({ contents: 'encrypted' });
+    await runDataTask(DATA_TASKS.CREATE_TRANSFER, { data: {
+      format: 'mcilroy-method-routine-transfer', version: 1, routine,
+    }, currentTime: 123, options: { compress: true } });
+    expect(JSON.parse(createTransferPackage.mock.calls[0][0])).toMatchObject({ version: 2, schemaVersion: 11 });
+    expect(createTransferPackage.mock.calls[0].slice(1)).toEqual([123, { compress: true }]);
+  });
+  it.each([1, 2])('opens version %i routine transfers through the worker path', async version => {
+    openTransferPackage.mockResolvedValue(JSON.stringify({
+      format: 'mcilroy-method-routine-transfer', version, ...(version === 2 ? { schemaVersion: 10 } : {}), routine,
+    }));
+    const opened = await runDataTask(DATA_TASKS.OPEN_TRANSFER_PLAN, { contents: 'encrypted', key: 'key', local: {} });
+    expect(opened.routine).toMatchObject({ version: 2, schemaVersion: 11, routine: { kind: 'strength' } });
+  });
   it('classifies full backups and legacy transfers through the one restore action', () => {
     const backup = exportBackup([], [], []);
     expect(runDataTask(DATA_TASKS.READ_IMPORT_FILE, { contents: backup }).backup.profiles).toEqual([]);

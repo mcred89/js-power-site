@@ -25,7 +25,7 @@ jest.mock('./data/dataWorkerFactory', () => ({
 }));
 
 import TrackerApp from './TrackerApp';
-import { get as mockGet, getAll as mockGetAll, getAllByIndex as mockGetAllByIndex } from './data/storage';
+import { applyBatch as mockApplyBatch, get as mockGet, getAll as mockGetAll, getAllByIndex as mockGetAllByIndex } from './data/storage';
 
 const clickButton = async (container, label) => {
   const button = [...container.querySelectorAll('button')]
@@ -144,5 +144,41 @@ it('shows an existing routine on Today at startup when its profile pointer is mi
   expect(container.textContent).not.toContain('Build your first routine');
 
   act(() => root.unmount());
+  global.IS_REACT_ACT_ENVIRONMENT = false;
+});
+
+it.each(['start', 'delete'])('leaves a newly claimed event session intact when a stale tab attempts to %s strength work', async action => {
+  const originalProfile = { id: 'profile-1', name: 'Alex', activeRoutineId: 'routine-1', activeWorkoutRoutineId: null };
+  let storedProfile = originalProfile;
+  const storedRoutine = { id: 'routine-1', profileId: 'profile-1', name: 'Normal', inputs: {}, updatedAt: '2026-01-01', workouts: [{ id: 'day-1', name: 'Squat', weekLabel: 'Week 1', exercises: [{ id: 'squat', generated: { movement: 'Squat', weight: '100', prescription: '3 × 5' }, overrides: {} }] }] };
+  mockGetAll.mockImplementation(store => Promise.resolve(store === 'profiles' ? [originalProfile] : []));
+  mockGet.mockImplementation((store, key) => Promise.resolve(store === 'metadata' ? { key, value: originalProfile.id } : storedRoutine));
+  mockGetAllByIndex.mockResolvedValue([storedRoutine]);
+  mockApplyBatch.mockImplementation(async batch => {
+    if (batch.conditions?.profiles?.some(condition => JSON.stringify(condition.expected) !== JSON.stringify(storedProfile))) {
+      throw Object.assign(new Error('Training changed in another tab. Reload to resume the active workout.'), { name: 'BatchConflictError' });
+    }
+    if (batch.puts?.profiles?.length) storedProfile = batch.puts.profiles[0];
+  });
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  await act(async () => { root.render(<TrackerApp appearance="system" onAppearanceChange={() => {}} />); await new Promise(resolve => setTimeout(resolve, 0)); });
+  if (action === 'start') await clickButton(container, 'Open workout');
+  else {
+    await clickButton(container, 'Plans');
+    await clickButton(container, 'Delete');
+    act(() => {
+      const input = container.querySelector('[aria-label="Type yes to confirm"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'yes');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+  storedProfile = { ...originalProfile, activeWorkoutRoutineId: 'events' };
+  await clickButton(container, action === 'start' ? 'Start workout' : 'Delete plan');
+  expect(storedProfile.activeWorkoutRoutineId).toBe('events');
+  expect(container.textContent).toContain('Training changed');
+  act(() => root.unmount());
+  mockApplyBatch.mockResolvedValue(undefined);
   global.IS_REACT_ACT_ENVIRONMENT = false;
 });

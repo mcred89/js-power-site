@@ -1,10 +1,4 @@
-import {
-  BACKUP_VERSION,
-  DATABASE_VERSION,
-  addActiveWorkoutReferences,
-  migrateBackup,
-  runDatabaseMigrations,
-} from './storageMigrations';
+import { DATABASE_VERSION, runDatabaseMigrations } from './storageMigrations';
 import { serializedRecordsEqual } from './recordComparison';
 
 const DATABASE_NAME = 'mcilroy-method';
@@ -158,15 +152,23 @@ export const applyBatch = ({ puts = {}, deletes = {}, conditions = {}, deleteByI
       checks.forEach(({ storeName, key, expected }) => {
         const request = tx.objectStore(storeName).get(key);
         request.onsuccess = () => {
+          if (settled) return;
           if (!serializedRecordsEqual(request.result, expected)) {
             const conflict = batchConflict();
-            try { tx.abort(); } catch (error) { fail(conflict); }
+            // An abort can synchronously emit request errors in IndexedDB adapters.
+            // Preserve the actual conflict before those generic abort errors arrive.
             fail(conflict);
+            try { tx.abort(); } catch (error) { fail(conflict); }
             return;
           }
           remainingChecks -= 1;
           // Reads and writes stay in this transaction, closing the preview/confirmation race.
-          if (!remainingChecks) performWrites();
+          if (!remainingChecks) {
+            try { performWrites(); } catch (error) {
+              fail(error);
+              try { tx.abort(); } catch (abortError) { fail(abortError); }
+            }
+          }
         };
         request.onerror = () => {
           try { tx.abort(); } catch (error) { fail(request.error || error); }
@@ -177,32 +179,6 @@ export const applyBatch = ({ puts = {}, deletes = {}, conditions = {}, deleteByI
       fail(error);
     }
   }));
-};
-
-export const exportBackup = (profiles, routines, templates = []) => JSON.stringify({
-  format: 'mcilroy-method-backup',
-  version: BACKUP_VERSION,
-  dataSchemaVersion: DATABASE_VERSION,
-  exportedAt: new Date().toISOString(),
-  profiles,
-  routines,
-  templates,
-}, null, 2);
-
-export const parseBackup = contents => {
-  const migrated = migrateBackup(JSON.parse(contents));
-  // Normalize even current-version files: hand-edited or partially copied backups may
-  // contain dangling active-workout references, which startup must never chase.
-  const backup = {
-    ...migrated,
-    profiles: addActiveWorkoutReferences(migrated.profiles, migrated.routines),
-  };
-  if (backup.format !== 'mcilroy-method-backup' ||
-      !Array.isArray(backup.profiles) || !Array.isArray(backup.routines) ||
-      !Array.isArray(backup.templates)) {
-    throw new Error('This is not a supported McIlroy Method backup.');
-  }
-  return backup;
 };
 
 export const requestPersistentStorage = async () => {
