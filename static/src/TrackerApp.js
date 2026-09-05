@@ -165,23 +165,27 @@ export const todayRoutineIds = profile => [...new Set([
   profile?.activeStrongmanRoutineId,
 ].filter(Boolean))];
 
+const loadTodayRoutineRecords = async (storage, profileId, routineIds, profileLoaded = false) => {
+  let routines = (await Promise.all(routineIds.map(id => storage.get('routines', id))))
+    .filter(item => item?.profileId === profileId);
+  // Older or interrupted writes can leave a profile without a usable active-routine
+  // pointer even though saved routines exist. Recover these at startup and profile
+  // switches while keeping valid pointers on the fast path.
+  const fullProfile = Boolean(profileId && (!routineIds.length || routines.length !== routineIds.length));
+  if (fullProfile && !profileLoaded) {
+    routines = await storage.getAllByIndex('routines', 'profileId', profileId);
+  }
+  return { routines, fullProfile };
+};
+
 export const loadInitialTrackerRecords = async storage => {
   const [profiles, savedDefault] = await Promise.all([
     storage.getAll('profiles'), storage.get('metadata', 'defaultProfileId'),
   ]);
   const selectedProfileId = initialProfileId(profiles, savedDefault?.value);
   const selected = profiles.find(item => item.id === selectedProfileId);
-  const routineIds = todayRoutineIds(selected);
-  let routines = (await Promise.all(routineIds.map(id => storage.get('routines', id))))
-    .filter(Boolean);
-  // Older or interrupted writes can leave a profile without a usable active-routine
-  // pointer even though its routines are still intact. Secondary screens query the full
-  // profile index, which previously made Today appear to repair itself after changing tabs.
-  // Keep the fast pointed read for normal startup, but recover from a missing/dangling pointer.
-  if (selected && (!routineIds.length || routines.length !== routineIds.length)) {
-    routines = await storage.getAllByIndex('routines', 'profileId', selected.id);
-  }
-  return { profiles, routines, selectedProfileId, defaultProfileId: savedDefault?.value || null };
+  const records = await loadTodayRoutineRecords(storage, selectedProfileId, todayRoutineIds(selected));
+  return { profiles, ...records, selectedProfileId, defaultProfileId: savedDefault?.value || null };
 };
 
 export const mergeRoutineRead = (current, records, requestedGeneration, currentGeneration) => {
@@ -494,7 +498,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   useEffect(() => {
     loadInitialTrackerRecords({ getAll, get, getAllByIndex })
-      .then(({ profiles: savedProfiles, routines: startupRoutines, defaultProfileId: savedDefaultId, selectedProfileId: selectedId }) => {
+      .then(({ profiles: savedProfiles, routines: startupRoutines, fullProfile, defaultProfileId: savedDefaultId, selectedProfileId: selectedId }) => {
+        if (fullProfile) loadedProfileRoutinesFor.current = selectedId;
         setProfiles(savedProfiles);
         setRoutines(startupRoutines);
         setDefaultProfileId(savedDefaultId);
@@ -513,10 +518,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     if (loading || !selectedProfileId) return undefined;
     const generation = ++todayLoadGeneration.current;
     setTodayRoutinesLoaded(false);
-    Promise.all(todayIds
-      .map(id => get('routines', id)))
-      .then(records => {
+    loadTodayRoutineRecords({ get, getAllByIndex }, selectedProfileId, todayIds, loadedProfileRoutinesFor.current === selectedProfileId)
+      .then(({ routines: records, fullProfile }) => {
         if (generation !== todayLoadGeneration.current) return;
+        if (fullProfile) loadedProfileRoutinesFor.current = selectedProfileId;
         // Merge by id instead of replacing the cache: a slower read must not discard a
         // routine already updated by an action in this page session.
         setRoutines(current => mergeRoutineRead(current, records, generation, todayLoadGeneration.current));
@@ -610,6 +615,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     };
   }, [routines, selectedProfileId]);
   const strengthRoutines = profileRoutines.filter(item => item.kind !== 'strongman');
+  const hasPlans = profileRoutines.length > 0;
   const routine = strengthRoutines.find(item => item.id === selectedRoutineId) ||
     strengthRoutines.find(item => item.id === profile?.activeRoutineId) ||
     strengthRoutines.find(item => item.id === profile?.scheduledStrengthRoutineId) || strengthRoutines[0];
@@ -721,6 +727,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     setStrongmanRequest(request || {});
     setWorkoutId(null);
     setView('strongman');
+  };
+
+  const openStrengthBuilder = () => {
+    setBuilderTemplate(null);
+    setView('builder');
   };
 
   const selectRoutine = async item => {
@@ -1279,13 +1290,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         ) : view === 'today' ? (
           <section className="dashboard">
             <p className="eyebrow">{routine ? routine.name : 'Ready when you are'}</p>
-            <h1>{pending.length ? 'Your next workout' : routine ? 'Routine complete' : `Welcome, ${profile.name}`}</h1>
+            <div className="today-heading"><h1>{pending.length ? 'Your next workout' : routine ? 'Routine complete' : `Welcome, ${profile.name}`}</h1>{hasPlans && <details className="today-plan-menu"><summary>Add plan</summary><div className="today-plan-options"><button className="text-button" type="button" onClick={openStrengthBuilder}>Strength routine</button><button className="text-button" type="button" onClick={() => openStrongman({ create: true })}>Strongman block</button></div></details>}</div>
             {activeEntry && <div className="resume-workout"><div><p>Workout in progress</p><strong>{activeEntry.workout.name}</strong></div><button className="primary-button" type="button" onClick={resumeActiveWorkout}>Resume workout</button></div>}
-            {activeStrongman && <div className="next-workout"><p>Independent strongman block</p><h2>{activeStrongman.name}</h2><p>{nextEvent ? `${nextEvent.weekLabel} · ${nextEvent.phase}` : 'Event session in progress'}</p><button className="secondary-button" type="button" onClick={() => openStrongman({ planId: activeStrongman.id })}>View strongman block</button>{nextEvent && <button className="text-button" type="button" onClick={() => openStrongman({ planId: activeStrongman.id, workoutId: nextEvent.id })}>Open standalone event day</button>}</div>}
             {!routine ? (
-              <div className="empty-card"><h2>Build your first routine</h2><p>Generate a complete plan and keep it on this phone.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build a routine</button></div>
+              !hasPlans ? <div className="empty-card"><h2>Build your first routine</h2><p>Generate a complete plan and keep it on this phone.</p><button className="primary-button" type="button" onClick={openStrengthBuilder}>Build a routine</button></div> : !activeStrongman && <p>No active routine. Choose a saved plan in Plans or add a new one.</p>
             ) : pending.length ? (
-              <>
                 <div className="next-workout">
                   <p>{pending[0].cycleLabel && <>{pending[0].cycleLabel} · </>}{pending[0].weekLabel}</p>
                   <h2>{pending[0].name}</h2>
@@ -1294,9 +1303,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
                   {pending[0].kind === 'eventSlot' && <p>{nextEvent ? `Continues ${activeStrongman.name} · ${nextEvent.weekLabel}` : 'Choose a strongman block or use a manual event day.'}</p>}
                   <button className="primary-button" type="button" onClick={() => showWorkout(pending[0])}>Open workout</button>
                 </div>
-                {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
-              </>
-            ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
+            ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={openStrengthBuilder}>Build another routine</button></div>}
+            {activeStrongman
+              ? <div className="next-workout"><p>Independent strongman block</p><h2>{activeStrongman.name}</h2><p>{nextEvent ? `${nextEvent.weekLabel} · ${nextEvent.phase}` : 'Event session in progress'}</p><button className="secondary-button" type="button" onClick={() => openStrongman({ planId: activeStrongman.id })}>View strongman block</button>{nextEvent && <button className="text-button" type="button" onClick={() => openStrongman({ planId: activeStrongman.id, workoutId: nextEvent.id })}>Open standalone event day</button>}</div>
+              : !hasPlans && <div className="empty-card"><h2>Plan strongman training</h2><p>Build event days for general training or a competition, with their own timeline and priorities.</p><button className="primary-button" type="button" onClick={() => openStrongman({ create: true })}>New strongman block</button></div>}
+            {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
           </section>
         ) : view === 'plans' ? (
           !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, newStrongman: () => openStrongman({ create: true }), select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, correct: async (item, maxes) => { await saveRoutine((await import('./data/routinePlanning')).correctMaxes(item, maxes)); flash('Future workouts updated.'); }, useTemplate: item => { if (item.kind === 'strongman') openStrongman({ create: true, template: item }); else { setBuilderTemplate(item); setView('builder'); } }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>

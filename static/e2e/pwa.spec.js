@@ -12,7 +12,10 @@ test.beforeEach(async ({ request }) => {
 
 test('independent strongman baseline resumes offline and continues through weeks 11–12 after a ten-week strength block', async ({ page, context }) => {
   await createProfile(page, 'Event Athlete');
-  await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Build a routine', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Plan strongman training', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath('today-create-plans.png'), fullPage: true });
   await page.getByRole('button', { name: 'New strongman block' }).click();
   await page.getByLabel('Block name', { exact: true }).fill('Nationals preparation');
   await page.getByRole('button', { name: 'Add event', exact: true }).click();
@@ -26,7 +29,8 @@ test('independent strongman baseline resumes offline and continues through weeks
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath('strongman-block.png'), fullPage: true });
   await page.getByRole('button', { name: 'Back to training' }).click();
-  await page.getByRole('button', { name: 'Build a routine', exact: true }).click();
+  await page.getByText('Add plan', { exact: true }).click();
+  await page.getByRole('button', { name: 'Strength routine', exact: true }).click();
   await fillMaxes(page);
   await selectWeakPoints(page);
   await page.getByLabel('Build a mesocycle from multiple cycles').check();
@@ -116,6 +120,38 @@ test('independent strongman baseline resumes offline and continues through weeks
   expect(completedEvents.status).toBe('complete');
   expect(completedEvents.workouts.slice(10).every(workout => workout.completedAt && workout.hostRef === null)).toBe(true);
   expect(finished.profiles[0]).toMatchObject({ activeWorkoutRoutineId: null, activeStrongmanRoutineId: null });
+});
+
+test('Today adds strongman midway through a strength routine without a persistent creation card', async ({ page }) => {
+  await createProfile(page, 'Mid-block Athlete');
+  await createRoutine(page, { name: 'Current strength block' });
+  await expect(page.getByRole('heading', { name: 'Plan strongman training', exact: true })).toHaveCount(0);
+  const original = await page.evaluate(async () => {
+    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
+    const routines = await new Promise(resolve => { const request = database.transaction('routines').objectStore('routines').getAll(); request.onsuccess = () => resolve(request.result); });
+    database.close();
+    return routines[0];
+  });
+  await page.getByText('Add plan', { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Strength routine', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Strongman block', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath('today-add-plan.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Strongman block', exact: true }).click();
+  await page.getByLabel('Block name', { exact: true }).fill('Mid-block event training');
+  await page.getByRole('button', { name: 'Add event', exact: true }).click();
+  await page.getByLabel('Event 1 name', { exact: true }).fill('Sandbag carry');
+  await page.getByRole('button', { name: 'Save strongman block', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to training' }).click();
+  await expect(page.getByRole('button', { name: 'Open workout', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View strongman block', exact: true })).toBeVisible();
+  const current = await page.evaluate(async id => {
+    const database = await new Promise(resolve => { const request = indexedDB.open('mcilroy-method'); request.onsuccess = () => resolve(request.result); });
+    const routine = await new Promise(resolve => { const request = database.transaction('routines').objectStore('routines').get(id); request.onsuccess = () => resolve(request.result); });
+    database.close();
+    return routine;
+  }, original.id);
+  expect(current).toEqual(original);
 });
 
 test('imported active event conflicts retain attempts and resume explicitly after the original finishes', async ({ page }) => {

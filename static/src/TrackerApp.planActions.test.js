@@ -78,3 +78,58 @@ test('renaming a stale event plan preserves another tab recorded session', async
   expect(saved.workouts[0].session).toEqual(session);
   expect(db.profiles[0].activeWorkoutRoutineId).toBe(events.id);
 });
+
+test.each(['empty', 'pending strength', 'completed strength', 'paused event', 'saved event', 'completed event'])('Today opens a new strongman block from %s without changing saved training', async state => {
+  act(() => root.unmount());
+  db.profiles[0] = { ...db.profiles[0], activeRoutineId: state === 'empty' ? null : first.id, scheduledStrengthRoutineId: null, activeStrongmanRoutineId: null };
+  db.routines = state === 'empty' ? [] : [first];
+  if (state === 'completed strength') first.workouts.forEach(workout => { workout.completedAt = '2026-09-05T12:00:00Z'; });
+  if (state.endsWith('event')) db.routines.push({ ...events, status: { 'paused event': 'paused', 'saved event': 'saved', 'completed event': 'complete' }[state] });
+  const before = clone(db);
+  await render();
+  const existingAction = state === 'empty' ? 'Build a routine' : state === 'completed strength' ? 'Build another routine' : 'Open workout';
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === existingAction)).toBe(true);
+  if (state === 'empty') {
+    expect(container.querySelector('.today-plan-menu')).toBeNull();
+    await click('New strongman block');
+  } else {
+    expect([...container.querySelectorAll('h2')].some(heading => heading.textContent === 'Plan strongman training')).toBe(false);
+    expect([...container.querySelectorAll('button')].some(button => button.textContent === 'New strongman block')).toBe(false);
+    expect(container.querySelector('.today-plan-menu summary').textContent).toBe('Add plan');
+    act(() => container.querySelector('.today-plan-menu summary').click());
+    expect(container.querySelector('.today-plan-menu').open).toBe(true);
+    await click('Strongman block');
+  }
+  expect(container.querySelector('.strongman-builder h1').textContent).toBe('Plan strongman training');
+  expect(container.querySelector('[aria-label="Block name"]').value).toBe('Alex strongman block');
+  await click('← Back to training');
+  expect(container.querySelector('.dashboard')).not.toBeNull();
+  expect(db).toEqual(before);
+});
+
+test('Today shows the enrolled event block instead of another creation card', () => {
+  const labels = [...container.querySelectorAll('button')].map(button => button.textContent);
+  expect(labels).toContain('View strongman block');
+  expect(labels).toContain('Open standalone event day');
+  expect(labels).not.toContain('New strongman block');
+  expect(container.querySelector('.today-plan-menu summary').textContent).toBe('Add plan');
+});
+
+test('Today can add a strength routine from its compact plan action', async () => {
+  act(() => container.querySelector('.today-plan-menu summary').click());
+  await click('Strength routine');
+  expect(container.textContent).toContain('Generate plan');
+  expect(container.querySelector('[name="maxSquat"]')).not.toBeNull();
+});
+
+test.each(['saved', 'paused'])('a profile with only a %s event block gets compact creation actions', async status => {
+  act(() => root.unmount());
+  db.profiles[0] = { ...db.profiles[0], activeRoutineId: null, scheduledStrengthRoutineId: null, activeStrongmanRoutineId: null };
+  db.routines = [{ ...events, status }];
+  await render();
+  expect(container.querySelector('.today-plan-menu summary').textContent).toBe('Add plan');
+  expect(container.querySelector('.empty-card')).toBeNull();
+  act(() => container.querySelector('.today-plan-menu summary').click());
+  await click('Strongman block');
+  expect(container.querySelector('[aria-label="Block name"]').value).toBe('Alex strongman block');
+});

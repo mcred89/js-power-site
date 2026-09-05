@@ -142,9 +142,82 @@ it('shows an existing routine on Today at startup when its profile pointer is mi
   expect(container.textContent).toContain('Your next workout');
   expect(container.textContent).toContain('Deadlift day');
   expect(container.textContent).not.toContain('Build your first routine');
+  expect(mockGetAllByIndex).toHaveBeenCalledTimes(1);
+  await clickButton(container, 'Plans');
+  expect(mockGetAllByIndex).toHaveBeenCalledTimes(1);
 
   act(() => root.unmount());
   global.IS_REACT_ACT_ENVIRONMENT = false;
+});
+
+it.each([null, 'missing', 'routine-1'])('loads saved routines on a Today profile switch with unusable pointer %s', async activeRoutineId => {
+  const first = { id: 'routine-1', profileId: 'profile-1', name: 'First plan', updatedAt: '2026-09-05', inputs: {}, workouts: [] };
+  const saved = { id: 'saved-events', profileId: 'profile-2', kind: 'strongman', status: 'paused', name: 'Saved preparation', updatedAt: '2026-09-05', inputs: {}, workouts: [] };
+  mockGetAll.mockImplementation(store => Promise.resolve(store === 'profiles' ? [
+    { id: 'profile-1', name: 'Alex', activeRoutineId: first.id },
+    { id: 'profile-2', name: 'Blair', activeRoutineId },
+  ] : []));
+  mockGet.mockImplementation((store, key) => Promise.resolve(store === 'metadata' ? { key, value: 'profile-1' } : key === first.id ? first : undefined));
+  mockGetAllByIndex.mockResolvedValue([saved]);
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(<TrackerApp appearance="system" onAppearanceChange={() => {}} />); await new Promise(resolve => setTimeout(resolve, 0)); });
+    expect(mockGetAllByIndex).not.toHaveBeenCalled();
+    await act(async () => {
+      const selector = container.querySelector('[aria-label="Current profile"]');
+      selector.value = 'profile-2';
+      selector.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(mockGetAllByIndex).toHaveBeenCalledTimes(1);
+    expect(mockGetAllByIndex).toHaveBeenCalledWith('routines', 'profileId', 'profile-2');
+    await clickButton(container, 'Plans');
+    expect(container.textContent).toContain('Saved preparation');
+    expect(mockGetAllByIndex).toHaveBeenCalledTimes(1);
+  } finally {
+    act(() => root.unmount());
+    global.IS_REACT_ACT_ENVIRONMENT = false;
+  }
+});
+
+it('ignores a delayed fallback after switching away from its profile', async () => {
+  const first = { id: 'routine-1', profileId: 'profile-1', name: 'First plan', updatedAt: '2026-09-05', inputs: {}, workouts: [] };
+  const saved = { id: 'saved-events', profileId: 'profile-2', kind: 'strongman', status: 'saved', name: 'Current preparation', updatedAt: '2026-09-06', inputs: {}, workouts: [] };
+  mockGetAll.mockImplementation(store => Promise.resolve(store === 'profiles' ? [
+    { id: 'profile-1', name: 'Alex', activeRoutineId: first.id },
+    { id: 'profile-2', name: 'Blair', activeRoutineId: null },
+  ] : []));
+  mockGet.mockImplementation((store, key) => Promise.resolve(store === 'metadata' ? { key, value: 'profile-1' } : first));
+  let resolveRecovery;
+  mockGetAllByIndex.mockImplementationOnce(() => new Promise(resolve => { resolveRecovery = resolve; })).mockResolvedValue([saved]);
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  const switchProfile = async profileId => act(async () => {
+    const selector = container.querySelector('[aria-label="Current profile"]');
+    selector.value = profileId;
+    selector.dispatchEvent(new Event('change', { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  try {
+    await act(async () => { root.render(<TrackerApp appearance="system" onAppearanceChange={() => {}} />); await new Promise(resolve => setTimeout(resolve, 0)); });
+    await switchProfile('profile-2');
+    expect(mockGetAllByIndex).toHaveBeenCalledTimes(1);
+    await switchProfile('profile-1');
+    await act(async () => resolveRecovery([{ ...saved, name: 'Outdated preparation', updatedAt: '2026-09-01' }]));
+    expect(container.textContent).toContain('First plan');
+    await switchProfile('profile-2');
+    expect(mockGetAllByIndex).toHaveBeenCalledTimes(2);
+    await clickButton(container, 'Plans');
+    expect(container.textContent).toContain('Current preparation');
+    expect(container.textContent).not.toContain('Outdated preparation');
+    expect(mockGetAllByIndex).toHaveBeenCalledTimes(2);
+  } finally {
+    act(() => root.unmount());
+    global.IS_REACT_ACT_ENVIRONMENT = false;
+  }
 });
 
 it.each(['start', 'delete'])('leaves a newly claimed event session intact when a stale tab attempts to %s strength work', async action => {

@@ -91,7 +91,12 @@ infrastructure change is included.
 
 ## Implemented workflow
 
-In the installed app, open **Plans → New strongman block**. Enter the independent
+In the installed app, an empty profile offers both strength and strongman creation cards
+on Today. Once any routine is saved, use **Today → Add plan → Strongman block**
+or **Plans → New strongman block**. Saved and paused routines count as existing setup.
+Today keeps the compact Add plan action available while showing current workouts;
+an active strongman block also shows its event-day actions.
+Enter the independent
 block length, competition date if known, phases, events, priorities, equipment,
 and variations. In the website calculator, choose **Strongman block** to preview
 the same setup without saving anything; choosing a local profile enables an
@@ -142,17 +147,22 @@ plan controls, and transfer operations load separately while remaining in the of
 
 ## Verification — September 5, 2026
 
+The core strongman implementation was deployed in commit `02be339`. These results
+include the subsequent Today creation refinement, which has been verified locally.
+
 - Tests were written and observed failing before implementing planner, lifecycle,
   migration, coverage, session, and UI behavior. Existing strength calculations and
   normal-day strongman prescriptions were characterized first.
-- Full Jest suite after review fixes: **413 tests in 42 suites passed**.
+- Full Jest suite after review and Today entry fixes: **427 tests in 42 suites passed**.
 - Production build and service-worker generation passed. Initial JavaScript is
-  **65.83 kB gzip**, within the unchanged **66.70 kB** budget; 35 assets are precached.
+  **66.11 kB gzip**, within the unchanged **66.70 kB** budget; 35 assets are precached.
 - Targeted browser checks passed for offline event resume, standalone weeks 11–12
   after a ten-week strength block, preserved normal-day exercises, and explicit resume
   of an imported conflict copy after its original active session finishes.
-- Full local Playwright suite: **17 tests passed** across the website and mobile PWA,
+- Full local Playwright suite: **18 tests passed** across the website and mobile PWA,
   including normal workouts, history, future max correction, backup imports, offline
-  install/update caching, and both real WebRTC transfer scopes.
+  install/update caching, both real WebRTC transfer scopes, empty-profile creation,
+  and adding strongman from Today's compact action during an existing strength block.
 - Reviewed mobile builder, block, and session screenshots; checked viewport overflow.
-  Physical Android Chrome installation remains unverified. Nothing was deployed.
+  Physical Android Chrome installation remains unverified. The Today entry refinement
+  has not been deployed.
