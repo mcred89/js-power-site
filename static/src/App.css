@@ -404,3 +404,8 @@ body { min-width:320px; }
   .progress-card { padding:20px; }
   .timing-grid { grid-template-columns:1fr; }
 }
+
+.qr-transfer { max-height:90dvh; overflow-y:auto; }
+.pairing-code { display:block; width:100%; max-width:360px; height:auto; margin:16px auto; background:white; }
+.pairing-camera { display:block; width:100%; max-height:300px; object-fit:cover; border-radius:12px; background:#111; }
+.pairing-caption { font-size:14px; text-align:center; }

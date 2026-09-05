@@ -17,16 +17,6 @@ export const createSharedTransferContents = transfer => JSON.stringify({
   package: JSON.parse(transfer.contents),
 });
 
-export const createTransferFile = transfer => new File(
-  [createSharedTransferContents(transfer)], transfer.filename, { type: 'text/plain' },
-);
-
-export const canShareTransfer = transfer => Boolean(
-  navigator.share && navigator.canShare && navigator.canShare({ files: [createTransferFile(transfer)] }),
-);
-
-export const shareTransfer = transfer => navigator.share({ files: [createTransferFile(transfer)] });
-
 export const sharedTransferContents = contents => {
   try {
     const shared = JSON.parse(contents);

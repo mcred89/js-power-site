@@ -11,6 +11,15 @@ const routine = {
 };
 
 describe('background data task handlers', () => {
+  it('classifies full backups and legacy transfers through the one restore action', () => {
+    const backup = exportBackup([], [], []);
+    expect(runDataTask(DATA_TASKS.READ_IMPORT_FILE, { contents: backup }).backup.profiles).toEqual([]);
+    expect(runDataTask(DATA_TASKS.READ_IMPORT_FILE, { contents: JSON.stringify({
+      format: 'mcilroy-method-shared-transfer', version: 1, key: 'key', package: { ciphertext: 'ciphertext' },
+    }) })).toEqual({ transfer: { key: 'key', contents: '{"ciphertext":"ciphertext"}' } });
+    expect(runDataTask(DATA_TASKS.READ_IMPORT_FILE, { contents: '{"format":"mcilroy-method-encrypted-transfer"}' })).toEqual({ locked: true });
+    expect(() => runDataTask(DATA_TASKS.READ_IMPORT_FILE, { contents: '{}' })).toThrow();
+  });
   it('produces byte-identical pretty backups', () => {
     const payload = { profiles: [{ id: 'p1' }], routines: [routine], templates: [] };
     const generated = runDataTask(DATA_TASKS.SERIALIZE_BACKUP, payload);

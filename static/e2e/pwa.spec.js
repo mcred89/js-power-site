@@ -223,18 +223,14 @@ test('PWA supports multiple profiles, routines, downloads, and backup import pre
   await page.getByRole('button', { name: 'View Primary Plan' }).click();
 
   await page.getByRole('button', { name: 'Settings' }).click();
-  await expect(page.getByRole('button', { name: /QR/i })).toHaveCount(0);
-  const planDownload = page.waitForEvent('download');
-  await page.getByRole('button', { name: 'Download plan CSV' }).click();
-  await expect((await planDownload).suggestedFilename()).toBe('primary-plan-plan.csv');
-  await expect(page.getByRole('button', { name: 'Download history CSV' })).toBeDisabled();
-
+  await expect(page.getByRole('button', { name: 'Receive with QR' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Download plan CSV' })).toHaveCount(0);
   const backupDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export backup' }).click();
   const backup = await backupDownload;
   const backupPath = testInfo.outputPath('backup.json');
   await backup.saveAs(backupPath);
-  await page.locator('input[accept="application/json,.json"]').setInputFiles(backupPath);
+  await page.locator('input[type="file"]').setInputFiles(backupPath);
   const importDialog = page.getByRole('dialog', { name: 'Preview import' });
   await expect(importDialog).toContainText('0 copied · 3 skipped · 0 merged');
   await importDialog.getByRole('button', { name: 'Import backup' }).click();
@@ -383,4 +379,96 @@ test('PWA atomically installs updates and preserves release-independent transfer
     return Boolean(await (await caches.open(shell)).match('/missing-runtime.png'));
   });
   expect(cachedFailure).toBe(false);
+});
+// Real WebRTC and QR decoding; only the camera input is replaced with a canvas.
+const installQrCamera = async page => page.addInitScript(() => {
+  window.__qrTracks = [];
+  navigator.mediaDevices.getUserMedia = async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 600;
+    canvas.height = 600;
+    window.__qrCamera = canvas;
+    const stream = canvas.captureStream(10);
+    window.__qrTracks.push(...stream.getTracks());
+    return stream;
+  };
+});
+
+const scanDisplayedCodes = async (display, scanner) => {
+  const image = display.getByRole('img', { name: /Device pairing code/ });
+  await expect(image).toBeVisible();
+  const count = Number((await image.getAttribute('alt')).match(/of (\d+)/)[1]);
+  for (let index = 0; index < count; index += 1) {
+    const source = await image.getAttribute('src');
+    await scanner.waitForFunction(() => Boolean(window.__qrCamera));
+    await scanner.evaluate(async source => {
+      const image = new Image();
+      image.src = source;
+      await image.decode();
+      window.__qrCamera.getContext('2d').drawImage(image, 0, 0, 600, 600);
+    }, source);
+    if (index < count - 1) {
+      await expect(scanner.getByRole('status').filter({ hasText: `Scanned ${index + 1} of ${count} codes` })).toBeVisible();
+      await expect(image).not.toHaveAttribute('src', source);
+    }
+  }
+};
+
+for (const scope of ['full backup', 'one routine']) {
+  test(`PWA pairs through QR and transfers ${scope} over a real data channel`, async ({ page, browser }, testInfo) => {
+    test.setTimeout(90000);
+    await installQrCamera(page);
+    await createProfile(page, 'Sending Athlete');
+    await createRoutine(page, { name: 'QR Plan', duration: '3 weeks' });
+    const receiverContext = await browser.newContext({ baseURL: testInfo.project.use.baseURL, viewport: { width: 393, height: 851 } });
+    const receiver = await receiverContext.newPage();
+    const errors = [];
+    receiver.on('pageerror', error => errors.push(error.message));
+    await receiver.addInitScript(() => Object.defineProperty(navigator, 'standalone', { get: () => true }));
+    await installQrCamera(receiver);
+    try {
+      await createProfile(receiver, 'Receiving Athlete');
+      await receiver.getByRole('button', { name: 'Settings' }).click();
+      await receiver.getByRole('button', { name: 'Receive with QR' }).click();
+      await page.getByRole('button', { name: 'Settings' }).click();
+      await page.screenshot({ path: testInfo.outputPath('qr-settings.png'), fullPage: true });
+      await expect(page.getByRole('button', { name: 'Open received transfer' })).toHaveCount(0);
+      await page.getByRole('button', { name: `Send ${scope}` }).click();
+      if (scope === 'one routine') await page.getByRole('button', { name: 'Continue to QR' }).click();
+      await expect(page.getByRole('img', { name: /Device pairing code/ })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath('qr-pairing.png'), fullPage: true });
+      await scanDisplayedCodes(page, receiver);
+      await expect(receiver.getByRole('img', { name: /Device pairing code/ })).toBeVisible();
+      await page.getByRole('button', { name: 'Scan reply code' }).click();
+      await scanDisplayedCodes(receiver, page);
+      await expect(page.getByRole('button', { name: 'Send data' })).toBeVisible({ timeout: 35000 });
+      await expect(receiver.getByText('Devices connected.')).toBeVisible();
+      await page.getByRole('button', { name: 'Send data' }).click();
+      await expect(page.getByText('Transfer received. Review and import it on the other device.')).toBeVisible();
+      if (scope === 'one routine') await receiver.getByRole('button', { name: 'Preview import' }).click();
+      const preview = receiver.getByRole('dialog', { name: 'Preview import' });
+      await expect(preview).toContainText('QR Plan');
+      await preview.getByRole('button', { name: 'Import backup' }).click();
+      await expect(receiver.getByText(/Import complete:/)).toBeVisible();
+      if (scope === 'full backup') await receiver.getByLabel('Current profile').selectOption({ label: 'Sending Athlete' });
+      await receiver.getByRole('button', { name: 'Plans' }).click();
+      await expect(receiver.getByRole('button', { name: 'View QR Plan' })).toBeVisible();
+      await expect.poll(() => page.evaluate(() => window.__qrTracks.every(track => track.readyState === 'ended'))).toBe(true);
+      await expect.poll(() => receiver.evaluate(() => window.__qrTracks.every(track => track.readyState === 'ended'))).toBe(true);
+      expect(errors).toEqual([]);
+    } finally { await receiverContext.close(); }
+  });
+}
+
+test('PWA QR camera denial offers retry and cancellation', async ({ page }) => {
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = async () => { throw new DOMException('Denied', 'NotAllowedError'); };
+  });
+  await createProfile(page);
+  await page.getByRole('button', { name: 'Settings' }).click();
+  await page.getByRole('button', { name: 'Receive with QR' }).click();
+  await expect(page.getByText('Allow camera access in browser settings, then retry.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry camera' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 });

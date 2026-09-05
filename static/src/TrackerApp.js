@@ -27,7 +27,6 @@ import {
 import {
   download,
   sharedTransferContents,
-  shareTransfer,
 } from './data/transferUi';
 import {
   applyBatch,
@@ -40,12 +39,9 @@ import {
   save,
 } from './data/storage';
 export {
-  canShareTransfer,
   createSharedTransferContents,
-  createTransferFile,
   download,
   sharedTransferContents,
-  shareTransfer,
 } from './data/transferUi';
 
 const makeId = () => (
@@ -101,7 +97,7 @@ const runDataTaskInBackground = (type, payload) => loadDataTaskClient()
   .then(module => module.runDataTaskInBackground(type, payload));
 const cancelDataTasks = () => loadDataTaskClient().then(module => module.cancelBackgroundDataTasks());
 const ImportPreview = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.ImportPreview })));
-const TransferCreator = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferCreator })));
+const QrTransfer = lazy(() => import('./containers/QrTransfer'));
 const TransferUnlock = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.TransferUnlock })));
 const RoutineTransferCreator = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.RoutineTransferCreator })));
 const RoutineDestination = lazy(() => import('./components/TrackerOverlays').then(module => ({ default: module.RoutineDestination })));
@@ -279,10 +275,6 @@ export const profileAfterFinishedRoutine = (profile, routineId, updatedAt = new 
     ? profileWithActiveWorkout(profile, null, updatedAt)
     : profile
 );
-
-const safeFilename = value => value.toLowerCase()
-  .replace(/[^a-z0-9]+/g, '-')
-  .replace(/^-|-$/g, '') || 'routine';
 
 const ProfileForm = ({ onSave, title = 'Who is training?' }) => {
   const [name, setName] = useState('');
@@ -534,6 +526,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [finishPrompt, setFinishPrompt] = useState(null);
   const [importPlan, setImportPlan] = useState(null);
   const [createdTransfer, setCreatedTransfer] = useState(null);
+  const [receivingQr, setReceivingQr] = useState(false);
   const [transferFile, setTransferFile] = useState(null);
   const [choosingRoutineTransfer, setChoosingRoutineTransfer] = useState(false);
   const [receivedRoutine, setReceivedRoutine] = useState(null);
@@ -546,7 +539,6 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [dataTaskBusy, setDataTaskBusy] = useState(false);
   const applyingHistoryRef = useRef(false);
   const importRef = useRef();
-  const transferRef = useRef();
   const incomingTransferRef = useRef(false);
   const overlayTaskRef = useRef(null);
   const routinesRef = useRef([]);
@@ -1034,7 +1026,15 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     if (dataTaskBusy) return;
     setDataTaskBusy(true);
     try {
-      const backup = await runDataTaskInBackground(DATA_TASKS.PARSE_BACKUP, { contents: await file.text() });
+      const contents = await file.text();
+      const result = await runDataTaskInBackground('read-import-file', { contents });
+      if (result.transfer || result.locked) {
+        setDataTaskBusy(false);
+        if (result.transfer) await unlockTransferContents(result.transfer.contents, result.transfer.key);
+        else setTransferFile(file);
+        return;
+      }
+      const backup = result.backup;
       const local = await loadAllData();
       setImportPlan(await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, { backup, ...local }));
     } catch (error) {
@@ -1049,27 +1049,12 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     setDataTaskBusy(true);
     try {
       const local = await loadAllData();
-      const transfer = await runDataTaskInBackground(DATA_TASKS.CREATE_TRANSFER, { data: {
-        format: 'mcilroy-method-backup', version: 7, dataSchemaVersion: 7,
-        exportedAt: new Date().toISOString(), ...local,
-      }, options: { compress: true } });
+      const contents = await runDataTaskInBackground('serialize-backup', local);
+      const transfer = await runDataTaskInBackground(DATA_TASKS.CREATE_TRANSFER, { contents, options: { compress: true } });
       setCreatedTransfer({
         ...transfer,
-        filename: `mcilroy-method-transfer-${new Date().toISOString().slice(0, 10)}.txt`,
+        label: 'a full backup',
       });
-    } catch (error) {
-      flash(error.message);
-    } finally {
-      setDataTaskBusy(false);
-    }
-  };
-
-  const downloadRoutineCsv = async (type, suffix) => {
-    if (dataTaskBusy || !routine) return;
-    setDataTaskBusy(true);
-    try {
-      const chunks = await runDataTaskInBackground(type, { routine });
-      download(chunks, `${safeFilename(routine.name)}-${suffix}.csv`, 'text/csv;charset=utf-8');
     } catch (error) {
       flash(error.message);
     } finally {
@@ -1131,21 +1116,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       setChoosingRoutineTransfer(false);
       setCreatedTransfer({
         ...transfer,
-        filename: `${safeFilename(selected.name)}-${new Date().toISOString().slice(0, 10)}.txt`,
+        label: selected.name,
       });
     } catch (error) {
       if (error.name !== 'AbortError') flash(error.message);
     } finally {
       overlayTaskRef.current = null;
       setDataTaskBusy(false);
-    }
-  };
-
-  const sendTransfer = async () => {
-    try {
-      await shareTransfer(createdTransfer);
-    } catch (error) {
-      if (error.name !== 'AbortError') flash('The phone could not share this transfer. Download the file instead.');
     }
   };
 
@@ -1368,7 +1345,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             <ProgressScreen profile={profile} routines={progressRoutines} />
           </Suspense>
         ) : (
-          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} busy={dataTaskBusy} refs={{ import: importRef, transfer: transferRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, planCsv: () => downloadRoutineCsv(DATA_TASKS.PLAN_CSV, 'plan'), historyCsv: () => downloadRoutineCsv(DATA_TASKS.HISTORY_CSV, 'history'), backup: async () => { if (dataTaskBusy) return; setDataTaskBusy(true); try { const local = await loadAllData(); download(await runDataTaskInBackground('serialize-backup', local), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`); } catch (error) { flash(error.message); } finally { setDataTaskBusy(false); } }, transfer: makeTransfer, routineTransfer: async () => { const records = await getAllByIndex('routines', 'profileId', profile.id); setRoutines(current => [...current.filter(item => item.profileId !== profile.id), ...records]); setChoosingRoutineTransfer(true); }, importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, transferFile: event => { if (event.target.files[0]) receiveTransferFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
+          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} busy={dataTaskBusy} refs={{ import: importRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, backup: async () => { if (dataTaskBusy) return; setDataTaskBusy(true); try { const local = await loadAllData(); download(await runDataTaskInBackground('serialize-backup', local), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`); } catch (error) { flash(error.message); } finally { setDataTaskBusy(false); } }, transfer: makeTransfer, receiveQr: () => setReceivingQr(true), routineTransfer: async () => { const records = await getAllByIndex('routines', 'profileId', profile.id); setRoutines(current => [...current.filter(item => item.profileId !== profile.id), ...records]); setChoosingRoutineTransfer(true); }, importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
         )}
       </main>
 
@@ -1376,7 +1353,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       {finishPrompt && <ConfirmationModal title="Finish this workout?" confirmLabel="Finish workout" onCancel={() => setFinishPrompt(null)} onConfirm={finishActiveWorkout}>{finishPrompt.pendingSets ? `${finishPrompt.pendingSets} planned set${finishPrompt.pendingSets === 1 ? '' : 's'} will be recorded as skipped. ` : ''}{finishPrompt.missingRpe ? 'The main-lift RPE is still blank.' : ''}</ConfirmationModal>}
       <Suspense fallback={null}>
       {importPlan && <ImportPreview plan={importPlan} busy={dataTaskBusy} onCancel={() => { if (!dataTaskBusy) setImportPlan(null); }} onConfirm={confirmImport} />}
-      {createdTransfer && <TransferCreator transfer={createdTransfer} onClose={() => setCreatedTransfer(null)} onShare={sendTransfer} />}
+      {(createdTransfer || receivingQr) && <QrTransfer transfer={createdTransfer} onClose={() => { setCreatedTransfer(null); setReceivingQr(false); }} onReceive={async contents => { setReceivingQr(false); await receiveTransferFile(new File([contents], 'Device transfer', { type: 'text/plain' })); }} />}
       {transferFile && <TransferUnlock file={transferFile} busy={dataTaskBusy} onCancel={() => { overlayTaskRef.current = null; cancelDataTasks(); setDataTaskBusy(false); setTransferFile(null); }} onUnlock={unlockTransfer} />}
       {choosingRoutineTransfer && <RoutineTransferCreator routines={routines} busy={dataTaskBusy} onCancel={() => { overlayTaskRef.current = null; cancelDataTasks(); setDataTaskBusy(false); setChoosingRoutineTransfer(false); }} onCreate={createRoutineTransfer} />}
       {receivedRoutine && <RoutineDestination transfer={receivedRoutine} profiles={profiles} onCancel={() => setReceivedRoutine(null)} onConfirm={chooseRoutineDestination} />}

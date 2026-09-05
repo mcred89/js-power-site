@@ -2,9 +2,11 @@ import { createImportPlan } from './importBackup';
 import { routineHistoryCsvRowIterator, routinePlanCsvRowIterator } from './routines';
 import { exportBackup, parseBackup } from './storage';
 import { createTransferPackage, openTransferPackage } from './transferPackage';
+import { sharedTransferContents } from './transferUi';
 
 export const DATA_TASKS = Object.freeze({
   PARSE_BACKUP: 'parse-backup',
+  READ_IMPORT_FILE: 'read-import-file',
   PLAN_IMPORT: 'plan-import',
   SERIALIZE_BACKUP: 'serialize-backup',
   SERIALIZE_TRANSFER: 'serialize-transfer',
@@ -40,6 +42,12 @@ const collectCsvChunks = (rows, size) => {
 // Task handlers are deliberately environment-neutral: the worker and fallback execute the
 // exact same functions, preventing feature or error-message drift between older browsers.
 export const dataTaskHandlers = {
+  [DATA_TASKS.READ_IMPORT_FILE]: ({ contents }) => {
+    const shared = sharedTransferContents(contents);
+    if (shared) return { transfer: shared };
+    if (JSON.parse(contents)?.format === 'mcilroy-method-encrypted-transfer') return { locked: true };
+    return { backup: parseBackup(contents) };
+  },
   [DATA_TASKS.PARSE_BACKUP]: ({ contents }) => parseBackup(contents),
   [DATA_TASKS.PLAN_IMPORT]: ({ backup, profiles, routines, templates }) => createImportPlan(backup, profiles, routines, templates),
   [DATA_TASKS.SERIALIZE_BACKUP]: ({ profiles, routines, templates }) => exportBackup(profiles, routines, templates),

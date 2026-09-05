@@ -2,8 +2,8 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import App, { isInstalledApp } from './App';
 import TrackerApp from './TrackerApp';
-import { activateRoutineImport, canShareTransfer, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, createTransferFile, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, shareTransfer, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerHistoryState, trackerLoadPolicy, trackerRouteFromHistory, WorkoutCard } from './TrackerApp';
-import { RoutineCopyDialog, TransferCreator } from './components/TrackerOverlays';
+import { activateRoutineImport, commitRoutineLifecycle, completeWorkoutSetWithDraft, ConfirmationModal, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, PlanSetup, profileAfterFinishedRoutine, RoutineNameEditor, sharedTransferContents, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerHistoryState, trackerLoadPolicy, trackerRouteFromHistory, WorkoutCard } from './TrackerApp';
+import { RoutineCopyDialog } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
 
 jest.mock('./data/dataWorkerFactory', () => ({
@@ -355,56 +355,11 @@ it('opens a template in the normal editable routine builder', () => {
   act(() => root.unmount());
 });
 
-describe('native transfer sharing', () => {
-  const transfer = {
-    contents: '{"encrypted":true}',
-    filename: 'routine.txt',
-    key: 'correct-key',
-    expiresAt: '2026-08-18T18:00:00.000Z',
-  };
-
-  afterEach(() => {
-    delete navigator.share;
-    delete navigator.canShare;
-  });
-
-  it('creates a named transfer file for the phone share sheet', () => {
-    const file = createTransferFile(transfer);
-
-    expect(file.name).toBe('routine.txt');
-    expect(file.type).toBe('text/plain');
-  });
-
-  it('puts the key inside the encrypted share envelope for automatic receiving', async () => {
-    const shared = sharedTransferContents(createSharedTransferContents(transfer));
-
-    expect(shared.key).toBe('correct-key');
-    expect(JSON.parse(shared.contents)).toEqual({ encrypted: true });
-  });
-
-  it('shares the encrypted JSON file through the native share sheet', async () => {
-    navigator.canShare = jest.fn().mockReturnValue(true);
-    navigator.share = jest.fn().mockResolvedValue(undefined);
-
-    expect(canShareTransfer(transfer)).toBe(true);
-    await shareTransfer(transfer);
-
-    expect(navigator.share).toHaveBeenCalledWith({
-      files: [expect.objectContaining({ name: 'routine.txt' })],
-    });
-  });
-
-  it('offers file download when native file sharing is unavailable', () => {
-    global.IS_REACT_ACT_ENVIRONMENT = true;
-    const div = document.createElement('div');
-    const root = createRoot(div);
-
-    act(() => root.render(<TransferCreator transfer={transfer} onClose={() => {}} onShare={() => {}} />));
-
-    expect(div.textContent).toContain('Download file instead');
-    expect(div.textContent).not.toContain('Share with nearby phone');
-    act(() => root.unmount());
-  });
+it('preserves the transfer envelope for QR transport and older file imports', () => {
+  const transfer = { contents: '{"encrypted":true}', key: 'correct-key' };
+  const shared = sharedTransferContents(createSharedTransferContents(transfer));
+  expect(shared.key).toBe('correct-key');
+  expect(JSON.parse(shared.contents)).toEqual({ encrypted: true });
 });
 
 it('shows every generator setting for a plan', () => {
