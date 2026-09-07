@@ -17,6 +17,10 @@ red for sprinting, and blue for rest, with sprint count, elapsed time, and a
 countdown. Distinct buzzers announce each transition. Keep the app open and set
 your phone's media volume before starting. Pause, resume, and reset are available;
 after a reload, tap Resume to re-enable sound and continue the saved timer.
+**Complete without timer** records the whole finisher as complete without starting
+the clock. In the timer, **Next interval** advances to the next sprint or rest,
+or completes the set after the final sprint. A paused timer stays paused when
+advancing; a running timer cues the new phase immediately.
 Selections and timer progress are included in backups. Existing saved plans keep
 their prescriptions and default to Tabata off.
 

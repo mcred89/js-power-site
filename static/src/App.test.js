@@ -7,6 +7,7 @@ import TrackerApp from './TrackerApp';
 import { activateRoutineImport, commitRoutineLifecycle, completeWorkoutSetWithDraft, createControllerChangeHandler, createSerializedRoutineWriter, createSharedTransferContents, importPlanBatch, initialProfileId, loadInitialTrackerRecords, mergeRoutineRead, profileAfterFinishedRoutine, sharedTransferContents, skipWorkoutSetWithDraft, templateBuilderInputs, todayRoutineIds, trackerHistoryState, trackerLoadPolicy, trackerRouteFromHistory, WorkoutCard } from './TrackerApp';
 import { RoutineCopyDialog } from './components/TrackerOverlays';
 import { RoutineBuilderScreen as RoutineBuilder } from './components/RoutineBuilderScreen';
+import { undoLatestSessionAction } from './data/routines';
 
 jest.mock('./data/dataWorkerFactory', () => ({
   createDataWorker: jest.fn(() => { throw new Error('Worker unavailable in Jest.'); }),
@@ -309,22 +310,46 @@ it.each([
     .toEqual(expect.objectContaining({ actualWeight: '225', actualReps: '8', status }));
 });
 
-it('finishes remaining legacy sprint records together while preserving already completed evidence', () => {
+it.each([
+  ['with the timer', { elapsedMs: 110000, runningSince: null }],
+  ['without the timer', null],
+])('finishes remaining legacy sprint records %s while preserving completed and skipped history', (label, timer) => {
   const previous = { id: 'first', number: 1, status: 'completed', completedAt: '2026-09-01', splitSeconds: 30 };
+  const skipped = { id: 'skipped', number: 2, status: 'skipped', skippedAt: '2026-09-02' };
   const routine = { workouts: [{ id: 'workout', session: {
     status: 'inProgress', runningSince: null, elapsedSeconds: 290,
     exercises: [{
       exerciseId: 'sprints', movement: 'Tabata sprints', plannedWeight: '',
       prescription: '8 rounds: 20 seconds sprint / 10 seconds rest',
-      sets: [previous, { id: 'second', number: 2, status: 'pending' }, { id: 'third', number: 3, status: 'pending' }],
+      sets: [previous, skipped, { id: 'second', number: 3, status: 'pending' }, { id: 'third', number: 4, status: 'pending' }],
     }],
   } }] };
-  const timer = { elapsedMs: 110000, runningSince: null };
   const finished = completeWorkoutSetWithDraft(routine, 'workout', 'sprints', 'second', { tabataTimer: timer });
   const sets = finished.workouts[0].session.exercises[0].sets;
   expect(sets[0]).toBe(previous);
-  expect(sets.slice(1).every(set => set.status === 'completed' && set.tabataTimer === timer)).toBe(true);
-  expect(sets[1].completedAt).toBe(sets[2].completedAt);
+  expect(sets[1]).toBe(skipped);
+  expect(sets.slice(2).every(set => set.status === 'completed' && set.tabataTimer === timer)).toBe(true);
+  expect(sets[2].completedAt).toBe(sets[3].completedAt);
+  expect(routine.workouts[0].session.exercises[0].sets.slice(2).map(set => set.status)).toEqual(['pending', 'pending']);
+});
+
+it.each([null, { elapsedMs: 45000, runningSince: null }])('completes a single Tabata set manually without recording timer time and supports undo: %j', timer => {
+  const routine = { workouts: [{ id: 'workout', session: {
+    status: 'inProgress', runningSince: null, elapsedSeconds: 90,
+    exercises: [{
+      exerciseId: 'sprints', movement: 'Tabata sprints', plannedWeight: '',
+      prescription: '8 rounds: 20 seconds sprint / 10 seconds rest',
+      sets: [{ id: 'finisher', number: 1, status: 'pending', tabataTimer: timer }],
+    }],
+  } }] };
+  const finished = completeWorkoutSetWithDraft(routine, 'workout', 'sprints', 'finisher', { tabataTimer: null });
+  expect(finished.workouts[0].session.exercises[0].sets).toEqual([expect.objectContaining({
+    id: 'finisher', status: 'completed', tabataTimer: null, splitSeconds: 90,
+  })]);
+  const undone = undoLatestSessionAction(finished, 'workout');
+  expect(undone.workouts[0].session.exercises[0].sets).toEqual([expect.objectContaining({
+    id: 'finisher', status: 'pending', tabataTimer: null, completedAt: null,
+  })]);
 });
 
 it('keeps template setup choices but requests new maxes and increases', () => {

@@ -15,6 +15,7 @@ jest.mock('./TabataTimer', () => {
       {completed ? <span>Tabata complete</span> : <>
         <button onClick={() => onTimerChange({ elapsedMs: 0, runningSince: '2026-09-07T12:00:00.000Z' })}>Start timer</button>
         <button onClick={() => onComplete({ elapsedMs: 290000, runningSince: null })}>Simulate timer completion</button>
+        <button onClick={() => onComplete(null)}>Complete without timer</button>
       </>}
     </div>;
   };
@@ -126,6 +127,18 @@ it('runs Tabata with one timer and completes the whole set without sprint checko
   act(() => mounted.root.unmount());
 });
 
+it('completes Tabata without starting or saving a timer', async () => {
+  const single = workoutWithTabata();
+  single.session.exercises[1].sets = [{ ...single.session.exercises[1].sets[0], tabataTimer: null }];
+  const mounted = renderSession({}, single);
+  await act(async () => {});
+  act(() => mounted.button('Complete without timer').click());
+  expect(mounted.props.onAdjust).not.toHaveBeenCalled();
+  expect(mounted.props.onCompleteSet).toHaveBeenCalledTimes(1);
+  expect(mounted.props.onCompleteSet).toHaveBeenCalledWith('tabata', 'round-1', { tabataTimer: null });
+  act(() => mounted.root.unmount());
+});
+
 it.each([
   { prescription: '3 × 10' },
   { plannedWeight: '20' },
@@ -190,11 +203,14 @@ it('shows Tabata rounds and timing in history without suggesting weight or reps'
   act(() => root.unmount());
 });
 
-it('shows a completed timer as one set in history and summary', async () => {
+it.each([
+  ['timed', { elapsedMs: 290000, runningSince: null }],
+  ['manual', null],
+])('shows %s Tabata completion as one set in history and summary', async (label, timer) => {
   const completed = workoutWithTabata();
   completed.session.exercises[1].sets = [{
     ...completed.session.exercises[1].sets[0], status: 'completed', splitSeconds: 350,
-    tabataTimer: { elapsedMs: 290000, runningSince: null },
+    tabataTimer: timer,
   }];
   const mounted = renderSession({}, completed);
   await act(async () => mounted.button('Next exercise').click());
@@ -203,7 +219,9 @@ it('shows a completed timer as one set in history and summary', async () => {
   const history = mounted.div.querySelectorAll('.history-exercise')[1];
   expect(history.querySelectorAll('.history-set')).toHaveLength(1);
   expect(history.textContent).toContain('Set 1');
-  expect(history.textContent).toContain('Tabata finisher complete · 4:50');
+  expect(history.querySelector('.history-set span').textContent).toBe(timer
+    ? 'Tabata finisher complete · 4:50'
+    : 'Tabata finisher complete');
   expect(history.textContent).not.toMatch(/Round 1|reps|Open weight/);
   act(() => mounted.root.render(<WorkoutSummary workout={completed} onDone={() => {}} />));
   expect(mounted.div.textContent).toContain('Completed sets3');

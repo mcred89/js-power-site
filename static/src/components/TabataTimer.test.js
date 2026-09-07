@@ -190,3 +190,118 @@ it('shows an already completed set without starting or completing it again', asy
   expect(props.onComplete).not.toHaveBeenCalled();
   expect(sound.unlock).not.toHaveBeenCalled();
 });
+
+it('completes once without starting audio or recording a fabricated timer duration', async () => {
+  const props = renderTimer();
+  const completeButton = button('Complete without timer');
+  act(() => {
+    completeButton.click();
+    completeButton.click();
+  });
+  expect(props.onComplete).toHaveBeenCalledTimes(1);
+  expect(props.onComplete).toHaveBeenCalledWith(null);
+  expect(props.onTimerChange).not.toHaveBeenCalled();
+  expect(createTabataAudio).not.toHaveBeenCalled();
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.textContent).toContain('Tabata complete');
+  expect(button('Complete without timer')).toBeUndefined();
+  expect(button('View finished timer')).toBeUndefined();
+  advance(300000);
+  expect(props.onComplete).toHaveBeenCalledTimes(1);
+
+  renderTimer({ ...props, completed: true });
+  renderTimer(props);
+  expect(button('Start timer')).toBeDefined();
+  await click('Complete without timer');
+  expect(props.onComplete).toHaveBeenCalledTimes(2);
+});
+
+it('allows manual completion after closing a partially used timer and cancels its cues', async () => {
+  const props = renderTimer();
+  await click('Start timer');
+  advance(70000);
+  await click('Close timer');
+  await click('Complete without timer');
+  expect(sound.stop).toHaveBeenCalledTimes(2);
+  expect(props.onComplete).toHaveBeenCalledWith(null);
+  expect(button('Resume timer')).toBeUndefined();
+  expect(button('View finished timer')).toBeUndefined();
+  advance(300000);
+  expect(props.onComplete).toHaveBeenCalledTimes(1);
+});
+
+it('advances running intervals immediately and reschedules cues and the next countdown', async () => {
+  const props = renderTimer();
+  await click('Start timer');
+  advance(5000);
+  await click('Next interval');
+  expect(document.querySelector('.tabata-timer-sprint')).not.toBeNull();
+  expect(document.querySelector('[role="timer"]').textContent).toBe('0:20');
+  expect(sound.schedule).toHaveBeenLastCalledWith(8, 60000);
+  expect(props.onTimerChange).toHaveBeenLastCalledWith({ elapsedMs: 60000, runningSince: '2026-09-07T12:00:05.000Z' });
+  advance(3000);
+  await click('Next interval');
+  expect(document.querySelector('.tabata-timer-rest')).not.toBeNull();
+  expect(document.querySelector('[role="timer"]').textContent).toBe('0:10');
+  expect(sound.schedule).toHaveBeenLastCalledWith(8, 80000);
+  advance(10000);
+  expect(document.querySelector('.tabata-timer-round').textContent).toBe('Sprint 2 of 8');
+  expect(document.querySelector('[role="timer"]').textContent).toBe('0:20');
+  expect(props.onComplete).not.toHaveBeenCalled();
+});
+
+it('advances a paused interval without starting sound or the clock and resumes at the new position', async () => {
+  const props = renderTimer({ timer: { elapsedMs: 84000, runningSince: null } });
+  await click('Resume timer');
+  await click('Pause timer');
+  await click('Next interval');
+  expect(props.onTimerChange).toHaveBeenLastCalledWith({ elapsedMs: 90000, runningSince: null });
+  expect(document.querySelector('.tabata-timer-round').textContent).toBe('Sprint 2 of 8');
+  expect(document.querySelector('.tabata-timer-direction').textContent).toBe('Paused');
+  expect(sound.schedule).toHaveBeenCalledTimes(1);
+  advance(30000);
+  expect(document.querySelector('[role="timer"]').textContent).toBe('0:20');
+  await click('Resume timer');
+  expect(sound.schedule).toHaveBeenLastCalledWith(8, 90000);
+  advance(20000);
+  expect(document.querySelector('.tabata-timer-rest')).not.toBeNull();
+});
+
+it.each([false, true])('completes once when advancing beyond the last sprint (paused: %s)', async paused => {
+  const props = renderTimer({ roundCount: 2, timer: { elapsedMs: 95000, runningSince: null } });
+  await click('Resume timer');
+  if (paused) await click('Pause timer');
+  await click('Next interval');
+  expect(document.querySelector('.tabata-timer-complete')).not.toBeNull();
+  expect(props.onComplete).toHaveBeenCalledWith({ elapsedMs: 110000, runningSince: null });
+  expect(button('Next interval')).toBeUndefined();
+  expect(sound.schedule).toHaveBeenLastCalledWith(2, paused ? 95000 : 110000);
+  advance(300000);
+  expect(props.onComplete).toHaveBeenCalledTimes(1);
+});
+
+it('pauses at the next interval if its buzzer cannot be scheduled', async () => {
+  const props = renderTimer();
+  await click('Start timer');
+  sound.schedule.mockImplementationOnce(() => { throw new Error('Audio interrupted'); });
+  await click('Next interval');
+  expect(props.onTimerChange).toHaveBeenLastCalledWith({ elapsedMs: 60000, runningSince: null });
+  expect(sound.stop).toHaveBeenCalledTimes(1);
+  expect(button('Retry sound')).toBeDefined();
+  advance(30000);
+  expect(document.querySelector('[role="timer"]').textContent).toBe('0:20');
+  await click('Retry sound');
+  expect(sound.schedule).toHaveBeenLastCalledWith(8, 60000);
+});
+
+it('disables interval advancement while audio is still starting', async () => {
+  let resolveUnlock;
+  sound.unlock.mockReturnValue(new Promise(resolve => { resolveUnlock = resolve; }));
+  const props = renderTimer();
+  act(() => button('Start timer').click());
+  expect(button('Next interval').disabled).toBe(true);
+  await click('Next interval');
+  expect(props.onTimerChange).not.toHaveBeenCalled();
+  await act(async () => resolveUnlock());
+  expect(sound.schedule).toHaveBeenCalledWith(8, 0);
+});

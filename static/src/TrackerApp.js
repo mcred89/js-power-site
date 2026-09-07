@@ -154,8 +154,8 @@ export const completeWorkoutSetWithDraft = (routine, workoutId, exerciseId, setI
   const exercise = adjusted.workouts.find(item => item.id === workoutId)?.session?.exercises
     .find(item => item.exerciseId === exerciseId);
   // Older active sessions may retain individual rounds as historical records.
-  // Finishing their timer settles the remaining work in this same durable write.
-  if (draft?.tabataTimer && isTabataExercise(exercise)) {
+  // Completing the finisher settles the remaining work in this same durable write.
+  if (draft?.tabataTimer !== undefined && isTabataExercise(exercise)) {
     const timestamp = new Date().toISOString();
     return exercise.sets.filter(set => set.status === 'pending').reduce((result, set) => (
       completeSessionSet(result, workoutId, exerciseId, set.id, timestamp)

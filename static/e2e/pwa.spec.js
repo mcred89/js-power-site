@@ -277,6 +277,119 @@ test('PWA runs a hands-free Tabata timer after strongman and completes one set',
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
+const openTabataFinisher = async page => {
+  await createProfile(page, 'Tabata Controls Athlete');
+  await page.getByRole('button', { name: 'Build a routine' }).click();
+  await page.getByLabel('Routine name').fill('Tabata Controls Plan');
+  await fillMaxes(page);
+  await selectVolume(page, 'Low');
+  await selectWeakPoints(page);
+  await page.getByLabel('Add Tabata sprints to Squat day').check();
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await expect(page.getByText('Routine created on this phone.')).toBeVisible();
+  await page.getByRole('button', { name: 'Open workout' }).click();
+  await page.getByRole('button', { name: 'Start workout' }).click();
+  await page.getByRole('button', { name: 'Skip exercise', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Tabata sprints', exact: true })).toBeVisible();
+};
+
+const readTabataSets = async page => page.evaluate(async () => {
+  const database = await new Promise((resolve, reject) => {
+    const request = indexedDB.open('mcilroy-method');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    const routines = await new Promise((resolve, reject) => {
+      const request = database.transaction('routines').objectStore('routines').getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return routines[0].workouts[0].session.exercises.slice(-1)[0].sets;
+  } finally {
+    database.close();
+  }
+});
+
+test('PWA completes a Tabata set without starting audio or recording timer duration', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    window.__tabataAudioContexts = 0;
+    const NativeAudioContext = window.AudioContext;
+    window.AudioContext = class extends NativeAudioContext {
+      constructor(...args) {
+        super(...args);
+        window.__tabataAudioContexts += 1;
+      }
+    };
+  });
+  await openTabataFinisher(page);
+  await page.screenshot({ path: testInfo.outputPath('tabata-completion-option.png') });
+  await page.getByRole('button', { name: 'Complete without timer', exact: true }).click();
+  await expect(page.getByText('Tabata complete', { exact: true })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Tabata timer' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'View finished timer', exact: true })).toHaveCount(0);
+  expect(await page.evaluate(() => window.__tabataAudioContexts)).toBe(0);
+  const savedSets = await readTabataSets(page);
+  expect(savedSets).toHaveLength(1);
+  expect(savedSets[0]).toMatchObject({ status: 'completed', tabataTimer: null });
+  expect(savedSets[0].completedAt).toBeTruthy();
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume workout' }).click();
+  await page.getByRole('button', { name: 'Next exercise', exact: true }).click();
+  await expect(page.getByText('Tabata complete', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View finished timer', exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo latest action', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Complete without timer', exact: true })).toBeVisible();
+  expect((await readTabataSets(page))[0]).toMatchObject({ status: 'pending', tabataTimer: null });
+});
+
+test('PWA advances Tabata intervals while running and paused, then completes the last sprint', async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date('2026-09-07T12:00:00.000Z') });
+  await openTabataFinisher(page);
+  await page.clock.pauseAt(new Date('2026-09-07T12:01:00.000Z'));
+  await page.getByRole('button', { name: 'Start timer', exact: true }).click();
+  const timer = page.getByRole('dialog', { name: 'Tabata timer' });
+  const nextInterval = timer.getByRole('button', { name: 'Next interval', exact: true });
+  await expect(timer).toHaveClass(/tabata-timer-warmup/);
+  await nextInterval.click();
+  await expect(timer).toHaveClass(/tabata-timer-sprint/);
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 1 of 8');
+  await expect(timer.getByRole('timer', { name: 'Sprint time remaining' })).toHaveText('0:20');
+  await page.clock.fastForward(5000);
+  await expect(timer.getByRole('timer', { name: 'Sprint time remaining' })).toHaveText('0:15');
+  await nextInterval.click();
+  await expect(timer).toHaveClass(/tabata-timer-rest/);
+  await expect(timer.getByRole('timer', { name: 'Rest time remaining' })).toHaveText('0:10');
+  await timer.getByRole('button', { name: 'Pause timer', exact: true }).click();
+  await nextInterval.click();
+  await expect(timer).toHaveClass(/tabata-timer-sprint/);
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 2 of 8');
+  await expect(timer.locator('.tabata-timer-direction')).toHaveText('Paused');
+  await page.clock.fastForward(20000);
+  await expect(timer.getByRole('timer', { name: 'Sprint time remaining' })).toHaveText('0:20');
+  await page.screenshot({ path: testInfo.outputPath('tabata-next-interval.png') });
+  expect(await timer.evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
+  expect((await readTabataSets(page))[0]).toMatchObject({
+    status: 'pending', tabataTimer: { elapsedMs: 90000, runningSince: null },
+  });
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume workout' }).click();
+  await page.getByRole('button', { name: 'Resume timer', exact: true }).click();
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 2 of 8');
+  await page.clock.fastForward(180000);
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 8 of 8');
+  await nextInterval.click();
+  await expect(timer).toHaveClass(/tabata-timer-complete/);
+  await expect(nextInterval).toHaveCount(0);
+  await timer.getByRole('button', { name: 'Back to workout', exact: true }).click();
+  await expect(page.getByText('Tabata complete', { exact: true })).toBeVisible();
+  const savedSets = await readTabataSets(page);
+  expect(savedSets).toHaveLength(1);
+  expect(savedSets[0]).toMatchObject({ status: 'completed', tabataTimer: { elapsedMs: 290000, runningSince: null } });
+});
+
 test('PWA coalesces typed drafts and folds an immediate action into one durable write', async ({ page }) => {
   await page.addInitScript(() => {
     window.__routineWrites = 0;

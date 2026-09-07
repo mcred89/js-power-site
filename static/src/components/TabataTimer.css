@@ -2,7 +2,7 @@
 .tabata-timer-card .tabata-timer-card-title { margin:0 0 12px; color:var(--ink); font-size:24px; font-weight:800; }
 .tabata-timer-card p { max-width:440px; margin:12px auto; color:var(--muted); font-size:15px; line-height:1.55; }
 .tabata-timer-card .tabata-timer-sound-help { font-size:13px; }
-.tabata-timer-card .primary-button { margin-top:14px; }
+.tabata-timer-card-actions { display:flex; flex-direction:column; gap:12px; max-width:440px; margin:24px auto 0; }
 .tabata-timer-screen { --tabata-phase:#176436; position:fixed; inset:0; z-index:1000; overflow:auto; color:#fff; background:var(--tabata-phase); padding:max(18px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-right)) max(22px,env(safe-area-inset-bottom)) max(24px,env(safe-area-inset-left)); font-variant-numeric:tabular-nums; }
 .tabata-timer-sprint { --tabata-phase:#ae2029; }
 .tabata-timer-rest { --tabata-phase:#1358a0; }
@@ -24,8 +24,9 @@
 .tabata-timer-screen progress::-webkit-progress-bar { background:rgba(255,255,255,.25); border-radius:8px; }
 .tabata-timer-screen progress::-webkit-progress-value { background:#fff; border-radius:8px; }
 .tabata-timer-screen progress::-moz-progress-bar { background:#fff; border-radius:8px; }
-.tabata-timer-controls { display:flex; justify-content:center; gap:12px; }
+.tabata-timer-controls { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .tabata-timer-controls button { flex:1; min-height:54px; padding:12px 18px; border:1px solid #fff; border-radius:12px; color:var(--tabata-phase); background:#fff; font-size:15px; font-weight:800; cursor:pointer; }
+.tabata-timer-controls .tabata-timer-reset, .tabata-timer-controls button:only-child { grid-column:1 / -1; }
 .tabata-timer-controls .tabata-timer-secondary { color:#fff; background:transparent; }
 .tabata-timer-screen button:focus-visible { outline:3px solid #fff; outline-offset:4px; }
 .tabata-timer-controls button:disabled { opacity:.65; cursor:wait; }
@@ -39,6 +40,6 @@
   .tabata-timer-phase { font-size:22px; }
   .tabata-timer-countdown { font-size:100px; }
   .tabata-timer-direction { min-height:36px; margin-top:8px; font-size:13px; }
-  .tabata-timer-controls { flex-direction:column; gap:8px; }
+  .tabata-timer-controls { grid-template-columns:1fr; gap:8px; }
   .tabata-timer-controls button { min-height:44px; }
 }

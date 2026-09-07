@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createTabataAudio } from '../data/tabataAudio';
 import { getTabataElapsedMs, getTabataTiming } from '../data/tabataTimer';
@@ -27,6 +27,7 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
   const [starting, setStarting] = useState(false);
   const [soundUnavailable, setSoundUnavailable] = useState(false);
   const [recovered, setRecovered] = useState(Boolean(timer?.runningSince) && !completed);
+  const [locallyCompleted, setLocallyCompleted] = useState(false);
   const audioRef = useRef(null);
   const localTimerRef = useRef(localTimer);
   const incomingTimerRef = useRef(timer);
@@ -40,11 +41,12 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
   onTimerChangeRef.current = onTimerChange;
   onCompleteRef.current = onComplete;
 
-  const timing = getTabataTiming(roundCount, completed
+  const setCompleted = completed || locallyCompleted;
+  const timing = getTabataTiming(roundCount, setCompleted
     ? getTabataTiming(roundCount, 0).totalDurationMs
     : getTabataElapsedMs(localTimer, now));
-  const running = Boolean(localTimer?.runningSince) && !completed;
-  const finished = completed || timing.phase === 'complete';
+  const running = Boolean(localTimer?.runningSince) && !setCompleted;
+  const finished = setCompleted || timing.phase === 'complete';
 
   useEffect(() => {
     mountedRef.current = true;
@@ -76,7 +78,17 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
 
   useEffect(() => {
     completedRef.current = completed;
+    setLocallyCompleted(false);
   }, [completed]);
+
+  const finishSet = useCallback(finalState => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    localTimerRef.current = finalState;
+    setLocalTimer(finalState);
+    setLocallyCompleted(true);
+    onCompleteRef.current(finalState);
+  }, []);
 
   useEffect(() => {
     if (!running) return undefined;
@@ -86,14 +98,11 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
 
   useEffect(() => {
     if (!running || timing.phase !== 'complete' || completedRef.current) return;
-    completedRef.current = true;
     const finalState = { elapsedMs: timing.totalDurationMs, runningSince: null };
-    localTimerRef.current = finalState;
-    setLocalTimer(finalState);
     // The final audio cue is already scheduled. Leave it playing while the
     // completed timer stays visible; explicit dismissal still cancels sound.
-    onCompleteRef.current(finalState);
-  }, [running, timing.phase, timing.totalDurationMs]);
+    finishSet(finalState);
+  }, [running, timing.phase, timing.totalDurationMs, finishSet]);
 
   useEffect(() => {
     if (!expanded) return undefined;
@@ -127,7 +136,7 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
   };
 
   const start = async () => {
-    if (starting || localTimerRef.current?.runningSince || completed) return;
+    if (starting || localTimerRef.current?.runningSince || completedRef.current) return;
     const action = ++actionRef.current;
     setStarting(true);
     setExpanded(true);
@@ -158,11 +167,45 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
     saveTimer({ elapsedMs, runningSince: new Date().toISOString() });
   };
 
+  const completeWithoutTimer = () => {
+    actionRef.current += 1;
+    setStarting(false);
+    audioRef.current?.stop();
+    setRecovered(false);
+    setExpanded(false);
+    // Manual completion records the set without inventing a timed duration.
+    finishSet(null);
+  };
+
+  const nextInterval = () => {
+    if (starting || completedRef.current) return;
+    const current = localTimerRef.current;
+    const position = getTabataTiming(roundCount, getTabataElapsedMs(current));
+    const elapsedMs = position.totalElapsedMs + position.phaseRemainingMs;
+    let runningSince = current?.runningSince ? new Date().toISOString() : null;
+    if (runningSince) {
+      try {
+        // Replace all queued buzzers and cue the new phase immediately.
+        audioRef.current.schedule(roundCount, elapsedMs);
+      } catch (error) {
+        audioRef.current.stop();
+        setSoundUnavailable(true);
+        runningSince = null;
+      }
+    }
+    if (elapsedMs === position.totalDurationMs) {
+      finishSet({ elapsedMs, runningSince: null });
+    } else {
+      saveTimer({ elapsedMs, runningSince });
+    }
+  };
+
   const reset = () => {
     actionRef.current += 1;
     setStarting(false);
     audioRef.current?.stop();
     completedRef.current = false;
+    setLocallyCompleted(false);
     setRecovered(false);
     saveTimer(null);
     setExpanded(false);
@@ -194,14 +237,17 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
 
   if (!expanded) return (
     <div className="tabata-timer-card">
-      <p className="tabata-timer-card-title">{completed ? 'Tabata complete' : 'One set. Hands-free sprints.'}</p>
+      <p className="tabata-timer-card-title">{setCompleted ? 'Tabata complete' : 'One set. Hands-free sprints.'}</p>
       <p>1 minute warm-up, then {roundCount} sprints: 20 seconds on, 10 seconds between sprints.</p>
-      {recovered && <p className="tabata-timer-notice" role="status">Timer paused after reopening. Resume to enable the buzzer.</p>}
-      {localTimer && !completed && <p>Paused at {formatTime(Math.floor(timing.totalElapsedMs / 1000) * 1000)} of {formatTime(timing.totalDurationMs)}.</p>}
-      {!completed && <p className="tabata-timer-sound-help">Turn up your media volume. High buzzers mean sprint; low buzzers mean rest.</p>}
-      {completed
-        ? <button className="secondary-button" type="button" onClick={() => setExpanded(true)}>View finished timer</button>
-        : <button className="primary-button" type="button" onClick={start} disabled={starting}>{localTimer ? 'Resume timer' : 'Start timer'}</button>}
+      {recovered && !setCompleted && <p className="tabata-timer-notice" role="status">Timer paused after reopening. Resume to enable the buzzer.</p>}
+      {localTimer && !setCompleted && <p>Paused at {formatTime(Math.floor(timing.totalElapsedMs / 1000) * 1000)} of {formatTime(timing.totalDurationMs)}.</p>}
+      {!setCompleted && <p className="tabata-timer-sound-help">Turn up your media volume. High buzzers mean sprint; low buzzers mean rest.</p>}
+      {setCompleted
+        ? localTimer && <button className="secondary-button" type="button" onClick={() => setExpanded(true)}>View finished timer</button>
+        : <div className="tabata-timer-card-actions">
+          <button className="primary-button" type="button" onClick={start} disabled={starting}>{localTimer ? 'Resume timer' : 'Start timer'}</button>
+          <button className="secondary-button" type="button" onClick={completeWithoutTimer}>Complete without timer</button>
+        </div>}
     </div>
   );
 
@@ -234,11 +280,12 @@ const TabataTimer = ({ roundCount = 8, timer = null, completed = false, onTimerC
         <div className="tabata-timer-footer">
           <div className="tabata-timer-total"><span>Total time</span><strong>{formatTime(Math.floor(timing.totalElapsedMs / 1000) * 1000)} <span>/ {formatTime(timing.totalDurationMs)}</span></strong></div>
           <progress aria-label="Tabata time elapsed" value={timing.totalElapsedMs} max={timing.totalDurationMs} />
-          {soundUnavailable && <p className="tabata-timer-notice" role="status">The buzzer could not start. The timer is paused. Enable sound in your browser and retry.</p>}
+          {soundUnavailable && !finished && <p className="tabata-timer-notice" role="status">The buzzer could not start. The timer is paused. Enable sound in your browser and retry.</p>}
           <div className="tabata-timer-controls">
             {finished ? <button type="button" onClick={close}>Back to workout</button> : <>
               <button type="button" onClick={running ? pause : start} disabled={starting}>{starting ? 'Starting…' : running ? 'Pause timer' : soundUnavailable ? 'Retry sound' : 'Resume timer'}</button>
-              <button className="tabata-timer-secondary" type="button" onClick={reset}>Reset timer</button>
+              <button type="button" onClick={nextInterval} disabled={starting}>Next interval</button>
+              <button className="tabata-timer-secondary tabata-timer-reset" type="button" onClick={reset}>Reset timer</button>
             </>}
           </div>
         </div>
