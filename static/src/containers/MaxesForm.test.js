@@ -64,6 +64,9 @@ it('prefills editable generator settings from a template', () => {
     mainLiftChoice: 'High',
     duration: '3 weeks',
     includeStrongmanDay: true,
+    squatTabataEnabled: true,
+    pressTabataEnabled: false,
+    deadliftTabataEnabled: true,
   }} />));
 
   expect(formRef.current.state).toMatchObject({
@@ -71,10 +74,16 @@ it('prefills editable generator settings from a template', () => {
     mainLiftChoice: 'High',
     duration: '3 weeks',
     includeStrongmanDay: true,
+    squatTabataEnabled: true,
+    pressTabataEnabled: false,
+    deadliftTabataEnabled: true,
   });
   expect(div.querySelector('[name="maxSquat"]').value).toBe('');
   expect(div.querySelector('[name="mainLiftChoice"]:checked').value).toBe('High');
   expect(div.querySelector('[name="duration"]:checked').value).toBe('3 weeks');
   expect(div.querySelector('[name="includeStrongmanDay"]').checked).toBe(true);
+  expect(div.querySelector('[name="squatTabataEnabled"]').checked).toBe(true);
+  expect(div.querySelector('[name="pressTabataEnabled"]').checked).toBe(false);
+  expect(div.querySelector('[name="deadliftTabataEnabled"]').checked).toBe(true);
   act(() => root.unmount());
 });

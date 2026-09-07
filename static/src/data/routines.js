@@ -1,6 +1,8 @@
 import { completedPrimaryEstimate, MAIN_LIFTS } from './estimatedMax';
 import { buildRoutinePlan, MAX_PROGRESSION_MODES } from './routineGeneration';
 import { restoreLegacyEventSlots } from './retiredStrongman';
+import { tabataRoundCount } from './tabata';
+import { getTabataElapsedMs } from './tabataTimer';
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -146,7 +148,10 @@ export const startWorkoutSession = (routine, workoutId, timestamp = now()) => up
     };
     const exercises = workout.exercises.map(exercise => {
       const shown = visibleExercise(exercise);
-      const parsed = parsePrescription(shown.prescription);
+      const roundCount = tabataRoundCount(shown);
+      const parsed = roundCount
+        ? { setCount: 1, plannedReps: '', actualReps: '' }
+        : parsePrescription(shown.prescription);
       const startingWeight = shown.weight === 0 ? previousWeightFor(shown.movement) : shown.weight;
       return {
         exerciseId: exercise.id,
@@ -167,6 +172,7 @@ export const startWorkoutSession = (routine, workoutId, timestamp = now()) => up
           skippedAt: null,
           skipActionId: null,
           splitSeconds: null,
+          ...(roundCount ? { tabataTimer: null } : {}),
         })),
       };
     });
@@ -218,6 +224,15 @@ const hasPendingSets = session => session.exercises.some(exercise => (
   exercise.sets.some(set => set.status === 'pending')
 ));
 
+const freezeTabataTimer = (set, timestamp) => set.tabataTimer?.runningSince ? {
+  ...set,
+  tabataTimer: {
+    ...set.tabataTimer,
+    elapsedMs: getTabataElapsedMs(set.tabataTimer, Date.parse(timestamp)),
+    runningSince: null,
+  },
+} : set;
+
 export const completeSessionSet = (
   routine,
   workoutId,
@@ -231,7 +246,7 @@ export const completeSessionSet = (
     ...exercise,
     sets: exercise.sets.map(set => (
       exercise.exerciseId === exerciseId && set.id === setId && set.status === 'pending'
-        ? { ...set, status: 'completed', completedAt: timestamp, splitSeconds }
+        ? { ...freezeTabataTimer(set, timestamp), status: 'completed', completedAt: timestamp, splitSeconds }
         : set
     )),
   }));
@@ -265,7 +280,7 @@ const skipSets = (routine, workoutId, exerciseId, shouldSkip, timestamp = now())
         ...exercise,
         sets: exercise.sets.map(set => (
           set.status === 'pending' && shouldSkip(set)
-            ? { ...set, status: 'skipped', skippedAt: timestamp, skipActionId }
+            ? { ...freezeTabataTimer(set, timestamp), status: 'skipped', skippedAt: timestamp, skipActionId }
             : set
         )),
       }
@@ -371,6 +386,7 @@ export const undoLatestSessionAction = (routine, workoutId, timestamp = now()) =
             skippedAt: null,
             skipActionId: null,
             splitSeconds: null,
+            ...(Object.prototype.hasOwnProperty.call(set, 'tabataTimer') ? { tabataTimer: null } : {}),
           }
           : set
       )),
@@ -435,7 +451,7 @@ export const finishWorkoutSession = (routine, workoutId, timestamp = now()) => u
         exercises: workout.session.exercises.map(exercise => ({
           ...exercise,
           sets: exercise.sets.map(set => set.status === 'pending'
-            ? { ...set, status: 'skipped', skippedAt: timestamp, skipActionId: null }
+            ? { ...freezeTabataTimer(set, timestamp), status: 'skipped', skippedAt: timestamp, skipActionId: null }
             : set),
         })),
       },

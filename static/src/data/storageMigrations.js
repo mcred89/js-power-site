@@ -1,6 +1,7 @@
 import { retireStrongmanData } from './retiredStrongman';
+import { addTabataTimers } from './tabataSessionMigration';
 
-export const DATABASE_VERSION = 12;
+export const DATABASE_VERSION = 14;
 
 // These shipped steps remain available for installations that skipped releases.
 export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
@@ -69,6 +70,19 @@ export const addAccessoryWeakPoints = routine => ({
     deadliftWeakPoint: routine.inputs.deadliftWeakPoint || '',
   } : routine.inputs,
 });
+
+export const addTabataSprintOptions = record => {
+  if (!record.inputs || typeof record.inputs !== 'object' || Array.isArray(record.inputs)) return record;
+  return {
+    ...record,
+    inputs: {
+      squatTabataEnabled: false,
+      pressTabataEnabled: false,
+      deadliftTabataEnabled: false,
+      ...record.inputs,
+    },
+  };
+};
 
 const effectiveMaxesFor = (inputs, cycleIndex = 0) => ({
   maxSquat: Number(inputs.maxSquat) + (Number(inputs.squatIncrement) || 0) * cycleIndex,
@@ -241,6 +255,14 @@ export const databaseMigrations = {
     };
     readStore(0);
   },
+  13: ({ transaction, done }) => migrateRecordStores(transaction, 13, {
+    routines: addTabataSprintOptions,
+    templates: addTabataSprintOptions,
+  }, done),
+  14: ({ transaction, done }) => migrateRecordStores(transaction, 14, {
+    routines: addTabataTimers,
+    templates: addTabataTimers,
+  }, done),
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {

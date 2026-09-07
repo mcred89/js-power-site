@@ -114,6 +114,15 @@ export const PlanSetup = ({ routine }) => {
           })}
         </dl>
       </div>
+      <div className="setup-section">
+        <h3>Tabata sprints</h3>
+        <p>Always last, after accessories and Strongman work.</p>
+        <dl className="setup-events">
+          {eventLifts.map(([key, label]) => (
+            <div key={key}><dt>{label}</dt><dd>{inputs[`${key}TabataEnabled`] ? '8 rounds · 20 seconds sprint / 10 seconds rest' : 'None'}</dd></div>
+          ))}
+        </dl>
+      </div>
     </details>
   );
 };

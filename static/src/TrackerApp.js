@@ -1,5 +1,6 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActiveWorkoutScreen } from './components/EagerTrackerScreens';
+import { isTabataExercise } from './data/tabata';
 import {
   adjustSessionSet,
   adaptiveStatusForWorkout,
@@ -150,6 +151,16 @@ export const completeWorkoutSetWithDraft = (routine, workoutId, exerciseId, setI
   const adjusted = draft
     ? adjustSessionSet(routine, workoutId, exerciseId, setId, draft)
     : routine;
+  const exercise = adjusted.workouts.find(item => item.id === workoutId)?.session?.exercises
+    .find(item => item.exerciseId === exerciseId);
+  // Older active sessions may retain individual rounds as historical records.
+  // Finishing their timer settles the remaining work in this same durable write.
+  if (draft?.tabataTimer && isTabataExercise(exercise)) {
+    const timestamp = new Date().toISOString();
+    return exercise.sets.filter(set => set.status === 'pending').reduce((result, set) => (
+      completeSessionSet(result, workoutId, exerciseId, set.id, timestamp)
+    ), adjusted);
+  }
   return completeSessionSet(adjusted, workoutId, exerciseId, setId);
 };
 

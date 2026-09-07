@@ -5,6 +5,20 @@ import {
   formatDuration,
 } from './WorkoutSession';
 import { WorkoutSessionHistory, WorkoutSummary } from './WorkoutSessionHistory';
+import { TABATA_PRESCRIPTION } from '../data/tabata';
+
+jest.mock('./TabataTimer', () => {
+  const React = require('react');
+  return function Timer({ roundCount, onTimerChange, onComplete, completed }) {
+    return <div data-testid="tabata-timer">
+      <span>{roundCount} sprints as one set</span>
+      {completed ? <span>Tabata complete</span> : <>
+        <button onClick={() => onTimerChange({ elapsedMs: 0, runningSince: '2026-09-07T12:00:00.000Z' })}>Start timer</button>
+        <button onClick={() => onComplete({ elapsedMs: 290000, runningSince: null })}>Simulate timer completion</button>
+      </>}
+    </div>;
+  };
+});
 
 const workout = {
   name: 'Squat',
@@ -57,6 +71,169 @@ const renderSession = (overrides = {}, value = workout) => {
   };
   return { button, div, edit, props, root };
 };
+
+const workoutWithTabata = (overrides = {}) => ({
+  ...workout,
+  session: {
+    ...workout.session,
+    exercises: [
+      {
+        ...workout.session.exercises[0],
+        sets: workout.session.exercises[0].sets.map(set => ({ ...set, status: 'completed', splitSeconds: 60 })),
+      },
+      {
+        exerciseId: 'tabata',
+        movement: 'Tabata sprints',
+        prescription: TABATA_PRESCRIPTION,
+        plannedWeight: '',
+        sets: Array.from({ length: 8 }, (_, index) => ({
+          id: `round-${index + 1}`,
+          number: index + 1,
+          plannedWeight: '',
+          plannedReps: '',
+          actualWeight: '',
+          actualReps: '',
+          status: 'pending',
+          splitSeconds: null,
+        })),
+        ...overrides,
+      },
+    ],
+  },
+});
+
+it('runs Tabata with one timer and completes the whole set without sprint checkoffs', async () => {
+  const single = workoutWithTabata();
+  single.session.exercises[1].sets = [{ ...single.session.exercises[1].sets[0], tabataTimer: null }];
+  const mounted = renderSession({}, single);
+  await act(async () => {});
+  expect(mounted.div.textContent).toContain('8 sprints as one set');
+  expect(mounted.div.querySelector('[aria-label="Weight (lb)"]')).toBeNull();
+  expect(mounted.div.querySelector('[aria-label="Reps"]')).toBeNull();
+  expect(mounted.div.querySelector('.set-tally')).toBeNull();
+  expect(mounted.div.querySelector('.session-progress').textContent).toBe('2/3 sets');
+  expect(mounted.button('Complete round')).toBeUndefined();
+  expect(mounted.button('Skip this round')).toBeUndefined();
+
+  act(() => mounted.button('Start timer').click());
+  expect(mounted.props.onAdjust).toHaveBeenCalledWith('tabata', 'round-1', {
+    tabataTimer: { elapsedMs: 0, runningSince: '2026-09-07T12:00:00.000Z' },
+  });
+  act(() => mounted.button('Simulate timer completion').click());
+  expect(mounted.props.onCompleteSet).toHaveBeenCalledWith('tabata', 'round-1', {
+    tabataTimer: { elapsedMs: 290000, runningSince: null },
+  });
+  act(() => mounted.root.unmount());
+});
+
+it.each([
+  { prescription: '3 × 10' },
+  { plannedWeight: '20' },
+  { movement: 'Jump rope', prescription: '3 × 50', original: { movement: 'Tabata sprints' } },
+])('retains set controls for customized or substituted sprint work: %j', overrides => {
+  const mounted = renderSession({}, workoutWithTabata(overrides));
+  expect(mounted.div.textContent).toContain('Set 1 of 8');
+  expect(mounted.div.querySelector('[aria-label="Weight (lb)"]')).not.toBeNull();
+  expect(mounted.div.querySelector('[aria-label="Reps"]')).not.toBeNull();
+  expect(mounted.button('Complete set')).toBeDefined();
+  expect(mounted.button('Skip this set')).toBeDefined();
+  act(() => mounted.root.unmount());
+});
+
+it('retains timing controls when a sprint exercise is renamed', async () => {
+  const mounted = renderSession({}, workoutWithTabata({ movement: 'Hill sprints' }));
+  await act(async () => {});
+  expect(mounted.div.querySelector('h1').textContent).toBe('Hill sprints');
+  expect(mounted.div.textContent).toContain('8 sprints as one set');
+  expect(mounted.button('Start timer')).toBeDefined();
+  expect(mounted.div.querySelector('[aria-label="Reps"]')).toBeNull();
+  act(() => mounted.root.unmount());
+});
+
+it('opens the pending legacy sprint after undo even when an earlier record has a completed timer', async () => {
+  const legacy = workoutWithTabata();
+  legacy.session.exercises[1].sets = legacy.session.exercises[1].sets.map((set, index) => ({
+    ...set,
+    status: index === 7 ? 'pending' : 'completed',
+    tabataTimer: index === 7 ? null : { elapsedMs: 290000, runningSince: null },
+  }));
+  const mounted = renderSession({}, legacy);
+  await act(async () => {});
+  expect(mounted.div.textContent).toContain('1 sprints as one set');
+  act(() => mounted.button('Start timer').click());
+  expect(mounted.props.onAdjust.mock.calls[0].slice(0, 2)).toEqual(['tabata', 'round-8']);
+  act(() => mounted.root.unmount());
+});
+
+it('shows Tabata rounds and timing in history without suggesting weight or reps', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const completed = workoutWithTabata();
+  completed.session.exercises[1].sets = completed.session.exercises[1].sets.map((set, index) => ({
+    ...set,
+    status: index === 0 ? 'completed' : 'skipped',
+    splitSeconds: index === 0 ? 90 : null,
+  }));
+  act(() => root.render(<WorkoutSessionHistory workout={completed} />));
+  const history = div.querySelectorAll('.history-exercise')[1];
+  expect(history.textContent).toContain('Round 1');
+  expect(history.textContent).toContain('20 seconds sprint / 10 seconds rest');
+  expect(history.textContent).toContain('Split 1:30 · Interval 0:30');
+  expect(history.textContent).toContain('Round 8Skipped');
+  expect(history.textContent).not.toMatch(/weight|reps| lb/);
+
+  act(() => root.render(<WorkoutSummary workout={completed} onDone={() => {}} />));
+  expect(div.textContent).toContain('Completed sets + rounds3');
+  expect(div.textContent).toContain('Skipped sets + rounds7');
+  expect(div.textContent).toContain('2,000 lb');
+  act(() => root.unmount());
+});
+
+it('shows a completed timer as one set in history and summary', async () => {
+  const completed = workoutWithTabata();
+  completed.session.exercises[1].sets = [{
+    ...completed.session.exercises[1].sets[0], status: 'completed', splitSeconds: 350,
+    tabataTimer: { elapsedMs: 290000, runningSince: null },
+  }];
+  const mounted = renderSession({}, completed);
+  await act(async () => mounted.button('Next exercise').click());
+  expect(mounted.div.textContent).toContain('Tabata complete');
+  act(() => mounted.root.render(<WorkoutSessionHistory workout={completed} />));
+  const history = mounted.div.querySelectorAll('.history-exercise')[1];
+  expect(history.querySelectorAll('.history-set')).toHaveLength(1);
+  expect(history.textContent).toContain('Set 1');
+  expect(history.textContent).toContain('Tabata finisher complete · 4:50');
+  expect(history.textContent).not.toMatch(/Round 1|reps|Open weight/);
+  act(() => mounted.root.render(<WorkoutSummary workout={completed} onDone={() => {}} />));
+  expect(mounted.div.textContent).toContain('Completed sets3');
+  act(() => mounted.root.unmount());
+});
+
+it('retains completed round history when remaining sprint work is substituted', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const completed = workoutWithTabata({
+    movement: 'Jump rope',
+    prescription: '1 × 50',
+    original: { movement: 'Tabata sprints', prescription: TABATA_PRESCRIPTION, plannedWeight: '' },
+    sets: [
+      { id: 'round-1', number: 1, plannedWeight: '', plannedReps: '', actualWeight: '', actualReps: '', status: 'completed', splitSeconds: 90 },
+      { id: 'jump-set', number: 2, plannedWeight: '', plannedReps: '50', actualWeight: '', actualReps: '50', status: 'completed', splitSeconds: 150 },
+    ],
+  });
+  act(() => root.render(<WorkoutSessionHistory workout={completed} />));
+  const rows = div.querySelectorAll('.history-exercise')[1].querySelectorAll('.history-set');
+  expect(rows[0].textContent).toContain('Round 1');
+  expect(rows[0].textContent).toContain('20 seconds sprint / 10 seconds rest');
+  expect(rows[0].textContent).not.toContain('reps');
+  expect(rows[1].textContent).toContain('Set 2');
+  expect(rows[1].textContent).toContain('50 reps');
+  act(() => root.render(<WorkoutSummary workout={completed} onDone={() => {}} />));
+  expect(div.textContent).toContain('Completed sets + rounds4');
+  act(() => root.unmount());
+});
 
 it('does not offer undo for finish-generated skips without an action timestamp', () => {
   const finishedSkip = {

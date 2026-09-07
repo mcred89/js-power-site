@@ -1,7 +1,3 @@
-import {
-  DATABASE_VERSION,
-  runDatabaseMigrations,
-} from './storageMigrations';
 import { serializedRecordsEqual } from './recordComparison';
 
 const DATABASE_NAME = 'mcilroy-method';
@@ -23,7 +19,9 @@ const openDatabase = () => {
   if (!window.indexedDB) {
     return Promise.reject(new Error('IndexedDB is not available in this browser.'));
   }
-  databasePromise = new Promise((resolve, reject) => {
+  // Load upgrade code before opening the database: awaiting a chunk inside
+  // onupgradeneeded would let IndexedDB close its versionchange transaction.
+  databasePromise = import('./storageMigrations').then(({ DATABASE_VERSION, runDatabaseMigrations }) => new Promise((resolve, reject) => {
     const request = window.indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
     request.onupgradeneeded = event => {
       runDatabaseMigrations(request.result, request.transaction, event.oldVersion, event.newVersion);
@@ -39,9 +37,12 @@ const openDatabase = () => {
       resolve(database);
     };
     request.onerror = () => {
-      databasePromise = undefined;
       reject(request.error);
     };
+  })).catch(error => {
+    // Both a failed chunk load and a failed database open may be retried.
+    databasePromise = undefined;
+    throw error;
   });
   return databasePromise;
 };
@@ -175,8 +176,6 @@ export const applyBatch = ({ puts = {}, deletes = {}, conditions = {}, deleteByI
     }
   }));
 };
-
-export { exportBackup, parseBackup } from './storageBackup';
 
 export const requestPersistentStorage = async () => {
   if (!navigator.storage?.persist) return false;

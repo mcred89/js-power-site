@@ -1,4 +1,5 @@
-import { exportBackup, parseBackup } from './storage';
+import { exportBackup, parseBackup } from './storageBackup';
+import { BACKUP_VERSION, DATABASE_VERSION } from './storageMigrations';
 import { IDBFactory } from 'fake-indexeddb';
 
 describe('portable backups', () => {
@@ -11,8 +12,8 @@ describe('portable backups', () => {
       profiles,
       routines,
       templates,
-      version: 12,
-      dataSchemaVersion: 12,
+      version: BACKUP_VERSION,
+      dataSchemaVersion: DATABASE_VERSION,
     });
   });
 
@@ -26,8 +27,8 @@ describe('portable backups', () => {
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
       ...oldBackup,
-      version: 12,
-      dataSchemaVersion: 12,
+      version: BACKUP_VERSION,
+      dataSchemaVersion: DATABASE_VERSION,
       templates: [],
       archives: [],
       routines: [{ ...oldBackup.routines[0], kind: 'strength' }],
@@ -43,7 +44,7 @@ describe('portable backups', () => {
     };
 
     expect(parseBackup(JSON.stringify(oldBackup))).toEqual({
-      ...oldBackup, version: 12, dataSchemaVersion: 12, templates: [], archives: [],
+      ...oldBackup, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION, templates: [], archives: [],
     });
   });
 
@@ -55,7 +56,7 @@ describe('portable backups', () => {
     };
     const migrated = parseBackup(JSON.stringify(oldBackup));
 
-    expect(migrated).toMatchObject({ version: 12, dataSchemaVersion: 12, unknown: 'retained' });
+    expect(migrated).toMatchObject({ version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION, unknown: 'retained' });
     expect(migrated.routines[0].workouts[0].session.exercises[0]).toMatchObject({
       unknown: true, original: null, substitutedAt: null,
       sets: [{ status: 'skipped', skippedAt: null, skipActionId: null }],
@@ -88,7 +89,7 @@ describe('portable backups', () => {
     expect(() => parseBackup('{"profiles":[]}')).toThrow('not a supported');
   });
 
-  it.each([11, 12])('rejects malformed archive data in version %i instead of discarding it', version => {
+  it.each([11, 12, 13, 14])('rejects malformed archive data in version %i instead of discarding it', version => {
     expect(() => parseBackup(JSON.stringify({
       format: 'mcilroy-method-backup', version,
       profiles: [], routines: [], templates: [], archives: { unknown: 'preserve this' },
@@ -98,7 +99,7 @@ describe('portable backups', () => {
   it('keeps existing archives and retires unexpected current-version blocks without overwriting collisions', () => {
     const existing = { id: 'routines:event', store: 'routines', record: { id: 'event', notes: 'Original archive' }, unknown: true };
     const event = { id: 'event', profileId: 'p1', kind: 'strongman', notes: 'Different record', workouts: [] };
-    const source = { format: 'mcilroy-method-backup', version: 12, profiles: [{ id: 'p1' }], routines: [event], templates: [], archives: [existing] };
+    const source = { format: 'mcilroy-method-backup', version: BACKUP_VERSION, profiles: [{ id: 'p1' }], routines: [event], templates: [], archives: [existing] };
     const serialized = JSON.stringify(source);
     const parsed = parseBackup(serialized);
     expect(parsed.routines).toEqual([]);
@@ -130,8 +131,10 @@ describe('IndexedDB connection reuse', () => {
 
     let isolatedStorage;
     jest.isolateModules(() => { isolatedStorage = require('./storage'); });
-    await isolatedStorage.getAll('profiles');
-    await isolatedStorage.getAll('routines');
+    await Promise.all([
+      isolatedStorage.getAll('profiles'),
+      isolatedStorage.getAll('routines'),
+    ]);
 
     expect(open).toHaveBeenCalledTimes(1);
     Object.defineProperty(window, 'indexedDB', { configurable: true, value: originalIndexedDB });

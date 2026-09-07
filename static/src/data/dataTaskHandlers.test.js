@@ -1,6 +1,6 @@
 import { DATA_TASKS, runDataTask, streamCsvChunks } from './dataTaskHandlers';
 import { routineHistoryToCsv, routinePlanToCsv } from './routineCsv';
-import { exportBackup } from './storage';
+import { exportBackup } from './storageBackup';
 import { openTransferPackage } from './transferPackage';
 
 jest.mock('./transferPackage', () => ({

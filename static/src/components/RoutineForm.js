@@ -41,6 +41,9 @@ const defaultFormState = {
   deadliftEventMovement: '',
   deadliftEventSets: '',
   deadliftEventReps: '',
+  squatTabataEnabled: false,
+  pressTabataEnabled: false,
+  deadliftTabataEnabled: false,
   needsToFillOutForm: true,
 };
 
@@ -264,6 +267,23 @@ export class RoutineForm extends Component {
             <legend className="option-title">Strongman events <span className="optional-label">Optional</span></legend>
             <p className="field-help">Add your own event to any main-lift day.</p>
             {eventLifts.map(eventLift => this.renderEventFields(eventLift))}
+          </fieldset>
+          <fieldset className="event-group">
+            <legend className="option-title">Tabata sprints <span className="optional-label">Optional</span></legend>
+            <p className="field-help">Each selected day ends with 8 rounds of 20 seconds sprint / 10 seconds rest, after accessories and Strongman work.</p>
+            {eventLifts.map(({ key, label }) => (
+              <div className="event-option" key={key}>
+                <label className="check-label">
+                  <input
+                    type="checkbox"
+                    name={`${key}TabataEnabled`}
+                    checked={this.state[`${key}TabataEnabled`]}
+                    onChange={this.handleCheckbox}
+                  />
+                  <span>Add Tabata sprints to {label} day</span>
+                </label>
+              </div>
+            ))}
           </fieldset>
           <button type="submit" className="primary-button">Generate plan <span aria-hidden="true">→</span></button>
         </form>

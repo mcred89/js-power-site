@@ -2,11 +2,13 @@ import {
   DATABASE_VERSION, addActiveWorkoutReferences, addEffectiveMaxSnapshots,
   addWorkoutSessions, addSessionActionMetadata, addAccessoryWeakPoints,
   addMaxProgressionMode, addRoutineKind, addTrainingPlanReferences, addEventEvidenceSnapshots,
+  addTabataSprintOptions,
 } from './storageMigrations';
 import { retireStrongmanData } from './retiredStrongman';
+import { addTabataTimers } from './tabataSessionMigration';
 
 // Backup preparation runs in the on-demand data task worker, outside startup.
-export const BACKUP_VERSION = 12;
+export const BACKUP_VERSION = 14;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -86,6 +88,20 @@ export const backupMigrations = {
     templates: Array.isArray(backup.templates) ? backup.templates.map(addEventEvidenceSnapshots) : backup.templates,
   }),
   12: backup => retireStrongmanData({ ...backup, version: 12, dataSchemaVersion: 12 }, { preferScheduled: true }),
+  13: backup => ({
+    ...backup,
+    version: 13,
+    dataSchemaVersion: 13,
+    routines: Array.isArray(backup.routines) ? backup.routines.map(addTabataSprintOptions) : backup.routines,
+    templates: Array.isArray(backup.templates) ? backup.templates.map(addTabataSprintOptions) : backup.templates,
+  }),
+  14: backup => ({
+    ...backup,
+    version: 14,
+    dataSchemaVersion: 14,
+    routines: Array.isArray(backup.routines) ? backup.routines.map(addTabataTimers) : backup.routines,
+    templates: Array.isArray(backup.templates) ? backup.templates.map(addTabataTimers) : backup.templates,
+  }),
 };
 
 export const migrateBackup = original => {

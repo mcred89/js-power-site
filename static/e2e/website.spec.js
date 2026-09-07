@@ -9,10 +9,12 @@ test('normal website generates, edits, exports, and copies a routine', async ({ 
   await selectVolume(page, 'Low');
   await selectWeakPoints(page);
   await page.getByLabel('Include three descending back-off sets').check();
+  await page.getByLabel('Add Tabata sprints to Squat day').check();
   await page.getByRole('button', { name: /Generate plan/ }).click();
 
   await expect(page.getByRole('heading', { name: '5 weeks. 15 sessions.' })).toBeVisible();
   await expect(page.getByText('Squat back-off: 175 lb')).toBeVisible();
+  await expect(page.locator('.day').first().locator('li').last()).toHaveText('Tabata sprints · 8 rounds: 20 seconds sprint / 10 seconds rest');
   const csvDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export CSV' }).click();
   await expect((await csvDownload).suggestedFilename()).toBe('strength-routine.csv');
@@ -21,6 +23,7 @@ test('normal website generates, edits, exports, and copies a routine', async ({ 
 
   await page.getByRole('button', { name: 'Edit your plan' }).click();
   await expect(page.getByLabel('Squat max')).toHaveValue('315');
+  await expect(page.getByLabel('Add Tabata sprints to Squat day')).toBeChecked();
 });
 
 test('normal website supports short high-volume strongman routines', async ({ page }) => {
@@ -34,11 +37,20 @@ test('normal website supports short high-volume strongman routines', async ({ pa
   await page.getByLabel('Movement').fill('Log clean and press');
   await page.getByLabel('Sets').fill('4');
   await page.getByLabel('Reps').fill('3');
+  await page.getByLabel('Add Tabata sprints to Press day').check();
   await page.getByRole('button', { name: /Generate plan/ }).click();
 
   await expect(page.getByRole('heading', { name: '3 weeks. 16 sessions.' })).toBeVisible();
   await expect(page.getByText('Strongman event: Log clean and press')).toHaveCount(5);
   await expect(page.getByText('Strongman day')).toHaveCount(3);
+  const pressDays = page.locator('.day').filter({ has: page.getByRole('heading', { name: /· Press$/ }) });
+  await expect(pressDays).toHaveCount(5);
+  for (const day of await pressDays.all()) {
+    await expect(day.locator('li').last()).toHaveText('Tabata sprints · 8 rounds: 20 seconds sprint / 10 seconds rest');
+    await expect(day.locator('li').nth(-2)).toHaveText('Strongman event: Log clean and press · 4 × 3');
+    await expect(day.locator('li').nth(-3)).toHaveText('Curls · 3 × 5–20');
+  }
+  await expect(page.getByText('Tabata sprints ·', { exact: false })).toHaveCount(5);
 });
 
 test('normal website supports chained mesocycles with increasing maxes', async ({ page }) => {

@@ -1,3 +1,5 @@
+import { TABATA_PRESCRIPTION } from './tabata';
+
 const percentages = {
   Low: [{ percent: .65, reps: '4 × 6' }, { percent: .7, reps: '4 × 5' }, { percent: .75, reps: '4 × 4' }, { percent: .8, reps: '4 × 3' }, { percent: .85, reps: '4 × 2' }],
   High: [{ percent: .55, reps: '5 × 10' }, { percent: .6, reps: '5 × 9' }, { percent: .65, reps: '5 × 8' }, { percent: .7, reps: '5 × 7' }, { percent: .75, reps: '5 × 6' }],
@@ -80,6 +82,12 @@ const getExercises = (day, props) => {
     movement: `Strongman event: ${props[`${day.eventKey}EventMovement`]}`,
     weight: '',
     prescription: `${props[`${day.eventKey}EventSets`]} × ${props[`${day.eventKey}EventReps`]}`,
+  });
+  // Finishers must follow every main lift, back-off set, accessory, and event.
+  if (props[`${day.eventKey}TabataEnabled`]) exercises.push({
+    movement: 'Tabata sprints',
+    weight: '',
+    prescription: TABATA_PRESCRIPTION,
   });
   return exercises;
 };

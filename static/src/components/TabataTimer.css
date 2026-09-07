@@ -1,0 +1,44 @@
+.tabata-timer-card { text-align:center; }
+.tabata-timer-card .tabata-timer-card-title { margin:0 0 12px; color:var(--ink); font-size:24px; font-weight:800; }
+.tabata-timer-card p { max-width:440px; margin:12px auto; color:var(--muted); font-size:15px; line-height:1.55; }
+.tabata-timer-card .tabata-timer-sound-help { font-size:13px; }
+.tabata-timer-card .primary-button { margin-top:14px; }
+.tabata-timer-screen { --tabata-phase:#176436; position:fixed; inset:0; z-index:1000; overflow:auto; color:#fff; background:var(--tabata-phase); padding:max(18px,env(safe-area-inset-top)) max(24px,env(safe-area-inset-right)) max(22px,env(safe-area-inset-bottom)) max(24px,env(safe-area-inset-left)); font-variant-numeric:tabular-nums; }
+.tabata-timer-sprint { --tabata-phase:#ae2029; }
+.tabata-timer-rest { --tabata-phase:#1358a0; }
+.tabata-timer-complete { --tabata-phase:#176436; }
+.tabata-timer-layout { width:min(100%,780px); min-height:calc(100% - 2px); margin:0 auto; display:flex; flex-direction:column; }
+.tabata-timer-header { display:flex; align-items:center; justify-content:space-between; gap:16px; font-size:14px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; }
+.tabata-timer-header button { width:44px; height:44px; border:1px solid rgba(255,255,255,.55); border-radius:50%; color:inherit; background:transparent; font-size:30px; line-height:1; cursor:pointer; }
+.tabata-timer-main { flex:1; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:30px 0; text-align:center; }
+.tabata-timer-round { margin:0 0 18px; font-size:clamp(26px,7vw,42px); font-weight:850; letter-spacing:-.025em; }
+.tabata-timer-round span { opacity:.8; font-weight:600; }
+.tabata-timer-phase { margin:0; font-size:clamp(22px,5.5vw,32px); font-weight:750; text-transform:uppercase; letter-spacing:.1em; }
+.tabata-timer-countdown { margin:5px 0 0; font-size:clamp(88px,25vw,180px); font-weight:850; line-height:1.05; letter-spacing:-.065em; }
+.tabata-timer-direction { min-height:44px; max-width:440px; margin:18px 0 0; font-size:16px; font-weight:600; line-height:1.4; }
+.tabata-timer-footer { padding-top:8px; }
+.tabata-timer-total { display:flex; align-items:baseline; justify-content:space-between; gap:16px; font-size:14px; font-weight:650; }
+.tabata-timer-total strong { font-size:clamp(23px,5vw,30px); font-weight:800; }
+.tabata-timer-total strong span { opacity:.8; font-weight:500; }
+.tabata-timer-screen progress { display:block; width:100%; height:7px; margin:12px 0 22px; overflow:hidden; appearance:none; border:0; border-radius:8px; color:white; background:rgba(255,255,255,.25); }
+.tabata-timer-screen progress::-webkit-progress-bar { background:rgba(255,255,255,.25); border-radius:8px; }
+.tabata-timer-screen progress::-webkit-progress-value { background:#fff; border-radius:8px; }
+.tabata-timer-screen progress::-moz-progress-bar { background:#fff; border-radius:8px; }
+.tabata-timer-controls { display:flex; justify-content:center; gap:12px; }
+.tabata-timer-controls button { flex:1; min-height:54px; padding:12px 18px; border:1px solid #fff; border-radius:12px; color:var(--tabata-phase); background:#fff; font-size:15px; font-weight:800; cursor:pointer; }
+.tabata-timer-controls .tabata-timer-secondary { color:#fff; background:transparent; }
+.tabata-timer-screen button:focus-visible { outline:3px solid #fff; outline-offset:4px; }
+.tabata-timer-controls button:disabled { opacity:.65; cursor:wait; }
+.tabata-timer-notice { border:1px solid currentColor; border-radius:9px; padding:10px 12px; font-size:13px; line-height:1.45; }
+@media (max-height:520px) and (min-width:560px) {
+  .tabata-timer-screen { padding-top:12px; padding-bottom:12px; }
+  .tabata-timer-layout { display:grid; grid-template-columns:1.15fr 1fr; column-gap:32px; align-items:center; }
+  .tabata-timer-header { grid-column:1 / -1; }
+  .tabata-timer-main { padding:8px 0; }
+  .tabata-timer-round { margin-bottom:8px; font-size:25px; }
+  .tabata-timer-phase { font-size:22px; }
+  .tabata-timer-countdown { font-size:100px; }
+  .tabata-timer-direction { min-height:36px; margin-top:8px; font-size:13px; }
+  .tabata-timer-controls { flex-direction:column; gap:8px; }
+  .tabata-timer-controls button { min-height:44px; }
+}

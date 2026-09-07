@@ -2,6 +2,24 @@
 
 The code in this repo deploys a serverless React website into AWS S3.
 
+## Tabata sprint finishers
+
+In **Build your routine**, select Squat, Press, or Deadlift days under **Tabata
+sprints**. Each selected day ends with eight rounds of 20 seconds sprinting and
+10 seconds rest. Tabata can be enabled alongside Strongman events and always
+follows the main lift, back-off sets, accessories, and Strongman work.
+
+The installed tracker treats the whole finisher as one set. **Start timer** runs
+a one-minute warm-up, then the sprints and rests automatically, completing the
+set after the last sprint. Eight sprints take 4:50 including warm-up; there is no
+rest after the final sprint. The timer fills the screen with green for warm-up,
+red for sprinting, and blue for rest, with sprint count, elapsed time, and a
+countdown. Distinct buzzers announce each transition. Keep the app open and set
+your phone's media volume before starting. Pause, resume, and reset are available;
+after a reload, tap Resume to re-enable sound and continue the saved timer.
+Selections and timer progress are included in backups. Existing saved plans keep
+their prescriptions and default to Tabata off.
+
 ## Backups and device transfers
 
 In the installed app, Settings provides **Export backup** and **Restore backup**

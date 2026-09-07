@@ -131,9 +131,12 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   const backup = JSON.parse(Buffer.concat(chunks).toString());
-  expect(backup).toMatchObject({ version: 12, dataSchemaVersion: 12 });
+  expect(backup).toMatchObject({ version: 14, dataSchemaVersion: 14 });
   expect(backup.routines).toHaveLength(1);
-  expect(backup.routines[0].inputs).toEqual(seeded.strength.inputs);
+  expect(backup.routines[0].inputs).toEqual({
+    ...seeded.strength.inputs,
+    squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false,
+  });
   expect(backup.routines[0].workouts[0]).toEqual(seeded.strength.workouts[0]);
   expect(backup.routines[0].workouts[1]).toEqual({
     ...seeded.strength.workouts[1], kind: undefined, eventRef: undefined,
@@ -170,7 +173,108 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
     database.close();
     return result;
   });
-  expect(persisted).toEqual({ version: 12, archives: backup.archives });
+  expect(persisted).toEqual({ version: 14, archives: backup.archives });
+});
+
+test('PWA runs a hands-free Tabata timer after strongman and completes one set', async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date('2026-09-07T12:00:00.000Z') });
+  await page.addInitScript(() => {
+    window.__tabataTones = [];
+    const createOscillator = AudioContext.prototype.createOscillator;
+    AudioContext.prototype.createOscillator = function trackedOscillator() {
+      const oscillator = createOscillator.call(this);
+      const setFrequency = oscillator.frequency.setValueAtTime.bind(oscillator.frequency);
+      oscillator.frequency.setValueAtTime = (frequency, time) => {
+        window.__tabataTones.push({ frequency, time });
+        return setFrequency(frequency, time);
+      };
+      return oscillator;
+    };
+  });
+  await createProfile(page, 'Sprint Athlete');
+  await page.getByRole('button', { name: 'Build a routine' }).click();
+  await page.getByLabel('Routine name').fill('Strength and sprints');
+  await fillMaxes(page);
+  await selectVolume(page, 'Low');
+  await selectWeakPoints(page);
+  await page.getByLabel('Include three descending back-off sets').check();
+  await page.getByLabel('Add a Strongman event to Squat day').check();
+  await page.getByLabel('Movement').fill('Yoke carry');
+  await page.getByLabel('Sets', { exact: true }).fill('3');
+  await page.getByLabel('Reps', { exact: true }).fill('1');
+  await page.getByLabel('Add Tabata sprints to Squat day').check();
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await expect(page.getByText('Routine created on this phone.')).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Open workout' }).click();
+  await expect(page.locator('.exercise-row').last()).toContainText('Tabata sprints');
+  await expect(page.locator('.exercise-row').nth(-2)).toContainText('Strongman event: Yoke carry');
+  await page.getByRole('button', { name: 'Start workout' }).click();
+  for (let index = 0; index < 5; index += 1) {
+    await page.getByRole('button', { name: 'Skip exercise', exact: true }).click();
+  }
+  await expect(page.getByRole('heading', { name: 'Tabata sprints', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Next exercise' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Complete round', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Reps', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Weight (lb)', exact: true })).toHaveCount(0);
+  await page.clock.pauseAt(new Date('2026-09-07T12:01:00.000Z'));
+  await page.getByRole('button', { name: 'Start timer', exact: true }).click();
+  const timer = page.getByRole('dialog', { name: 'Tabata timer' });
+  await expect(timer).toHaveClass(/tabata-timer-warmup/);
+  await expect(timer.getByRole('timer', { name: 'Warm up time remaining' })).toHaveText('1:00');
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 1 of 8');
+  await expect(timer.locator('.tabata-timer-total')).toContainText('0:00 / 4:50');
+  const warmupColor = await timer.evaluate(element => getComputedStyle(element).backgroundColor);
+  await page.clock.fastForward(60000);
+  await expect(timer).toHaveClass(/tabata-timer-sprint/);
+  await expect(timer.getByRole('timer', { name: 'Sprint time remaining' })).toHaveText('0:20');
+  const sprintColor = await timer.evaluate(element => getComputedStyle(element).backgroundColor);
+  await page.screenshot({ path: testInfo.outputPath('tabata-sprint.png') });
+  await page.clock.fastForward(20000);
+  await expect(timer).toHaveClass(/tabata-timer-rest/);
+  await expect(timer.getByRole('timer', { name: 'Rest time remaining' })).toHaveText('0:10');
+  const restColor = await timer.evaluate(element => getComputedStyle(element).backgroundColor);
+  expect(new Set([warmupColor, sprintColor, restColor]).size).toBe(3);
+  await page.screenshot({ path: testInfo.outputPath('tabata-rest.png') });
+  const tones = await page.evaluate(() => window.__tabataTones);
+  expect(tones.filter(tone => tone.frequency === 1050)).toHaveLength(8);
+  expect(tones.filter(tone => tone.frequency === 330)).toHaveLength(7);
+  expect(tones.find(tone => tone.frequency === 330).time - tones.find(tone => tone.frequency === 1050).time).toBeCloseTo(20);
+  await page.clock.fastForward(10000);
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 2 of 8');
+  await page.getByRole('button', { name: 'Pause timer', exact: true }).click();
+  await page.clock.fastForward(20000);
+  await expect(timer.getByRole('timer', { name: 'Sprint time remaining' })).toHaveText('0:20');
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume workout' }).click();
+  await page.getByRole('button', { name: 'Resume timer', exact: true }).click();
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 2 of 8');
+  await page.clock.fastForward(180000);
+  await expect(timer.locator('.tabata-timer-round')).toHaveText('Sprint 8 of 8');
+  await expect(timer.getByRole('timer', { name: 'Sprint time remaining' })).toHaveText('0:20');
+  await page.clock.fastForward(20000);
+  await expect(timer).toHaveClass(/tabata-timer-complete/);
+  await expect(timer.locator('.tabata-timer-total')).toContainText('4:50 / 4:50');
+  await page.getByRole('button', { name: 'Back to workout', exact: true }).click();
+  await expect(page.getByText('Tabata complete', { exact: true })).toBeVisible();
+  const savedSets = await page.evaluate(async () => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mcilroy-method');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const routines = await new Promise((resolve, reject) => {
+      const request = database.transaction('routines').objectStore('routines').getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return routines[0].workouts[0].session.exercises.slice(-1)[0].sets;
+  });
+  expect(savedSets).toHaveLength(1);
+  expect(savedSets[0]).toMatchObject({ status: 'completed', tabataTimer: { elapsedMs: 290000, runningSince: null } });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 test('PWA coalesces typed drafts and folds an immediate action into one durable write', async ({ page }) => {

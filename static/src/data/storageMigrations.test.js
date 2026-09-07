@@ -2,6 +2,7 @@ import {
   addEffectiveMaxSnapshots,
   addMaxProgressionMode,
   addAccessoryWeakPoints,
+  addTabataSprintOptions,
   addSessionActionMetadata,
   addActiveWorkoutReferences,
   addWorkoutSessions,
@@ -11,7 +12,7 @@ import {
   BACKUP_VERSION,
   migrateBackup,
 } from './storageMigrations';
-import { parseBackup, exportBackup } from './storage';
+import { parseBackup, exportBackup } from './storageBackup';
 import { IDBFactory } from 'fake-indexeddb';
 
 // fake-indexeddb follows the browser cloning contract; CRA's Jest runtime predates
@@ -72,6 +73,8 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 10 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 11 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 12 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 13 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 14 } },
     ]);
   });
 
@@ -110,7 +113,7 @@ describe('IndexedDB migrations', () => {
     });
   });
 
-  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])('upgrades a real version %i database in order', async oldVersion => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])('upgrades a real version %i database in order', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `migration-${oldVersion}`;
     await new Promise((resolve, reject) => {
@@ -123,6 +126,10 @@ describe('IndexedDB migrations', () => {
         if (oldVersion >= 5 && !database.objectStoreNames.contains('templates')) database.createObjectStore('templates', { keyPath: 'id' });
         if (oldVersion >= 7) {
           request.transaction.objectStore('routines').createIndex('profileId', 'profileId', { unique: false });
+        }
+        if (oldVersion >= 12) {
+          const archives = database.createObjectStore('archives', { keyPath: 'id' });
+          archives.createIndex('profileId', 'record.profileId', { unique: false });
         }
         request.transaction.objectStore('profiles').put({
           id: 'p1',
@@ -183,10 +190,16 @@ describe('IndexedDB migrations', () => {
     expect(routine.workouts[0].session.exercises[0].sets[0]).toMatchObject({
       skippedAt: null, skipActionId: null,
     });
-    expect(routine.inputs).toMatchObject({ pressWeakPoint: '', deadliftWeakPoint: '' });
+    expect(routine.inputs).toMatchObject({
+      pressWeakPoint: '', deadliftWeakPoint: '',
+      squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false,
+    });
     expect(routine.inputs.maxProgressionMode).toBe('fixed');
     if (oldVersion >= 5) {
-      expect(template.inputs).toMatchObject({ pressWeakPoint: '', deadliftWeakPoint: '', maxProgressionMode: 'fixed' });
+      expect(template.inputs).toMatchObject({
+        pressWeakPoint: '', deadliftWeakPoint: '', maxProgressionMode: 'fixed',
+        squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false,
+      });
     } else {
       expect(template).toBeUndefined();
     }
@@ -208,6 +221,12 @@ describe('IndexedDB migrations', () => {
     expect(transaction.objectStore('routines').indexNames.contains('profileId')).toBe(true);
     const archiveIndex = database.transaction('archives').objectStore('archives').index('profileId');
     expect(archiveIndex.keyPath).toBe('record.profileId');
+    const metadata = await new Promise((resolve, reject) => {
+      const request = database.transaction('metadata').objectStore('metadata').get('dataSchemaVersion');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    expect(metadata).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     database.close();
   });
 
@@ -280,6 +299,108 @@ describe('IndexedDB migrations', () => {
   });
 });
 
+describe('Tabata sprint compatibility', () => {
+  const records = () => ({
+    routine: {
+      id: 'r1', profileId: 'p1', unknown: { preserved: true },
+      inputs: { maxSquat: '400', squatEventEnabled: true, pressTabataEnabled: true, unknown: 'retained' },
+      workouts: [
+        { id: 'completed', completedAt: '2026-09-06', effectiveMaxes: { maxSquat: 400 },
+          exercises: [{ id: 'squat', generated: { movement: 'Squat', weight: '320', prescription: '3x5' }, overrides: {} }],
+          session: { status: 'completed', notes: 'Keep this history', exercises: [] },
+        },
+        { id: 'pending', completedAt: null,
+          exercises: [{ id: 'event', generated: { movement: 'Strongman event: Sandbag', weight: '', prescription: '' }, overrides: { prescription: '3 carries' } }],
+        },
+      ],
+    },
+    template: { id: 't1', inputs: { deadliftEventEnabled: true, deadliftTabataEnabled: false }, unknown: true },
+    archive: { id: 'routines:retired', store: 'routines', record: { id: 'retired', profileId: 'p1', inputs: { unknown: true } } },
+  });
+
+  it('advances the database and backup versions for independent sprint options', () => {
+    expect(DATABASE_VERSION).toBe(14);
+    expect(BACKUP_VERSION).toBe(14);
+  });
+
+  it('adds disabled defaults while preserving explicit options, unknown data, and workout snapshots', () => {
+    const { routine } = records();
+    const before = JSON.stringify(routine);
+    const migrated = addTabataSprintOptions(routine);
+
+    expect(migrated.inputs).toEqual({
+      ...routine.inputs, squatTabataEnabled: false, pressTabataEnabled: true, deadliftTabataEnabled: false,
+    });
+    expect(migrated.workouts).toBe(routine.workouts);
+    expect(migrated.unknown).toBe(routine.unknown);
+    expect(JSON.stringify(routine)).toBe(before);
+    const unknownRecord = { id: 'unknown', custom: { preserved: true } };
+    expect(addTabataSprintOptions(unknownRecord)).toBe(unknownRecord);
+  });
+
+  it('migrates v12 backups purely without altering prescriptions, archives, or unknown records', () => {
+    const { routine, template, archive } = records();
+    const unknownRecord = { id: 'custom', unknown: ['Keep me'] };
+    const original = {
+      format: 'mcilroy-method-backup', version: 12, dataSchemaVersion: 12, unknown: { kept: true },
+      profiles: [{ id: 'p1', activeRoutineId: 'r1' }], routines: [routine, unknownRecord],
+      templates: [template], archives: [archive],
+    };
+    const before = JSON.stringify(original);
+    const migrated = migrateBackup(original);
+
+    expect(migrated).toEqual({
+      ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
+      routines: [addTabataSprintOptions(routine), unknownRecord], templates: [addTabataSprintOptions(template)],
+    });
+    expect(migrated.routines[0].workouts).toBe(routine.workouts);
+    expect(migrated.archives).toBe(original.archives);
+    expect(JSON.stringify(original)).toBe(before);
+    const roundTrip = parseBackup(exportBackup(migrated.profiles, migrated.routines, migrated.templates, migrated.archives));
+    expect(roundTrip.routines).toEqual(migrated.routines);
+    expect(roundTrip.templates).toEqual(migrated.templates);
+    expect(roundTrip.archives).toEqual(migrated.archives);
+  });
+
+  it('upgrades a deployed v12 database without changing completed or pending workout prescriptions', async () => {
+    const indexedDB = new IDBFactory();
+    const { routine, template, archive } = records();
+    await new Promise((resolve, reject) => {
+      const request = indexedDB.open('deployed-before-tabata', 12);
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        ['profiles', 'routines', 'templates', 'archives'].forEach(name => database.createObjectStore(name, { keyPath: 'id' }));
+        database.createObjectStore('metadata', { keyPath: 'key' });
+        request.transaction.objectStore('routines').createIndex('profileId', 'profileId');
+        request.transaction.objectStore('archives').createIndex('profileId', 'record.profileId');
+        request.transaction.objectStore('profiles').put({ id: 'p1', activeRoutineId: 'r1', unknown: true });
+        request.transaction.objectStore('routines').put(routine);
+        request.transaction.objectStore('templates').put(template);
+        request.transaction.objectStore('archives').put(archive);
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => { request.result.close(); resolve(); };
+    });
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('deployed-before-tabata', DATABASE_VERSION);
+      request.onupgradeneeded = event => runDatabaseMigrations(request.result, request.transaction, event.oldVersion, event.newVersion);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+    const read = (store, id) => new Promise((resolve, reject) => {
+      const request = database.transaction(store).objectStore(store).get(id);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    expect(await read('routines', 'r1')).toEqual(addTabataSprintOptions(routine));
+    expect(await read('templates', 't1')).toEqual(addTabataSprintOptions(template));
+    expect(await read('archives', archive.id)).toEqual(archive);
+    expect(await read('profiles', 'p1')).toEqual({ id: 'p1', activeRoutineId: 'r1', unknown: true });
+    expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
+    database.close();
+  });
+});
+
 describe('retired strongman compatibility', () => {
   const records = () => {
     const strength = { id: 'strength', profileId: 'p1', kind: 'strength', updatedAt: '2026-09-01',
@@ -299,10 +420,8 @@ describe('retired strongman compatibility', () => {
     return { strength, event };
   };
 
-  it('keeps shipped migrations and advances the database and backup versions', () => {
-    expect(DATABASE_VERSION).toBe(12);
-    expect(BACKUP_VERSION).toBe(12);
-    expect(Object.keys(databaseMigrations).map(Number)).toEqual(Array.from({ length: 12 }, (_, index) => index + 1));
+  it('keeps every shipped strongman migration', () => {
+    expect(Object.keys(databaseMigrations).map(Number)).toEqual(expect.arrayContaining(Array.from({ length: 12 }, (_, index) => index + 1)));
   });
 
   it('migrates v11 backups purely, preserves retired records, and restores only untouched slots', () => {
@@ -313,7 +432,7 @@ describe('retired strongman compatibility', () => {
     };
     const before = JSON.stringify(original);
     const migrated = migrateBackup(original);
-    expect(migrated).toMatchObject({ version: 12, dataSchemaVersion: 12, unknown: 'preserved' });
+    expect(migrated).toMatchObject({ version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION, unknown: 'preserved' });
     expect(migrated.profiles[0]).toMatchObject({ activeRoutineId: 'strength', activeWorkoutRoutineId: null });
     expect(migrated.routines).toHaveLength(1);
     expect(migrated.templates).toEqual([]);
@@ -384,14 +503,14 @@ describe('retired strongman compatibility', () => {
     const restored = await read('routines', 'strength');
     expect(restored.workouts[1].exercises[0].generated.movement).toBe('Strongman day');
     expect(restored.workouts[2]).toEqual(strength.workouts[2]);
-    expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: 12 });
+    expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     database.close();
   });
 
   it('normalizes current backups without replacing a newly selected routine with a stale scheduling pointer', () => {
     const { strength, event } = records();
     const selected = { ...strength, id: 'selected' };
-    const original = { format: 'mcilroy-method-backup', version: 12, profiles: [{ id: 'p1', activeRoutineId: 'selected', scheduledStrengthRoutineId: 'strength', activeWorkoutRoutineId: 'events' }], routines: [strength, selected, event], templates: [] };
+    const original = { format: 'mcilroy-method-backup', version: BACKUP_VERSION, profiles: [{ id: 'p1', activeRoutineId: 'selected', scheduledStrengthRoutineId: 'strength', activeWorkoutRoutineId: 'events' }], routines: [strength, selected, event], templates: [] };
     expect(parseBackup(JSON.stringify(original)).profiles[0]).toMatchObject({ activeRoutineId: 'selected', activeWorkoutRoutineId: null });
   });
 });

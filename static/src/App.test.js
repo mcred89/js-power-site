@@ -309,6 +309,24 @@ it.each([
     .toEqual(expect.objectContaining({ actualWeight: '225', actualReps: '8', status }));
 });
 
+it('finishes remaining legacy sprint records together while preserving already completed evidence', () => {
+  const previous = { id: 'first', number: 1, status: 'completed', completedAt: '2026-09-01', splitSeconds: 30 };
+  const routine = { workouts: [{ id: 'workout', session: {
+    status: 'inProgress', runningSince: null, elapsedSeconds: 290,
+    exercises: [{
+      exerciseId: 'sprints', movement: 'Tabata sprints', plannedWeight: '',
+      prescription: '8 rounds: 20 seconds sprint / 10 seconds rest',
+      sets: [previous, { id: 'second', number: 2, status: 'pending' }, { id: 'third', number: 3, status: 'pending' }],
+    }],
+  } }] };
+  const timer = { elapsedMs: 110000, runningSince: null };
+  const finished = completeWorkoutSetWithDraft(routine, 'workout', 'sprints', 'second', { tabataTimer: timer });
+  const sets = finished.workouts[0].session.exercises[0].sets;
+  expect(sets[0]).toBe(previous);
+  expect(sets.slice(1).every(set => set.status === 'completed' && set.tabataTimer === timer)).toBe(true);
+  expect(sets[1].completedAt).toBe(sets[2].completedAt);
+});
+
 it('keeps template setup choices but requests new maxes and increases', () => {
   const template = { inputs: {
     maxSquat: '315',
