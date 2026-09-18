@@ -1,5 +1,5 @@
 const { expect, test } = require('./fixtures');
-const { createProfile, createRoutine, fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
+const { checkOptionHighlights, createProfile, createRoutine, fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
 const usesLocalReleaseFixtures = !process.env.SMOKE_BASE_URL;
 
 // Only the intentional failed runtime-image request is expected to reach the
@@ -9,6 +9,16 @@ test.use({ expectedConsoleErrors: [/missing-runtime\.png/] });
 test.beforeEach(async ({ request }) => {
   if (usesLocalReleaseFixtures) await request.get('/__smoke/release/reset');
 });
+
+for (const theme of ['light', 'dark', 'system']) {
+  test(`PWA selections keep the same bright outline after tapping in ${theme} appearance`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.addInitScript(appearance => localStorage.setItem('mcilroy-method-appearance', appearance), theme);
+    await createProfile(page);
+    await page.getByRole('button', { name: 'Build a routine' }).click();
+    await checkOptionHighlights(page, { touch: true });
+  });
+}
 
 test('standalone tracker excludes calculator-only entry requests', async ({ page }) => {
   const scripts = [];

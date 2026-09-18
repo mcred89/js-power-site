@@ -1,5 +1,15 @@
 const { expect, test } = require('./fixtures');
-const { fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
+const { checkOptionHighlights, fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
+
+for (const theme of ['light', 'dark', 'system']) {
+  test(`website selections stay brightly outlined before and after focus in ${theme} appearance`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await page.goto('/');
+    await page.getByLabel('Appearance').selectOption(theme);
+    await expect(page.locator(':root')).toHaveAttribute('data-theme', theme);
+    await checkOptionHighlights(page);
+  });
+}
 
 test('normal website generates, edits, exports, and copies a routine', async ({ page }) => {
   await page.goto('/');

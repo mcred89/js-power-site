@@ -35,4 +35,62 @@ const createRoutine = async (page, options = {}) => {
   await expect(page.getByRole('heading', { name: 'Your next workout' })).toBeVisible();
 };
 
-module.exports = { createProfile, createRoutine, fillMaxes, selectVolume, selectWeakPoints };
+const checkOptionHighlights = async (page, { touch = false } = {}) => {
+  const radio = name => page.getByRole('radio', { name, exact: true });
+  const appearance = input => input.evaluate(element => {
+    const style = getComputedStyle(element.nextElementSibling);
+    return {
+      border: style.borderTopColor,
+      background: style.backgroundColor,
+      color: style.color,
+      shadow: style.boxShadow,
+    };
+  });
+  const select = input => input.locator('..')[touch ? 'tap' : 'click']();
+  const accent = await page.locator(':root').evaluate(element => {
+    const hex = getComputedStyle(element).getPropertyValue('--accent').trim();
+    return `rgb(${hex.slice(1).match(/.{2}/g).map(channel => parseInt(channel, 16)).join(', ')})`;
+  });
+  const defaultChoice = radio('5 weeks');
+  const high = radio('High');
+  const glutes = radio('Glutes');
+  await expect(defaultChoice).toBeChecked();
+  await expect(defaultChoice.locator('..').locator('.option-text')).toHaveCSS('border-top-color', accent);
+  const selectedStyle = await appearance(defaultChoice);
+  const unselectedStyle = await appearance(high);
+  expect(selectedStyle.border).toBe(accent);
+  expect(selectedStyle.shadow).toContain(accent);
+  expect(selectedStyle.shadow).not.toBe(unselectedStyle.shadow);
+
+  await select(high);
+  await expect(high).toBeChecked();
+  await expect(high).toBeFocused();
+  await expect.poll(() => appearance(high)).toEqual(selectedStyle);
+  await select(glutes);
+  await expect(glutes).toBeChecked();
+  await expect(glutes).toBeFocused();
+  await expect(high).not.toBeFocused();
+  await expect.poll(() => appearance(glutes)).toEqual(selectedStyle);
+  await expect.poll(() => appearance(high)).toEqual(selectedStyle);
+  if (touch) {
+    await expect(glutes.locator('..')).toHaveCSS('-webkit-tap-highlight-color', 'rgba(0, 0, 0, 0)');
+  }
+
+  await select(radio('Low'));
+  await expect(high).not.toBeChecked();
+  await expect.poll(() => appearance(high)).toEqual(unselectedStyle);
+  await expect.poll(() => appearance(radio('Low'))).toEqual(selectedStyle);
+  await expect.poll(() => appearance(glutes)).toEqual(selectedStyle);
+
+  if (!touch) {
+    await radio('Low').press('ArrowRight');
+    await expect(high).toBeChecked();
+    await expect(high).toBeFocused();
+    await expect.poll(() => appearance(high)).toEqual(selectedStyle);
+    const keyboardOutline = high.locator('..').locator('.option-text');
+    await expect(keyboardOutline).toHaveCSS('outline-style', 'solid');
+    await expect.poll(() => keyboardOutline.evaluate(element => parseFloat(getComputedStyle(element).outlineWidth))).toBeGreaterThan(0);
+  }
+};
+
+module.exports = { checkOptionHighlights, createProfile, createRoutine, fillMaxes, selectVolume, selectWeakPoints };
