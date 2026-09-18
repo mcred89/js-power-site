@@ -251,26 +251,14 @@ export const updateSessionSetTimer = (routine, workoutId, timer, timestamp = now
   timestamp,
 );
 
-const transitionSetTimer = (session, exerciseId, timestamp) => {
+const transitionSetTimer = (session, exerciseId) => {
   const timer = session.setTimer;
   if (!timer || timer.exerciseId !== exerciseId || session.exercises.some(exercise => (
     exercise.exerciseId === exerciseId && exercise.sets.some(set => set.status === 'pending')
   ))) return session;
-  const exerciseIndex = session.exercises.findIndex(exercise => exercise.exerciseId === exerciseId);
-  const orderedExercises = [...session.exercises.slice(exerciseIndex + 1), ...session.exercises.slice(0, exerciseIndex)];
-  const nextExercise = orderedExercises.find(exercise => exercise.sets.some(set => set.status === 'pending'));
-  if (!nextExercise || isTabataExercise(nextExercise)) return {
-    ...session,
-    setTimer: null,
-  };
   return {
     ...session,
-    setTimer: {
-      ...timer,
-      exerciseId: nextExercise.exerciseId,
-      elapsedMs: getTimerElapsedMs(timer, Date.parse(timestamp)),
-      runningSince: null,
-    },
+    setTimer: null,
   };
 };
 
@@ -300,7 +288,7 @@ export const completeSessionSet = (
         : set
     )),
   }));
-  const session = transitionSetTimer({ ...workout.session, exercises }, exerciseId, timestamp);
+  const session = transitionSetTimer({ ...workout.session, exercises }, exerciseId);
   return {
     ...workout,
     session: hasPendingSets(session) ? session : {
@@ -337,7 +325,7 @@ const skipSets = (routine, workoutId, exerciseId, shouldSkip, timestamp = now())
         )),
       }
     ));
-    const session = transitionSetTimer({ ...workout.session, exercises }, exerciseId, timestamp);
+    const session = transitionSetTimer({ ...workout.session, exercises }, exerciseId);
     return { ...workout, session: stopSessionIfFinished(session, timestamp) };
   },
 );
@@ -408,21 +396,22 @@ export const substituteSessionExercise = (
   };
 });
 
+export const getLatestSessionAction = session => session.exercises.flatMap(exercise => exercise.sets.flatMap(set => {
+  if (set.status === 'completed') return [{
+    type: 'completed', actionId: set.id, occurredAt: set.completedAt, exerciseId: exercise.exerciseId,
+  }];
+  if (set.status === 'skipped' && set.skippedAt) return [{
+    type: 'skipped', actionId: set.skipActionId || set.id, occurredAt: set.skippedAt, exerciseId: exercise.exerciseId,
+  }];
+  return [];
+})).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))[0];
+
 export const undoLatestSessionAction = (routine, workoutId, timestamp = now()) => updateWorkout(
   routine,
   workoutId,
   workout => {
     if (workout.session?.status !== 'inProgress') return workout;
-    const actions = workout.session.exercises.flatMap(exercise => exercise.sets.flatMap(set => {
-      if (set.status === 'completed') return [{
-        type: 'completed', actionId: set.id, occurredAt: set.completedAt, exerciseId: exercise.exerciseId,
-      }];
-      if (set.status === 'skipped' && set.skippedAt) return [{
-        type: 'skipped', actionId: set.skipActionId || set.id, occurredAt: set.skippedAt, exerciseId: exercise.exerciseId,
-      }];
-      return [];
-    })).sort((a, b) => b.occurredAt.localeCompare(a.occurredAt));
-    const latest = actions[0];
+    const latest = getLatestSessionAction(workout.session);
     if (!latest) return workout;
     const exercises = workout.session.exercises.map(exercise => ({
       ...exercise,
@@ -448,9 +437,9 @@ export const undoLatestSessionAction = (routine, workoutId, timestamp = now()) =
       ...workout.session,
       exercises,
       ...(workout.session.setTimer ? {
-        setTimer: isTabataExercise(restoredExercise)
+        setTimer: isTabataExercise(restoredExercise) || workout.session.setTimer.exerciseId !== latest.exerciseId
           ? null
-          : { ...workout.session.setTimer, exerciseId: latest.exerciseId },
+          : workout.session.setTimer,
       } : {}),
     };
     if (workout.session.runningSince) return { ...workout, session };

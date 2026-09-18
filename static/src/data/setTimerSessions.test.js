@@ -66,28 +66,42 @@ describe('set timer workout recording', () => {
     expect(sessionOf(routine)).toMatchObject({ runningSince: at(0), setTimer: { elapsedMs: 5000, runningSince: null } });
   });
 
-  it('automatically pauses between exercises and undo restores the set without rewinding or resuming', () => {
-    let routine = complete(complete(startTimer(makeRoutine()), 0, 0, 25), 0, 1, 40);
-    expect(sessionOf(routine)).toMatchObject({ elapsedSeconds: 0, runningSince: at(0), setTimer: {
-      elapsedMs: 30000, runningSince: null, exerciseId: 'second',
-    } });
+  it.each(['running', 'paused', 'ready'])('stops the %s timer on the last set and undo leaves it off', phase => {
+    let routine = startTimer(makeRoutine());
+    if (phase === 'paused') routine = pauseTimer(routine, 13);
+    routine = complete(complete(routine, 0, 0, 14), 0, 1, phase === 'ready' ? 15 : 40);
+    expect(sessionOf(routine)).toMatchObject({ elapsedSeconds: 0, runningSince: at(0), setTimer: null });
     routine = undoLatestSessionAction(routine, 'workout', at(100));
-    expect(sessionOf(routine)).toMatchObject({ elapsedSeconds: 0, runningSince: at(0), setTimer: {
-      elapsedMs: 30000, runningSince: null, exerciseId: 'squat',
-    } });
+    expect(sessionOf(routine)).toMatchObject({ elapsedSeconds: 0, runningSince: at(0), setTimer: null });
     expect(sessionOf(routine).exercises[0].sets[1].status).toBe('pending');
     routine = substituteSessionExercise(routine, 'workout', 'squat', { movement: 'Front squat', weight: 150, reps: 6, setCount: 1 }, at(120));
     expect(sessionOf(routine).runningSince).toBe(at(0));
-    expect(sessionOf(routine).setTimer.runningSince).toBeNull();
+    expect(sessionOf(routine).setTimer).toBeNull();
   });
 
-  it.each(['set', 'exercise'])('also pauses on skipping the last %s', action => {
+  it.each(['set', 'exercise'])('also stops on skipping the last %s', action => {
     let routine = complete(startTimer(makeRoutine()), 0, 0, 25);
     const exercise = sessionOf(routine).exercises[0];
     routine = action === 'set'
       ? skipSessionSet(routine, 'workout', 'squat', exercise.sets[1].id, at(40))
       : skipRemainingSessionExercise(routine, 'workout', 'squat', at(40));
-    expect(sessionOf(routine)).toMatchObject({ elapsedSeconds: 0, runningSince: at(0), setTimer: { exerciseId: 'second', runningSince: null } });
+    expect(sessionOf(routine)).toMatchObject({ elapsedSeconds: 0, runningSince: at(0), setTimer: null });
+    routine = undoLatestSessionAction(routine, 'workout', at(50));
+    expect(sessionOf(routine).setTimer).toBeNull();
+    expect(sessionOf(routine).exercises[0].sets[1].status).toBe('pending');
+  });
+
+  it('keeps cadence when skipping an earlier set and stops when skipping all remaining sets', () => {
+    let routine = startTimer(makeRoutine());
+    const timer = sessionOf(routine).setTimer;
+    const exercise = sessionOf(routine).exercises[0];
+    routine = skipSessionSet(routine, 'workout', 'squat', exercise.sets[0].id, at(25));
+    expect(sessionOf(routine).setTimer).toEqual(timer);
+    routine = undoLatestSessionAction(routine, 'workout', at(30));
+    expect(sessionOf(routine).setTimer).toEqual(timer);
+    routine = skipRemainingSessionExercise(routine, 'workout', 'squat', at(40));
+    expect(sessionOf(routine)).toMatchObject({ setTimer: null, runningSince: at(0) });
+    expect(sessionOf(routine).exercises[0].sets.map(set => set.status)).toEqual(['skipped', 'skipped']);
   });
 
   it('stops the timer before Tabata while leaving the workout clock untouched', () => {
@@ -112,17 +126,24 @@ describe('set timer workout recording', () => {
     expect(sessionElapsedSeconds(sessionOf(routine), at(90))).toBe(90);
   });
 
-  it('preserves a running timer cadence when undo restores an eligible strength set', () => {
+  it('stops a running timer when undo restores a different strength exercise', () => {
     let routine = complete(makeRoutine(), 1, 0, 25);
     routine = startTimer(routine, 40);
-    const timer = sessionOf(routine).setTimer;
     routine = undoLatestSessionAction(routine, 'workout', at(80));
-    expect(sessionOf(routine).setTimer).toEqual({ ...timer, exerciseId: 'second' });
+    expect(sessionOf(routine)).toMatchObject({ setTimer: null, elapsedSeconds: 0, runningSince: at(0) });
     expect(sessionOf(routine).exercises[1].sets[0].status).toBe('pending');
-    expect(getSetTimerTiming(sessionOf(routine).setTimer, Date.parse(at(80)))).toEqual({ phase: 'interval', remainingMs: 30000 });
   });
 
-  it('advances forward to the next pending exercise before wrapping to earlier unfinished work', () => {
+  it('preserves timer cadence when undo restores a set of the same exercise', () => {
+    let routine = complete(startTimer(makeRoutine()), 0, 0, 25);
+    const timer = sessionOf(routine).setTimer;
+    routine = undoLatestSessionAction(routine, 'workout', at(80));
+    expect(sessionOf(routine).setTimer).toEqual(timer);
+    expect(sessionOf(routine).exercises[0].sets[0].status).toBe('pending');
+    expect(getSetTimerTiming(sessionOf(routine).setTimer, Date.parse(at(80)))).toEqual({ phase: 'interval', remainingMs: 60000 });
+  });
+
+  it('stops rather than transferring to later or earlier unfinished exercises', () => {
     let routine = makeRoutine();
     const second = sessionOf(routine).exercises[1];
     routine.workouts[0].session.exercises.push({ ...second, exerciseId: 'third', sets: second.sets.map(set => ({ ...set, id: 'third-set' })) });
@@ -130,9 +151,12 @@ describe('set timer workout recording', () => {
       intervalMs: 60000, elapsedMs: 0, runningSince: at(10), exerciseId: 'second',
     }, at(10));
     routine = complete(routine, 1, 0, 40);
-    expect(sessionOf(routine).setTimer).toMatchObject({ exerciseId: 'third', runningSince: null, elapsedMs: 30000 });
+    expect(sessionOf(routine).setTimer).toBeNull();
+    routine = updateSessionSetTimer(routine, 'workout', {
+      intervalMs: 30000, elapsedMs: 0, runningSince: at(45), exerciseId: 'third',
+    }, at(45));
     routine = complete(routine, 2, 0, 50);
-    expect(sessionOf(routine).setTimer).toMatchObject({ exerciseId: 'squat', runningSince: null, elapsedMs: 30000 });
+    expect(sessionOf(routine)).toMatchObject({ setTimer: null, runningSince: at(0) });
   });
 
   it('stops without losing progress or changing workout time, and starts fresh on the next run', () => {

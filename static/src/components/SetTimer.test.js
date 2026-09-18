@@ -229,14 +229,17 @@ it('stops cues for externally paused state and closes when the workout clears it
   expect(props.onTimerChange).toHaveBeenCalledTimes(1);
 });
 
-it('pauses when changing exercise while preserving the remaining countdown', async () => {
+it('stops and closes on exercise changes without saving a paused timer during cleanup', async () => {
   render();
   await click('Start timer');
   advance(28000);
   rerender({ exerciseId: 'bench', exerciseName: 'Bench press' });
-  expect(props.onTimerChange).toHaveBeenLastCalledWith(expect.objectContaining({ exerciseId: 'bench', elapsedMs: 28000, runningSince: null }));
-  expect(countdown()).toBe('0:42');
-  expect(button('Resume timer')).toBeDefined();
+  expect(sound.stop).toHaveBeenCalled();
+  expect(props.onClose).toHaveBeenCalledTimes(1);
+  act(() => root.unmount());
+  root = createRoot(container);
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
+  expect(props.onTimerChange).toHaveBeenLastCalledWith(expect.objectContaining({ exerciseId: 'squat' }));
 });
 
 it('freezes a timer whose running state cannot be saved', async () => {

@@ -12,16 +12,19 @@ shows the time remaining in the current interval.
 
 Weight and reps remain editable, including the existing plus/minus controls.
 **Complete set**, **Skip this set**, and **Undo latest action** record changes
-manually without changing the timer's cadence. Weight and rep edits continue
-to apply to later unfinished sets of the same exercise. A timer cue never
-records a set.
+manually without changing the timer's cadence while the exercise continues.
+Weight and rep edits continue to apply to later unfinished sets of the same
+exercise. A timer cue never records a set.
 
 **Pause timer** freezes the interval countdown; **Resume timer** continues from
 the remaining time. The workout clock keeps measuring total workout time,
-including these pauses. Completing or skipping an exercise pauses the interval
-for equipment changes. Entering a Tabata finisher stops the set
-timer so its separate timer can be started normally. **Stop timer** returns to
-the workout with edits and progress intact; starting again uses a fresh
+including these pauses. Completing or skipping the last remaining set stops the
+timer immediately and opens the normal next-exercise screen. Skipping the
+exercise or using the exercise arrows also stops its timer. Undo restores sets
+without restarting a timer that has ended. Start another timer when you want
+one: choose the interval again, prefilled with your last choice, and get a fresh
+10-second preparation countdown. Tabata keeps its own separate timer.
+**Stop timer** returns to the workout with edits and progress intact; starting again uses a fresh
 preparation countdown. Change the interval while paused to restart preparation.
 Switching away or reloading leaves the timer paused until you resume. Keep the
 app open and set your phone's media volume to hear the cues.

@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sessionElapsedSeconds } from '../data/routines';
+import { getLatestSessionAction, sessionElapsedSeconds } from '../data/routines';
 import { isTabataExercise, isTabataRound, tabataRoundCount } from '../data/tabata';
 import { getTimerElapsedMs as getSetTimerElapsedMs } from '../data/elapsedTimer';
 
@@ -284,15 +284,7 @@ export const ActiveWorkoutSession = ({
 
   const changeExercise = index => {
     flushAllDrafts();
-    const target = session.exercises[index];
-    if (session.setTimer) {
-      onSetTimer(isTabataExercise(target) || !pending[index][0] ? null : {
-        ...session.setTimer,
-        elapsedMs: getSetTimerElapsedMs(session.setTimer),
-        runningSince: null,
-        exerciseId: target.exerciseId,
-      });
-    }
+    if (session.setTimer) onSetTimer(null);
     setExerciseIndex(index);
   };
 
@@ -322,7 +314,13 @@ export const ActiveWorkoutSession = ({
     ))}</div>
   </fieldset>;
 
-  const undoButton = <button className="secondary-button" type="button" disabled={!canUndo} onClick={() => { flushAllDrafts(); onUndo(); }}>Undo latest action</button>;
+  const undoButton = <button className="secondary-button" type="button" disabled={!canUndo} onClick={() => {
+    flushAllDrafts();
+    // Undo clears persisted timers itself. Also close local preparation or a
+    // pending Stop when undoing an action from a different exercise.
+    if (timerOpen && !session.setTimer && getLatestSessionAction(session)?.exerciseId !== exercise.exerciseId) setTimerOpen(false);
+    onUndo();
+  }}>Undo latest action</button>;
   const otherActions = <>
     <button className="secondary-button" type="button" disabled={!currentSet} onClick={skipExercise}>Skip exercise</button>
     <button className="secondary-button" type="button" disabled={!currentSet} onClick={() => { flushAllDrafts(); pauseSetTimer(); setSubstituting(true); }}>Substitute</button>

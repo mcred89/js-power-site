@@ -126,6 +126,7 @@ const SetTimer = ({
     return () => {
       mountedRef.current = false;
       actionRef.current += 1;
+      saveRevisionRef.current += 1;
       document.removeEventListener('visibilitychange', hidden);
       window.removeEventListener('pagehide', pageHide);
       document.body.style.overflow = previousOverflow;
@@ -157,23 +158,16 @@ const SetTimer = ({
   }, [timer, updateLocal, closeView]);
 
   useEffect(() => {
-    if (!eligible) {
+    // A timer belongs to the exercise where it was opened. Clear local state
+    // before closing so cleanup cannot save it back as a paused timer.
+    if (!eligible || exerciseRef.current !== exerciseId) {
       actionRef.current += 1;
       saveRevisionRef.current += 1;
       audioRef.current?.stop();
       updateLocal(null);
       closeView();
-      return;
     }
-    if (exerciseRef.current === exerciseId) return;
-    exerciseRef.current = exerciseId;
-    if (!timerRef.current || stoppingRef.current) return;
-    actionRef.current += 1;
-    audioRef.current?.stop();
-    setStarting(false);
-    setNotice('Exercise changed. Resume when you are ready.');
-    save({ ...pauseState(timerRef.current), exerciseId });
-  }, [eligible, exerciseId, save, updateLocal, closeView]);
+  }, [eligible, exerciseId, updateLocal, closeView]);
 
   const running = Boolean(localTimer?.runningSince);
   useEffect(() => {

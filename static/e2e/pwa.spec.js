@@ -205,7 +205,7 @@ const readWorkoutSession = async page => page.evaluate(async () => {
   }
 });
 
-test('PWA repeats an optional set countdown while preserving manual records, pauses, and Tabata handoff', async ({ page }, testInfo) => {
+test('PWA repeats a set countdown within each exercise and starts each new timer independently', async ({ page }, testInfo) => {
   await page.clock.install({ time: new Date('2026-09-18T12:00:00.000Z') });
   await createProfile(page, 'Set Timer Athlete');
   await page.getByRole('button', { name: 'Build a routine' }).click();
@@ -290,18 +290,31 @@ test('PWA repeats an optional set countdown while preserving manual records, pau
   await page.clock.fastForward(10000);
   await timer.getByRole('button', { name: 'Complete set', exact: true }).click();
   await timer.getByRole('button', { name: 'Complete set', exact: true }).click();
-  await expect(timer.getByRole('heading', { name: /Yoke carry/ })).toBeVisible();
-  await expect(timer.getByRole('button', { name: 'Resume timer', exact: true })).toBeVisible();
+  await expect(timer).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /Yoke carry/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start set timer', exact: true })).toBeVisible();
+  expect((await readWorkoutSession(page)).setTimer).toBeNull();
   expect((await readWorkoutSession(page)).runningSince).toBeTruthy();
+  // Reloading an exercise boundary must not restore the finished exercise's timer.
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume workout', exact: true }).click();
+  await expect(timer).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: /Yoke carry/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Start set timer', exact: true }).click();
+  await expect(timer.getByLabel('Interval (minutes)')).toHaveValue('1.5');
+  await timer.getByRole('button', { name: '1 min', exact: true }).click();
+  await timer.getByRole('button', { name: 'Start timer', exact: true }).click();
+  await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
+  await timer.getByRole('button', { name: 'Pause timer', exact: true }).click();
   await timer.getByRole('button', { name: 'Change interval', exact: true }).click();
-  await timer.getByLabel('Interval (minutes)').fill('2.25');
+  await timer.getByLabel('Interval (minutes)').fill('0.75');
   await timer.getByRole('button', { name: 'Save interval', exact: true }).click();
   await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
   await page.clock.fastForward(30000);
   await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
   await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
   await page.clock.fastForward(17000);
-  await expect(countdown).toHaveText('2:08');
+  await expect(countdown).toHaveText('0:38');
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -314,9 +327,9 @@ test('PWA repeats an optional set countdown while preserving manual records, pau
   await page.reload();
   await page.getByRole('button', { name: 'Resume workout', exact: true }).click();
   await expect(timer.getByRole('button', { name: 'Resume timer', exact: true })).toBeVisible();
-  await expect(countdown).toHaveText('2:08');
+  await expect(countdown).toHaveText('0:38');
   await page.clock.fastForward(30000);
-  await expect(countdown).toHaveText('2:08');
+  await expect(countdown).toHaveText('0:38');
   expect((await readWorkoutSession(page)).runningSince).toBeTruthy();
   await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
   await timer.getByText('More workout controls', { exact: true }).click();
