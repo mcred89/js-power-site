@@ -1,9 +1,11 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sessionElapsedSeconds } from '../data/routines';
 import { isTabataExercise, isTabataRound, tabataRoundCount } from '../data/tabata';
+import { getTimerElapsedMs as getSetTimerElapsedMs } from '../data/elapsedTimer';
 
 const SubstituteDialog = lazy(() => import('./WorkoutSubstituteDialog'));
 const TabataTimer = lazy(() => import('./TabataTimer'));
+const SetTimer = lazy(() => import('./SetTimer'));
 
 export const formatDuration = value => {
   const seconds = Math.max(0, Number(value) || 0);
@@ -89,6 +91,8 @@ export const ActiveWorkoutSession = ({
   onSkipSet,
   onSubstitute,
   onUndo,
+  onSetTimer,
+  initialSetTimerIntervalMs = 60000,
 }) => {
   const session = workout.session;
   const [completedCount, totalCount, canUndo, pending, hasRounds] = useMemo(() => {
@@ -119,7 +123,11 @@ export const ActiveWorkoutSession = ({
     });
     return [nextCompleted, nextTotal, nextCanUndo, nextPending, nextHasRounds];
   }, [session]);
-  const [exerciseIndex, setExerciseIndex] = useState(() => Math.max(0, pending.findIndex(item => item[0])));
+  const [exerciseIndex, setExerciseIndex] = useState(() => {
+    const restoredIndex = session.exercises.findIndex(item => item.exerciseId === session.setTimer?.exerciseId);
+    return restoredIndex >= 0 ? restoredIndex : Math.max(0, pending.findIndex(item => item[0]));
+  });
+  const [timerOpen, setTimerOpen] = useState(Boolean(session.setTimer));
   const [substituting, setSubstituting] = useState(false);
   const [drafts, setDrafts] = useState({});
   const draftsRef = useRef({});
@@ -127,6 +135,7 @@ export const ActiveWorkoutSession = ({
   const internalPointerRef = useRef(false);
   const internalPointerTimerRef = useRef();
   const onAdjustRef = useRef(onAdjust);
+  const actionSetRef = useRef(null);
   onAdjustRef.current = onAdjust;
 
   useScreenWakeLock(true);
@@ -141,6 +150,12 @@ export const ActiveWorkoutSession = ({
     ? exercise.sets.filter(set => set.status === 'pending' && isTabataRound(exercise, set)).length
     : tabataRoundCount(exercise) || tabataRoundCount(exercise.original);
   const progressLabel = hasRounds ? 'sets + rounds' : 'sets';
+
+  useEffect(() => { actionSetRef.current = null; }, [currentSet?.id]);
+  useEffect(() => {
+    const restoredIndex = session.exercises.findIndex(item => item.exerciseId === session.setTimer?.exerciseId);
+    if (restoredIndex >= 0) setExerciseIndex(restoredIndex);
+  }, [session.setTimer?.exerciseId, session.exercises]);
 
   const cancelDraftTimer = useCallback(setId => {
     const timer = draftTimersRef.current.get(setId);
@@ -231,48 +246,100 @@ export const ActiveWorkoutSession = ({
     };
   }, [drainAllDrafts, flushAllDrafts]);
 
-  const completeSet = () => {
-    if (!currentSet) return;
-    const hasMoreHere = pending[exerciseIndex][1] > 1;
-    onCompleteSet(exercise.exerciseId, currentSet.id, takeDraft(currentSet.id)?.values);
-    if (!hasMoreHere && exerciseIndex < session.exercises.length - 1) {
-      setExerciseIndex(exerciseIndex + 1);
-    }
+  const advanceExercise = () => {
+    const nextIndex = pending.findIndex((item, index) => index > exerciseIndex && item[0]);
+    const earlierIndex = pending.findIndex((item, index) => index < exerciseIndex && item[0]);
+    if (nextIndex >= 0) setExerciseIndex(nextIndex);
+    else if (earlierIndex >= 0) setExerciseIndex(earlierIndex);
   };
 
-  const skipSet = () => {
-    if (!currentSet) return;
+  const completeSet = event => {
+    if (event.detail > 1 || !currentSet || actionSetRef.current === currentSet.id) return;
+    actionSetRef.current = currentSet.id;
     const hasMoreHere = pending[exerciseIndex][1] > 1;
-    onSkipSet(exercise.exerciseId, currentSet.id, takeDraft(currentSet.id)?.values);
-    if (!hasMoreHere && exerciseIndex < session.exercises.length - 1) setExerciseIndex(exerciseIndex + 1);
+    Promise.resolve(onCompleteSet(exercise.exerciseId, currentSet.id, takeDraft(currentSet.id)?.values))
+      .catch(() => { actionSetRef.current = null; });
+    if (!hasMoreHere) advanceExercise();
+  };
+
+  const skipSet = event => {
+    if (event.detail > 1 || !currentSet || actionSetRef.current === currentSet.id) return;
+    actionSetRef.current = currentSet.id;
+    const hasMoreHere = pending[exerciseIndex][1] > 1;
+    Promise.resolve(onSkipSet(exercise.exerciseId, currentSet.id, takeDraft(currentSet.id)?.values))
+      .catch(() => { actionSetRef.current = null; });
+    if (!hasMoreHere) advanceExercise();
   };
 
   const skipExercise = () => {
     const draft = currentSet ? takeDraft(currentSet.id)?.values : undefined;
     onSkipExercise(exercise.exerciseId, currentSet?.id, draft);
-    if (exerciseIndex < session.exercises.length - 1) setExerciseIndex(exerciseIndex + 1);
+    advanceExercise();
   };
+
+  const pauseSetTimer = () => {
+    if (!session.setTimer?.runningSince) return;
+    onSetTimer({ ...session.setTimer, elapsedMs: getSetTimerElapsedMs(session.setTimer), runningSince: null });
+  };
+
+  const changeExercise = index => {
+    flushAllDrafts();
+    const target = session.exercises[index];
+    if (session.setTimer) {
+      onSetTimer(isTabataExercise(target) || !pending[index][0] ? null : {
+        ...session.setTimer,
+        elapsedMs: getSetTimerElapsedMs(session.setTimer),
+        runningSince: null,
+        exerciseId: target.exerciseId,
+      });
+    }
+    setExerciseIndex(index);
+  };
+
+  const exercisePager = <div className="exercise-pager">
+    <button type="button" aria-label="Previous exercise" disabled={exerciseIndex === 0} onClick={() => changeExercise(exerciseIndex - 1)}>←</button>
+    <div><small>Exercise {exerciseIndex + 1} of {session.exercises.length}</small><h1>{exercise.movement}</h1><p>{exercise.prescription || 'Open work'}</p></div>
+    <button type="button" aria-label="Next exercise" disabled={exerciseIndex === session.exercises.length - 1} onClick={() => changeExercise(exerciseIndex + 1)}>→</button>
+  </div>;
+
+  const setTally = !tabata && <div className="set-tally" aria-label={`${exercise.movement} set tally`}>
+    {exercise.sets.map(set => <span className={set.status} key={set.id}>{set.status === 'completed' ? '✓' : set.status === 'skipped' ? '—' : set.number}</span>)}
+  </div>;
+
+  const currentSetCard = !tabata && (currentSet ? <div className="current-set-card">
+    <p>Set {currentSet.number} of {exercise.sets.length}</p>
+    <Stepper label="Weight (lb)" value={drafts[currentSet.id]?.values.actualWeight ?? currentSet.actualWeight} step={5} onBlur={event => blurDraft(currentSet.id, event)} onChange={value => updateDraft(exercise.exerciseId, currentSet.id, { actualWeight: value })} />
+    <Stepper label="Reps" value={drafts[currentSet.id]?.values.actualReps ?? currentSet.actualReps} step={1} onBlur={event => blurDraft(currentSet.id, event)} onChange={value => updateDraft(exercise.exerciseId, currentSet.id, { actualReps: value })} />
+    <small>Plan: {currentSet.plannedWeight !== '' ? `${currentSet.plannedWeight} lb` : 'open weight'} · {currentSet.plannedReps || 'open reps'}</small>
+    <button className="primary-button complete-set-button" type="button" onClick={completeSet}>Complete set</button>
+    <button className="text-button skip-set-button" type="button" onClick={skipSet}>Skip this set</button>
+  </div> : <div className="exercise-finished"><strong>Exercise complete</strong><span>Use the arrows to review another exercise.</span></div>);
+
+  const rpePicker = exercise.exerciseId === session.primaryExerciseId && <fieldset className="rpe-picker">
+    <legend>Main-lift RPE</legend>
+    <div>{Array.from({ length: 10 }, (_, index) => index + 1).map(value => (
+      <button className={session.rpe === value ? 'selected' : ''} type="button" onClick={() => { flushAllDrafts(); onRpe(value); }} key={value}>{value}</button>
+    ))}</div>
+  </fieldset>;
+
+  const undoButton = <button className="secondary-button" type="button" disabled={!canUndo} onClick={() => { flushAllDrafts(); onUndo(); }}>Undo latest action</button>;
+  const otherActions = <>
+    <button className="secondary-button" type="button" disabled={!currentSet} onClick={skipExercise}>Skip exercise</button>
+    <button className="secondary-button" type="button" disabled={!currentSet} onClick={() => { flushAllDrafts(); pauseSetTimer(); setSubstituting(true); }}>Substitute</button>
+    <button className="primary-button" type="button" onClick={() => { flushAllDrafts(); pauseSetTimer(); onFinish(); }}>Finish workout</button>
+  </>;
 
   return (
     <section className="active-session" aria-label="Workout in progress" onMouseDownCapture={markInternalPointer} onPointerDownCapture={markInternalPointer}>
-      <div className="session-topbar">
+      {!timerOpen && <><div className="session-topbar">
         <button className="text-button" type="button" onClick={() => { flushAllDrafts(); onLeave(); }}>← Leave</button>
         <div className="session-clock"><span>Workout time</span><SessionClock session={session} /></div>
         <span className="session-progress">{completedCount}/{totalCount} {progressLabel}</span>
       </div>
 
       <p className="eyebrow">{workout.weekLabel} · {workout.name}</p>
-      <div className="exercise-pager">
-        <button type="button" aria-label="Previous exercise" disabled={exerciseIndex === 0} onClick={() => { flushAllDrafts(); setExerciseIndex(exerciseIndex - 1); }}>←</button>
-        <div><small>Exercise {exerciseIndex + 1} of {session.exercises.length}</small><h1>{exercise.movement}</h1><p>{exercise.prescription || 'Open work'}</p></div>
-        <button type="button" aria-label="Next exercise" disabled={exerciseIndex === session.exercises.length - 1} onClick={() => { flushAllDrafts(); setExerciseIndex(exerciseIndex + 1); }}>→</button>
-      </div>
-
-      {!tabata && <div className="set-tally" aria-label={`${exercise.movement} set tally`}>
-        {exercise.sets.map(set => (
-          <span className={set.status} key={set.id}>{set.status === 'completed' ? '✓' : set.status === 'skipped' ? '—' : set.number}</span>
-        ))}
-      </div>}
+      {exercisePager}
+      {setTally}
 
       {exercise.original && <p className="substitution-note">Substituted for {exercise.original.movement} in this workout.</p>}
 
@@ -285,32 +352,30 @@ export const ActiveWorkoutSession = ({
           onTimerChange={timer => onAdjust(exercise.exerciseId, timerSet.id, { tabataTimer: timer })}
           onComplete={timer => onCompleteSet(exercise.exerciseId, timerSet.id, { tabataTimer: timer })}
         /></Suspense>
-      ) : currentSet ? (
-        <div className="current-set-card">
-          <p>Set {currentSet.number} of {exercise.sets.length}</p>
-          <Stepper label="Weight (lb)" value={drafts[currentSet.id]?.values.actualWeight ?? currentSet.actualWeight} step={5} onBlur={event => blurDraft(currentSet.id, event)} onChange={value => updateDraft(exercise.exerciseId, currentSet.id, { actualWeight: value })} />
-          <Stepper label="Reps" value={drafts[currentSet.id]?.values.actualReps ?? currentSet.actualReps} step={1} onBlur={event => blurDraft(currentSet.id, event)} onChange={value => updateDraft(exercise.exerciseId, currentSet.id, { actualReps: value })} />
-          <small>Plan: {currentSet.plannedWeight !== '' ? `${currentSet.plannedWeight} lb` : 'open weight'} · {currentSet.plannedReps || 'open reps'}</small>
-          <button className="primary-button complete-set-button" type="button" onClick={completeSet}>Complete set</button>
-          <button className="text-button skip-set-button" type="button" onClick={skipSet}>Skip this set</button>
-        </div>
-      ) : <div className="exercise-finished"><strong>Exercise complete</strong><span>Use the arrows to review another exercise.</span></div>}
-
-      {exercise.exerciseId === session.primaryExerciseId && (
-        <fieldset className="rpe-picker">
-          <legend>Main-lift RPE</legend>
-          <div>{Array.from({ length: 10 }, (_, index) => index + 1).map(value => (
-            <button className={session.rpe === value ? 'selected' : ''} type="button" onClick={() => { flushAllDrafts(); onRpe(value); }} key={value}>{value}</button>
-          ))}</div>
-        </fieldset>
-      )}
-
+      ) : currentSetCard || <div className="exercise-finished"><strong>Exercise complete</strong><span>Use the arrows to review another exercise.</span></div>}
+      {!tabata && currentSet && <button className="secondary-button start-set-timer-button" type="button" onClick={() => { flushAllDrafts(); setTimerOpen(true); }}>Start set timer</button>}
+      {rpePicker}
       <div className="session-footer-actions">
-        <button className="secondary-button" type="button" disabled={!canUndo} onClick={() => { flushAllDrafts(); onUndo(); }}>Undo latest action</button>
-        <button className="secondary-button" type="button" disabled={!currentSet} onClick={skipExercise}>Skip exercise</button>
-        <button className="secondary-button" type="button" disabled={!currentSet} onClick={() => { flushAllDrafts(); setSubstituting(true); }}>Substitute</button>
-        <button className="primary-button" type="button" onClick={() => { flushAllDrafts(); onFinish(); }}>Finish workout</button>
-      </div>
+        {undoButton}{otherActions}
+      </div></>}
+      {timerOpen && <Suspense fallback={<p role="status">Opening timer…</p>}><SetTimer
+        timer={session.setTimer || null}
+        initialIntervalMs={initialSetTimerIntervalMs}
+        exerciseId={exercise.exerciseId}
+        exerciseName={exercise.movement}
+        eligible={!tabata && Boolean(currentSet)}
+        onTimerChange={timer => { flushAllDrafts(); return onSetTimer(timer); }}
+        onClose={() => { flushAllDrafts(); setTimerOpen(false); }}
+      >
+        {setTally}
+        {currentSetCard}
+        {undoButton}
+        <details className="set-timer-more"><summary>More workout controls</summary>
+          {exercisePager}
+          {rpePicker}
+          <div className="session-footer-actions">{otherActions}</div>
+        </details>
+      </SetTimer></Suspense>}
       {substituting && <Suspense fallback={<p role="status">Opening substitute options…</p>}><SubstituteDialog exercise={exercise} onCancel={() => setSubstituting(false)} onConfirm={values => { onSubstitute(exercise.exerciseId, values); setSubstituting(false); }} /></Suspense>}
     </section>
   );

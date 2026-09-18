@@ -2,6 +2,30 @@
 
 The code in this repo deploys a serverless React website into AWS S3.
 
+## Optional workout set timer
+
+During a workout, **Start set timer** opens an optional repeating countdown.
+Choose a preset of 1, 1.5, 2, or 3 minutes, or enter a custom interval. Your
+profile remembers the last choice. A 10-second preparation countdown precedes
+the start cue, then a cue sounds at each interval; the large display always
+shows the time remaining in the current interval.
+
+Weight and reps remain editable, including the existing plus/minus controls.
+**Complete set**, **Skip this set**, and **Undo latest action** record changes
+manually without changing the timer's cadence. Weight and rep edits continue
+to apply to later unfinished sets of the same exercise. A timer cue never
+records a set.
+
+**Pause timer** freezes the interval countdown; **Resume timer** continues from
+the remaining time. The workout clock keeps measuring total workout time,
+including these pauses. Completing or skipping an exercise pauses the interval
+for equipment changes. Entering a Tabata finisher stops the set
+timer so its separate timer can be started normally. **Stop timer** returns to
+the workout with edits and progress intact; starting again uses a fresh
+preparation countdown. Change the interval while paused to restart preparation.
+Switching away or reloading leaves the timer paused until you resume. Keep the
+app open and set your phone's media volume to hear the cues.
+
 ## Tabata sprint finishers
 
 In **Build your routine**, select Squat, Press, or Deadlift days under **Tabata

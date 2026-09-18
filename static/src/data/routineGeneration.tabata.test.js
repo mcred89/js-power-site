@@ -1,4 +1,5 @@
-import { buildRoutinePlan, routineToCsv, routineToMarkdown } from './routineGeneration';
+import { buildRoutinePlan } from './routineGeneration';
+import { routineToCsv, routineToMarkdown } from './routineExports';
 import {
   correctMaxes, createRoutine, createRoutineFromTemplate, setWorkoutComplete,
   updateExercise, visibleExercise,

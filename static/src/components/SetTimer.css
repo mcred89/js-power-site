@@ -1,0 +1,50 @@
+.set-timer-screen { position:fixed; inset:0; z-index:50; overflow:auto; color:#fff; background:#133b50; padding:max(14px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left)); font-variant-numeric:tabular-nums; }
+.set-timer-screen.is-running { background:#124b3b; }
+.set-timer-layout { width:min(100%,680px); margin:0 auto; }
+.set-timer-header { display:flex; align-items:center; justify-content:space-between; gap:12px; font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.08em; }
+.set-timer-header button { min-width:44px; min-height:44px; border:1px solid #ffffff80; border-radius:50%; background:transparent; color:#fff; font-size:28px; }
+.set-timer-exercise { margin:10px 0 6px; text-align:center; font-size:clamp(21px,5.5vw,30px); line-height:1.15; }
+.set-timer-clock { text-align:center; padding:10px 0 16px; }
+.set-timer-clock p { margin:0; font-size:15px; text-transform:uppercase; letter-spacing:.1em; font-weight:750; }
+.set-timer-countdown { font-size:clamp(84px,25vw,148px); line-height:1.05; font-weight:850; letter-spacing:-.05em; }
+.set-timer-clock>span { display:block; margin-top:4px; font-size:14px; }
+.set-timer-controls { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:16px; }
+.set-timer-screen button { cursor:pointer; }
+.set-timer-screen button:disabled { opacity:.55; cursor:default; }
+.set-timer-controls button,.set-timer-setup button { min-height:44px; border:1px solid #ffffffb3; border-radius:10px; padding:10px 12px; color:#fff; background:transparent; font:inherit; font-weight:750; }
+.set-timer-controls .set-timer-primary,.set-timer-setup .set-timer-primary { color:#133b50; background:#fff; }
+.set-timer-controls .set-timer-change { grid-column:1 / -1; min-height:36px; padding:6px; border:0; text-decoration:underline; }
+.set-timer-screen :focus-visible { outline:3px solid #ffc86b; outline-offset:3px; }
+.set-timer-setup { display:flex; flex-direction:column; gap:12px; max-width:480px; margin:30px auto; }
+.set-timer-setup h2 { margin:0; font-size:26px; }
+.set-timer-setup p { margin:0 0 4px; line-height:1.5; }
+.set-timer-presets { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
+.set-timer-presets button { padding:10px 4px; }
+.set-timer-presets button[aria-pressed=true] { background:#fff; color:#133b50; }
+.set-timer-setup label { margin-top:8px; font-weight:750; }
+.set-timer-setup input { width:100%; min-height:48px; box-sizing:border-box; padding:10px 12px; border:1px solid #ffffff80; border-radius:8px; color:#142c3b; background:#fff; font:inherit; font-size:20px; }
+.set-timer-setup small { line-height:1.5; color:#d5e4eb; }
+.set-timer-workout-controls { --ink:#163143; --muted:#526773; --paper:#fff; --accent:#146b47; --accent-soft:#e5f1eb; --line:#cbd6d0; --canvas:#eef3ef; color:var(--ink); color-scheme:light; }
+.set-timer-workout-controls .current-set-card { margin:0 0 10px; padding:16px; border-radius:14px; background:#fff; }
+.set-timer-workout-controls .current-set-card>p { margin:0 0 12px; }
+.set-timer-workout-controls .session-stepper { margin-bottom:12px; }
+.set-timer-workout-controls .session-stepper>div { min-width:0; }
+.set-timer-workout-controls .session-stepper input { min-width:0; }
+.set-timer-workout-controls .current-set-card small { display:block; margin:2px 0 10px; }
+.set-timer-workout-controls .complete-set-button { margin-top:4px; }
+.set-timer-workout-controls .skip-set-button { margin:8px 0 0; }
+.set-timer-workout-controls>.set-tally { margin:0 0 12px; color:#fff; }
+.set-timer-workout-controls>.secondary-button { width:100%; margin:0 0 10px; }
+.set-timer-workout-controls details { padding:14px; border-radius:12px; background:#fff; }
+.set-timer-workout-controls summary { cursor:pointer; font-weight:750; }
+.set-timer-workout-controls .exercise-pager { margin-top:16px; }
+.set-timer-workout-controls .session-footer-actions { margin-top:12px; }
+.set-timer-notice { margin:16px 0 0; padding:10px 12px; border:1px solid #ffffff80; border-radius:9px; line-height:1.45; font-size:13px; }
+@media (min-width:360px) {
+  .set-timer-workout-controls .current-set-card { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 14px; }
+  .set-timer-workout-controls .current-set-card>p,.set-timer-workout-controls .current-set-card>small,.set-timer-workout-controls .current-set-card>button { grid-column:1 / -1; }
+  .set-timer-workout-controls .session-stepper>div { grid-template-columns:44px minmax(0,1fr) 44px; gap:4px; }
+  .set-timer-workout-controls .session-stepper+.session-stepper { margin-top:0; }
+  .set-timer-workout-controls .session-stepper button { min-width:44px; padding:0; }
+  .set-timer-workout-controls .session-stepper input { font-size:20px; }
+}

@@ -19,6 +19,7 @@ import {
   skipSessionSet,
   substituteSessionExercise,
   undoLatestSessionAction,
+  updateSessionSetTimer,
   updateExercise,
   visibleExercise,
 } from './data/routines';
@@ -630,7 +631,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const addProfile = async name => {
-    const item = { id: makeId(), name, activeWorkoutRoutineId: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const item = { id: makeId(), name, activeWorkoutRoutineId: null, setTimerIntervalMs: 60000, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const shouldMakeDefault = profiles.length === 0;
     // The first profile and its default pointer are one logical record. Never publish either
     // in React unless the shared IndexedDB transaction commits both of them.
@@ -762,6 +763,21 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const adjustWorkoutSet = async (exerciseId, setId, values) => {
     await changeSelectedRoutine(current => adjustSessionSet(current, workout.id, exerciseId, setId, values));
+  };
+
+  const changeWorkoutSetTimer = async timer => {
+    const current = routinesRef.current.find(item => item.id === routine.id) || routine;
+    const updated = updateSessionSetTimer(current, workout.id, timer);
+    if (timer && timer.intervalMs !== (profile.setTimerIntervalMs || 60000)) {
+      const updatedProfile = { ...profile, setTimerIntervalMs: timer.intervalMs };
+      await saveRoutine(updated, record => applyBatch({
+        puts: { routines: [record], profiles: [updatedProfile] },
+      }));
+      setProfiles(items => items.map(item => item.id === updatedProfile.id
+        ? { ...item, setTimerIntervalMs: timer.intervalMs } : item));
+    } else {
+      await saveRoutine(updated);
+    }
   };
 
   const completeWorkoutSet = async (exerciseId, setId, draft) => {
@@ -1151,7 +1167,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
           <Suspense fallback={<TrackerScreenFallback label="workout summary" />}><WorkoutSummary workout={workoutSummary} onDone={() => { setWorkoutSummary(null); setView('today'); }} /></Suspense>
         ) : workout?.session?.status === 'inProgress' ? (
           <ActiveWorkoutScreen
+            key={workout.id}
             workout={workout}
+            initialSetTimerIntervalMs={profile.setTimerIntervalMs || 60000}
+            onSetTimer={changeWorkoutSetTimer}
             onAdjust={adjustWorkoutSet}
             onCompleteSet={completeWorkoutSet}
             onFinish={requestFinishWorkout}

@@ -1,8 +1,5 @@
-import {
-  getEffectiveMaxes,
-  routineToCsv,
-  routineToMarkdown,
-} from '../data/routineGeneration';
+import { getEffectiveMaxes } from '../data/routineGeneration';
+import { routineToCsv, routineToMarkdown } from '../data/routineExports';
 
 describe('mesocycle max progression', () => {
   const plan = {

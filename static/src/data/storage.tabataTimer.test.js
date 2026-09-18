@@ -1,5 +1,6 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { addTabataTimers } from './tabataSessionMigration';
+import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { DATABASE_VERSION, runDatabaseMigrations } from './storageMigrations';
 import { BACKUP_VERSION, exportBackup, migrateBackup, parseBackup } from './storageBackup';
 
@@ -129,7 +130,8 @@ it('upgrades v13 backups purely and round-trips persisted timer state and unknow
     ...original,
     version: BACKUP_VERSION,
     dataSchemaVersion: DATABASE_VERSION,
-    routines: [addTabataTimers(routine), unknown],
+    profiles: original.profiles.map(addSetTimerPreference),
+    routines: [addSetTimers(addTabataTimers(routine)), unknown],
   });
   expect(migrated.archives).toBe(original.archives);
   expect(JSON.stringify(original)).toBe(serialized);
@@ -178,9 +180,9 @@ it('upgrades a deployed v13 IndexedDB while retaining mixed history and unrelate
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-  expect(await read('routines', 'r1')).toEqual(addTabataTimers(routine));
-  expect(await read('routines', 'mixed')).toEqual(mixed);
-  expect(await read('profiles', 'p1')).toEqual(profile);
+  expect(await read('routines', 'r1')).toEqual(addSetTimers(addTabataTimers(routine)));
+  expect(await read('routines', 'mixed')).toEqual(addSetTimers(mixed));
+  expect(await read('profiles', 'p1')).toEqual(addSetTimerPreference(profile));
   expect(await read('templates', 't1')).toEqual(template);
   expect(await read('archives', archive.id)).toEqual(archive);
   expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });

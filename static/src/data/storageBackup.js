@@ -6,9 +6,10 @@ import {
 } from './storageMigrations';
 import { retireStrongmanData } from './retiredStrongman';
 import { addTabataTimers } from './tabataSessionMigration';
+import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 
 // Backup preparation runs in the on-demand data task worker, outside startup.
-export const BACKUP_VERSION = 14;
+export const BACKUP_VERSION = 15;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -101,6 +102,14 @@ export const backupMigrations = {
     dataSchemaVersion: 14,
     routines: Array.isArray(backup.routines) ? backup.routines.map(addTabataTimers) : backup.routines,
     templates: Array.isArray(backup.templates) ? backup.templates.map(addTabataTimers) : backup.templates,
+  }),
+  15: backup => ({
+    ...backup,
+    version: 15,
+    dataSchemaVersion: 15,
+    profiles: Array.isArray(backup.profiles) ? backup.profiles.map(addSetTimerPreference) : backup.profiles,
+    routines: Array.isArray(backup.routines) ? backup.routines.map(addSetTimers) : backup.routines,
+    templates: Array.isArray(backup.templates) ? backup.templates.map(addSetTimers) : backup.templates,
   }),
 };
 

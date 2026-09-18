@@ -1,3 +1,5 @@
+export { getTimerElapsedMs as getTabataElapsedMs } from './elapsedTimer';
+
 export const TABATA_WARMUP_MS = 60000;
 export const TABATA_SPRINT_MS = 20000;
 export const TABATA_REST_MS = 10000;
@@ -46,16 +48,4 @@ export const getTabataTiming = (roundCount, elapsedMs = 0) => {
     totalElapsedMs,
     totalDurationMs,
   };
-};
-
-// Store elapsed time only when starting or pausing. Derive the running clock
-// from its timestamp so delayed renders and background throttling cannot drift.
-export const getTabataElapsedMs = (timer, now = Date.now()) => {
-  if (!timer) return 0;
-  const elapsedMs = nonnegativeElapsed(timer.elapsedMs);
-  const runningSince = typeof timer.runningSince === 'string'
-    ? Date.parse(timer.runningSince)
-    : NaN;
-  if (!Number.isFinite(runningSince) || !Number.isFinite(now)) return elapsedMs;
-  return elapsedMs + Math.max(0, now - runningSince);
 };

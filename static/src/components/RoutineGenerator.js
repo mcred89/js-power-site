@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { buildRoutinePlan, routineToCsv, routineToMarkdown } from '../data/routineGeneration';
+import { buildRoutinePlan } from '../data/routineGeneration';
+import { routineToCsv, routineToMarkdown } from '../data/routineExports';
 
 const TrainingDay = ({ day }) => (
   <div className={`day ${day.name === 'Strongman' ? 'strongman-day' : ''}`}>

@@ -131,7 +131,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   const backup = JSON.parse(Buffer.concat(chunks).toString());
-  expect(backup).toMatchObject({ version: 14, dataSchemaVersion: 14 });
+  expect(backup).toMatchObject({ version: 15, dataSchemaVersion: 15 });
   expect(backup.routines).toHaveLength(1);
   expect(backup.routines[0].inputs).toEqual({
     ...seeded.strength.inputs,
@@ -152,6 +152,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
   expect(backup.profiles[0]).toEqual({
     ...seeded.profile, activeRoutineId: seeded.strength.id, activeWorkoutRoutineId: null,
     activeStrongmanRoutineId: undefined, scheduledStrengthRoutineId: undefined,
+    setTimerIntervalMs: 60000,
   });
 
   await page.getByRole('button', { name: 'Today', exact: true }).click();
@@ -173,7 +174,150 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
     database.close();
     return result;
   });
-  expect(persisted).toEqual({ version: 14, archives: backup.archives });
+  expect(persisted).toEqual({ version: 15, archives: backup.archives });
+});
+
+const readWorkoutSession = async page => page.evaluate(async () => {
+  const database = await new Promise((resolve, reject) => {
+    const request = indexedDB.open('mcilroy-method');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try {
+    const routines = await new Promise((resolve, reject) => {
+      const request = database.transaction('routines').objectStore('routines').getAll();
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return routines[0].workouts[0].session;
+  } finally {
+    database.close();
+  }
+});
+
+test('PWA repeats an optional set countdown while preserving manual records, pauses, and Tabata handoff', async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date('2026-09-18T12:00:00.000Z') });
+  await createProfile(page, 'Set Timer Athlete');
+  await page.getByRole('button', { name: 'Build a routine' }).click();
+  await page.getByLabel('Routine name').fill('Timed strength and sprints');
+  await fillMaxes(page);
+  await selectVolume(page, 'Low');
+  await selectWeakPoints(page);
+  await page.getByLabel('Add a Strongman event to Squat day').check();
+  await page.getByLabel('Movement').fill('Yoke carry');
+  await page.getByLabel('Sets', { exact: true }).fill('3');
+  await page.getByLabel('Reps', { exact: true }).fill('1');
+  await page.getByLabel('Add Tabata sprints to Squat day').check();
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await page.getByRole('button', { name: 'Open workout' }).click();
+  await page.getByRole('button', { name: 'Start workout' }).click();
+  const timer = page.getByRole('dialog', { name: 'Set timer', exact: true });
+  await expect(timer).toHaveCount(0);
+  await page.clock.pauseAt(new Date('2026-09-18T12:01:00.000Z'));
+  await page.getByRole('button', { name: 'Start set timer', exact: true }).click();
+  await timer.getByRole('button', { name: '1.5 min', exact: true }).click();
+  await expect(timer.getByLabel('Interval (minutes)')).toHaveValue('1.5');
+  await timer.getByRole('button', { name: 'Start timer', exact: true }).click();
+  await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
+  await page.clock.fastForward(10000);
+  const countdown = timer.getByRole('timer', { name: 'Interval time remaining' });
+  await expect(countdown).toHaveText('1:30');
+  await page.clock.fastForward(20000);
+  await expect(countdown).toHaveText('1:10');
+  await timer.getByRole('textbox', { name: 'Weight (lb)' }).fill('225');
+  await timer.getByRole('textbox', { name: 'Reps', exact: true }).fill('4');
+  await timer.getByRole('button', { name: 'Complete set', exact: true }).dblclick();
+  expect((await readWorkoutSession(page)).exercises[0].sets.filter(set => set.status === 'completed')).toHaveLength(1);
+  await expect(countdown).toHaveText('1:10');
+  await expect(timer.getByRole('textbox', { name: 'Weight (lb)' })).toHaveValue('225');
+  await expect(timer.getByRole('textbox', { name: 'Reps', exact: true })).toHaveValue('4');
+  await timer.getByRole('button', { name: 'Undo latest action', exact: true }).click();
+  await timer.getByRole('button', { name: 'Skip this set', exact: true }).click();
+  await timer.getByRole('button', { name: 'Undo latest action', exact: true }).click();
+  await timer.getByRole('button', { name: 'Complete set', exact: true }).click();
+  await expect(countdown).toHaveText('1:10');
+  await expect(timer.getByText('Workout time', { exact: true })).toHaveCount(0);
+  expect(await countdown.evaluate(element => parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThanOrEqual(64);
+  expect(await timer.evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('workout-set-countdown.png') });
+
+  // A new interval starts without recording another set or changing the displayed values.
+  await page.clock.fastForward(70000);
+  await expect(countdown).toHaveText('1:30');
+  expect((await readWorkoutSession(page)).exercises[0].sets.map(set => set.status)).toEqual([
+    'completed', 'pending', 'pending', 'pending',
+  ]);
+  await timer.getByRole('button', { name: 'Pause timer', exact: true }).click();
+  const pausedSession = await readWorkoutSession(page);
+  expect(pausedSession.runningSince).toBeTruthy();
+  const workoutElapsedAt = (session, timestamp) => session.elapsedSeconds + Math.max(
+    0, Math.floor((timestamp - Date.parse(session.runningSince)) / 1000),
+  );
+  const elapsedAtPause = workoutElapsedAt(pausedSession, await page.evaluate(() => Date.now()));
+  await page.clock.fastForward(60000);
+  await expect(countdown).toHaveText('1:30');
+  expect(workoutElapsedAt(await readWorkoutSession(page), await page.evaluate(() => Date.now()))).toBe(elapsedAtPause + 60);
+  await timer.getByRole('button', { name: 'Increase weight (lb)', exact: true }).click();
+  await timer.getByRole('button', { name: 'Increase reps', exact: true }).click();
+  await timer.getByRole('button', { name: 'Complete set', exact: true }).click();
+  expect((await readWorkoutSession(page)).exercises[0].sets[1]).toMatchObject({
+    actualWeight: '230', actualReps: '5', splitSeconds: elapsedAtPause + 60,
+  });
+  await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
+  await page.clock.fastForward(15000);
+  await expect(countdown).toHaveText('1:15');
+  // An immediate stop also flushes an edit that has not reached its debounce deadline.
+  await timer.getByRole('textbox', { name: 'Weight (lb)' }).fill('240');
+  await timer.getByRole('button', { name: 'Stop timer', exact: true }).click();
+  await expect(timer).toHaveCount(0);
+  await expect(page.getByRole('textbox', { name: 'Weight (lb)' })).toHaveValue('240');
+  expect((await readWorkoutSession(page)).setTimer).toBeNull();
+
+  await page.getByRole('button', { name: 'Start set timer', exact: true }).click();
+  await expect(timer.getByLabel('Interval (minutes)')).toHaveValue('1.5');
+  await timer.getByRole('button', { name: 'Start timer', exact: true }).click();
+  await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
+  await page.clock.fastForward(10000);
+  await timer.getByRole('button', { name: 'Complete set', exact: true }).click();
+  await timer.getByRole('button', { name: 'Complete set', exact: true }).click();
+  await expect(timer.getByRole('heading', { name: /Yoke carry/ })).toBeVisible();
+  await expect(timer.getByRole('button', { name: 'Resume timer', exact: true })).toBeVisible();
+  expect((await readWorkoutSession(page)).runningSince).toBeTruthy();
+  await timer.getByRole('button', { name: 'Change interval', exact: true }).click();
+  await timer.getByLabel('Interval (minutes)').fill('2.25');
+  await timer.getByRole('button', { name: 'Save interval', exact: true }).click();
+  await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
+  await page.clock.fastForward(30000);
+  await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
+  await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
+  await page.clock.fastForward(17000);
+  await expect(countdown).toHaveText('2:08');
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect(timer.getByRole('button', { name: 'Resume timer', exact: true })).toBeVisible();
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume workout', exact: true }).click();
+  await expect(timer.getByRole('button', { name: 'Resume timer', exact: true })).toBeVisible();
+  await expect(countdown).toHaveText('2:08');
+  await page.clock.fastForward(30000);
+  await expect(countdown).toHaveText('2:08');
+  expect((await readWorkoutSession(page)).runningSince).toBeTruthy();
+  await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
+  await timer.getByText('More workout controls', { exact: true }).click();
+  await timer.getByRole('button', { name: 'Skip exercise', exact: true }).click();
+  await expect(timer).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Tabata sprints', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start timer', exact: true })).toBeVisible();
+  const finishedMainWork = await readWorkoutSession(page);
+  expect(finishedMainWork.setTimer).toBeNull();
+  expect(finishedMainWork.exercises[0].sets.map(set => set.status)).toEqual(Array(4).fill('completed'));
+  expect(finishedMainWork.exercises[2].sets[0].status).toBe('pending');
 });
 
 test('PWA runs a hands-free Tabata timer after strongman and completes one set', async ({ page }, testInfo) => {

@@ -32,7 +32,7 @@ describe('portable backups', () => {
       templates: [],
       archives: [],
       routines: [{ ...oldBackup.routines[0], kind: 'strength' }],
-      profiles: [{ id: 'p1', name: 'Alex', activeRoutineId: 'r1', activeWorkoutRoutineId: null }],
+      profiles: [{ id: 'p1', name: 'Alex', activeRoutineId: 'r1', activeWorkoutRoutineId: null, setTimerIntervalMs: 60000 }],
     });
     expect(oldBackup.version).toBe(1);
   });
@@ -75,7 +75,7 @@ describe('portable backups', () => {
 
   it('normalizes dangling current-version active workout references', () => {
     const backup = {
-      format: 'mcilroy-method-backup', version: 7, dataSchemaVersion: 7,
+      format: 'mcilroy-method-backup', version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
       profiles: [{ id: 'p1', activeWorkoutRoutineId: 'missing', unknown: true }],
       routines: [], templates: [],
     };
@@ -89,7 +89,7 @@ describe('portable backups', () => {
     expect(() => parseBackup('{"profiles":[]}')).toThrow('not a supported');
   });
 
-  it.each([11, 12, 13, 14])('rejects malformed archive data in version %i instead of discarding it', version => {
+  it.each([11, 12, 13, 14, 15])('rejects malformed archive data in version %i instead of discarding it', version => {
     expect(() => parseBackup(JSON.stringify({
       format: 'mcilroy-method-backup', version,
       profiles: [], routines: [], templates: [], archives: { unknown: 'preserve this' },

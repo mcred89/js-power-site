@@ -296,6 +296,7 @@ body { min-width:320px; }
 .session-footer-actions .primary-button { margin:0; }
 .session-footer-actions button:disabled { opacity:.45; cursor:default; }
 .skip-set-button { width:100%; margin-top:12px; }
+.start-set-timer-button { width:100%; margin-top:16px; }
 .substitution-note { color:var(--muted); font-size:13px; }
 .substitute-fields { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:18px; }
 .set-tally span.skipped { border-color:var(--line); color:var(--muted); background:var(--canvas); }

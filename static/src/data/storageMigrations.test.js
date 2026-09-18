@@ -75,6 +75,7 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 12 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 13 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 14 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 15 } },
     ]);
   });
 
@@ -113,7 +114,7 @@ describe('IndexedDB migrations', () => {
     });
   });
 
-  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])('upgrades a real version %i database in order', async oldVersion => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])('upgrades a real version %i database in order', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `migration-${oldVersion}`;
     await new Promise((resolve, reject) => {
@@ -138,7 +139,8 @@ describe('IndexedDB migrations', () => {
         });
         request.transaction.objectStore('routines').put({
           id: 'r1', profileId: 'p1', updatedAt: '2026-01-01', inputs: oldVersion >= 8
-            ? { pressWeakPoint: '', deadliftWeakPoint: '', ...(oldVersion >= 9 ? { maxProgressionMode: 'fixed' } : {}) }
+            ? { pressWeakPoint: '', deadliftWeakPoint: '', ...(oldVersion >= 9 ? { maxProgressionMode: 'fixed' } : {}),
+              ...(oldVersion >= 13 ? { squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false } : {}) }
             : {},
           workouts: [{
             id: 'w1',
@@ -152,7 +154,8 @@ describe('IndexedDB migrations', () => {
         if (oldVersion >= 5) {
           request.transaction.objectStore('templates').put({
             id: 't1',
-            inputs: oldVersion >= 8 ? { pressWeakPoint: '', deadliftWeakPoint: '', ...(oldVersion >= 9 ? { maxProgressionMode: 'fixed' } : {}) } : {},
+            inputs: oldVersion >= 8 ? { pressWeakPoint: '', deadliftWeakPoint: '', ...(oldVersion >= 9 ? { maxProgressionMode: 'fixed' } : {}),
+              ...(oldVersion >= 13 ? { squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false } : {}) } : {},
             unknown: true,
           });
         }
@@ -185,7 +188,8 @@ describe('IndexedDB migrations', () => {
       request.onerror = () => reject(request.error);
     });
     expect(tx.objectStore('routines').indexNames.contains('profileId')).toBe(true);
-    expect(profile).toMatchObject({ id: 'p1', unknown: true, activeWorkoutRoutineId: 'r1' });
+    expect(profile).toMatchObject({ id: 'p1', unknown: true, activeWorkoutRoutineId: 'r1', setTimerIntervalMs: 60000 });
+    expect(routine.workouts[0].session.setTimer).toBeNull();
     expect(routine.workouts[0]).toHaveProperty('effectiveMaxes');
     expect(routine.workouts[0].session.exercises[0].sets[0]).toMatchObject({
       skippedAt: null, skipActionId: null,
@@ -319,8 +323,8 @@ describe('Tabata sprint compatibility', () => {
   });
 
   it('advances the database and backup versions for independent sprint options', () => {
-    expect(DATABASE_VERSION).toBe(14);
-    expect(BACKUP_VERSION).toBe(14);
+    expect(DATABASE_VERSION).toBe(15);
+    expect(BACKUP_VERSION).toBe(15);
   });
 
   it('adds disabled defaults while preserving explicit options, unknown data, and workout snapshots', () => {
@@ -351,6 +355,7 @@ describe('Tabata sprint compatibility', () => {
 
     expect(migrated).toEqual({
       ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
+      profiles: original.profiles.map(profile => ({ ...profile, setTimerIntervalMs: 60000 })),
       routines: [addTabataSprintOptions(routine), unknownRecord], templates: [addTabataSprintOptions(template)],
     });
     expect(migrated.routines[0].workouts).toBe(routine.workouts);
@@ -395,7 +400,7 @@ describe('Tabata sprint compatibility', () => {
     expect(await read('routines', 'r1')).toEqual(addTabataSprintOptions(routine));
     expect(await read('templates', 't1')).toEqual(addTabataSprintOptions(template));
     expect(await read('archives', archive.id)).toEqual(archive);
-    expect(await read('profiles', 'p1')).toEqual({ id: 'p1', activeRoutineId: 'r1', unknown: true });
+    expect(await read('profiles', 'p1')).toEqual({ id: 'p1', activeRoutineId: 'r1', unknown: true, setTimerIntervalMs: 60000 });
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     database.close();
   });

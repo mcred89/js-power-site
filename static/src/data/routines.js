@@ -1,8 +1,9 @@
 import { completedPrimaryEstimate, MAIN_LIFTS } from './estimatedMax';
 import { buildRoutinePlan, MAX_PROGRESSION_MODES } from './routineGeneration';
-import { restoreLegacyEventSlots } from './retiredStrongman';
-import { tabataRoundCount } from './tabata';
-import { getTabataElapsedMs } from './tabataTimer';
+import { restoreLegacyEventSlots } from './legacyEventSlots';
+import { isTabataExercise, tabataRoundCount } from './tabata';
+import { getTimerElapsedMs } from './elapsedTimer';
+import { isValidSetTimerInterval } from './setTimerInterval';
 
 const makeId = () => {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
@@ -107,9 +108,9 @@ export const parsePrescription = prescription => {
   };
 };
 
-const updateWorkout = (routine, workoutId, change) => ({
+const updateWorkout = (routine, workoutId, change, timestamp = now()) => ({
   ...routine,
-  updatedAt: now(),
+  updatedAt: timestamp,
   workouts: routine.workouts.map(workout => workout.id === workoutId ? change(workout) : workout),
 });
 
@@ -185,6 +186,7 @@ export const startWorkoutSession = (routine, workoutId, timestamp = now()) => up
         runningSince: timestamp,
         stoppedAt: null,
         elapsedSeconds: 0,
+        setTimer: null,
         primaryExerciseId: exercises[0]?.exerciseId || null,
         rpe: null,
         exercises,
@@ -224,11 +226,59 @@ const hasPendingSets = session => session.exercises.some(exercise => (
   exercise.sets.some(set => set.status === 'pending')
 ));
 
+export const updateSessionSetTimer = (routine, workoutId, timer, timestamp = now()) => updateWorkout(
+  routine,
+  workoutId,
+  workout => {
+    const session = workout.session;
+    if (session?.status !== 'inProgress' || (!timer && !session.setTimer)) return workout;
+    const pending = hasPendingSets(session);
+    if (timer) {
+      const exercise = session.exercises.find(item => item.exerciseId === timer.exerciseId);
+      if (!pending || !exercise?.sets.some(set => set.status === 'pending') || isTabataExercise(exercise) ||
+          !isValidSetTimerInterval(timer.intervalMs) || !Number.isFinite(timer.elapsedMs) || timer.elapsedMs < 0 ||
+          (timer.runningSince !== null && (typeof timer.runningSince !== 'string' ||
+            !Number.isFinite(Date.parse(timer.runningSince))))) return workout;
+    }
+    return {
+      ...workout,
+      session: {
+        ...session,
+        setTimer: timer ? { ...timer } : null,
+      },
+    };
+  },
+  timestamp,
+);
+
+const transitionSetTimer = (session, exerciseId, timestamp) => {
+  const timer = session.setTimer;
+  if (!timer || timer.exerciseId !== exerciseId || session.exercises.some(exercise => (
+    exercise.exerciseId === exerciseId && exercise.sets.some(set => set.status === 'pending')
+  ))) return session;
+  const exerciseIndex = session.exercises.findIndex(exercise => exercise.exerciseId === exerciseId);
+  const orderedExercises = [...session.exercises.slice(exerciseIndex + 1), ...session.exercises.slice(0, exerciseIndex)];
+  const nextExercise = orderedExercises.find(exercise => exercise.sets.some(set => set.status === 'pending'));
+  if (!nextExercise || isTabataExercise(nextExercise)) return {
+    ...session,
+    setTimer: null,
+  };
+  return {
+    ...session,
+    setTimer: {
+      ...timer,
+      exerciseId: nextExercise.exerciseId,
+      elapsedMs: getTimerElapsedMs(timer, Date.parse(timestamp)),
+      runningSince: null,
+    },
+  };
+};
+
 const freezeTabataTimer = (set, timestamp) => set.tabataTimer?.runningSince ? {
   ...set,
   tabataTimer: {
     ...set.tabataTimer,
-    elapsedMs: getTabataElapsedMs(set.tabataTimer, Date.parse(timestamp)),
+    elapsedMs: getTimerElapsedMs(set.tabataTimer, Date.parse(timestamp)),
     runningSince: null,
   },
 } : set;
@@ -250,11 +300,12 @@ export const completeSessionSet = (
         : set
     )),
   }));
-  const session = { ...workout.session, exercises };
+  const session = transitionSetTimer({ ...workout.session, exercises }, exerciseId, timestamp);
   return {
     ...workout,
     session: hasPendingSets(session) ? session : {
       ...session,
+      setTimer: null,
       elapsedSeconds: splitSeconds,
       runningSince: null,
       stoppedAt: timestamp,
@@ -264,6 +315,7 @@ export const completeSessionSet = (
 
 const stopSessionIfFinished = (session, timestamp) => hasPendingSets(session) ? session : {
   ...session,
+  setTimer: null,
   elapsedSeconds: sessionElapsedSeconds(session, timestamp),
   runningSince: null,
   stoppedAt: timestamp,
@@ -285,7 +337,7 @@ const skipSets = (routine, workoutId, exerciseId, shouldSkip, timestamp = now())
         )),
       }
     ));
-    const session = { ...workout.session, exercises };
+    const session = transitionSetTimer({ ...workout.session, exercises }, exerciseId, timestamp);
     return { ...workout, session: stopSessionIfFinished(session, timestamp) };
   },
 );
@@ -391,7 +443,16 @@ export const undoLatestSessionAction = (routine, workoutId, timestamp = now()) =
           : set
       )),
     }));
-    const session = { ...workout.session, exercises };
+    const restoredExercise = exercises.find(exercise => exercise.exerciseId === latest.exerciseId);
+    const session = {
+      ...workout.session,
+      exercises,
+      ...(workout.session.setTimer ? {
+        setTimer: isTabataExercise(restoredExercise)
+          ? null
+          : { ...workout.session.setTimer, exerciseId: latest.exerciseId },
+      } : {}),
+    };
     if (workout.session.runningSince) return { ...workout, session };
     const remainingCompleted = exercises.flatMap(exercise => exercise.sets)
       .filter(set => set.status === 'completed');
@@ -444,6 +505,7 @@ export const finishWorkoutSession = (routine, workoutId, timestamp = now()) => u
       session: {
         ...workout.session,
         status: 'completed',
+        setTimer: null,
         completedAt: timestamp,
         elapsedSeconds,
         runningSince: null,
@@ -472,7 +534,7 @@ export const reopenWorkoutSession = (routine, workoutId, timestamp = now()) => r
         ? { ...set, status: 'pending' }
         : set),
     }));
-    const session = { ...workout.session, status: 'inProgress', completedAt: null, exercises };
+    const session = { ...workout.session, status: 'inProgress', completedAt: null, setTimer: null, exercises };
     const pending = hasPendingSets(session);
     return {
       ...workout,

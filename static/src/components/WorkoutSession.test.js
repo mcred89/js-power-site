@@ -413,6 +413,31 @@ it('flushes a combined weight and reps draft in one completion action', () => {
   jest.useRealTimers();
 });
 
+it('keeps the set timer optional and prevents duplicate taps from recording the same pending set twice', () => {
+  const mounted = renderSession();
+  expect(mounted.button('Start set timer')).toBeDefined();
+  expect(mounted.div.querySelector('[aria-label="Set timer"]')).toBeNull();
+  const complete = mounted.button('Complete set');
+  act(() => { complete.click(); complete.click(); });
+  expect(mounted.props.onCompleteSet).toHaveBeenCalledTimes(1);
+  act(() => mounted.root.unmount());
+});
+
+it('advances past already settled exercises to the next pending exercise', () => {
+  const nextWorkout = {
+    ...workout,
+    session: { ...workout.session, exercises: [
+      workout.session.exercises[0],
+      { exerciseId: 'done', movement: 'Finished rows', sets: [{ id: 'done-set', number: 1, status: 'completed' }] },
+      { exerciseId: 'next', movement: 'Yoke carry', sets: [{ id: 'next-set', number: 1, status: 'pending', actualWeight: 100, actualReps: 1 }] },
+    ] },
+  };
+  const mounted = renderSession({}, nextWorkout);
+  act(() => mounted.button('Complete set').click());
+  expect(mounted.div.querySelector('.exercise-pager h1').textContent).toBe('Yoke carry');
+  act(() => mounted.root.unmount());
+});
+
 it.each([
   ['leave', '← Leave', 'onLeave'],
   ['RPE', '8', 'onRpe'],
