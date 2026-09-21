@@ -137,7 +137,7 @@ it('stops and clears timer state before returning without touching child records
   expect(complete).not.toHaveBeenCalled();
 });
 
-it('pauses while hidden and never resumes automatically when visible again', async () => {
+it('continues counting while hidden without rewriting the running timer', async () => {
   const visibility = jest.spyOn(document, 'visibilityState', 'get');
   visibility.mockReturnValue('visible');
   render();
@@ -145,39 +145,86 @@ it('pauses while hidden and never resumes automatically when visible again', asy
   advance(17000);
   visibility.mockReturnValue('hidden');
   await act(async () => document.dispatchEvent(new Event('visibilitychange')));
-  expect(props.onTimerChange).toHaveBeenLastCalledWith(expect.objectContaining({ elapsedMs: 17000, runningSince: null }));
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
+  expect(sound.stop).not.toHaveBeenCalled();
   advance(100000);
+  expect(countdown()).toBe('0:13');
   visibility.mockReturnValue('visible');
   act(() => document.dispatchEvent(new Event('visibilitychange')));
-  expect(countdown()).toBe('0:53');
+  expect(countdown()).toBe('0:13');
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
   expect(sound.schedule).toHaveBeenCalledTimes(1);
-  expect(button('Resume timer')).toBeDefined();
+  expect(button('Pause timer')).toBeDefined();
   visibility.mockRestore();
 });
 
-it('pauses on pagehide and saves a paused clock on navigation away', async () => {
+it('catches up across missed interval boundaries after background callbacks are suspended', async () => {
+  const visibility = jest.spyOn(document, 'visibilityState', 'get');
+  visibility.mockReturnValue('visible');
+  const complete = jest.fn();
+  render({ children: <button onClick={complete}>Complete set</button> });
+  await click('Start timer');
+  advance(17000);
+  visibility.mockReturnValue('hidden');
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  act(() => jest.setSystemTime(new Date('2026-09-18T12:03:29.000Z')));
+  expect(countdown()).toBe('0:53');
+  visibility.mockReturnValue('visible');
+  act(() => document.dispatchEvent(new Event('visibilitychange')));
+  expect(countdown()).toBe('0:41');
+  expect(button('Pause timer')).toBeDefined();
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
+  expect(complete).not.toHaveBeenCalled();
+  visibility.mockRestore();
+});
+
+it('preserves the running timestamp on pagehide and navigation away', async () => {
   render();
   await click('Start timer');
   advance(4000);
   await act(async () => window.dispatchEvent(new Event('pagehide')));
-  expect(props.onTimerChange).toHaveBeenLastCalledWith(expect.objectContaining({ elapsedMs: 4000, runningSince: null }));
-  await click('Resume timer');
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
+  expect(sound.stop).not.toHaveBeenCalled();
+  expect(button('Pause timer')).toBeDefined();
   advance(1000);
+  expect(countdown()).toBe('0:05');
   act(() => root.unmount());
   root = createRoot(container);
-  expect(props.onTimerChange).toHaveBeenLastCalledWith(expect.objectContaining({ elapsedMs: 5000, runningSince: null }));
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
+  expect(props.onTimerChange).toHaveBeenLastCalledWith(expect.objectContaining({ elapsedMs: 0, runningSince: '2026-09-18T12:00:00.000Z' }));
   expect(sound.close).toHaveBeenCalledTimes(1);
 });
 
-it('reopens a running saved timer paused until a user enables sound', async () => {
-  render({ timer: { intervalMs: 60000, elapsedMs: 0, runningSince: '2026-09-18T11:59:43.000Z', exerciseId: 'squat' } });
-  expect(props.onTimerChange).toHaveBeenCalledWith({ intervalMs: 60000, elapsedMs: 17000, runningSince: null, exerciseId: 'squat' });
+it('reopens a running saved timer and enables sound without resetting or saving the clock', async () => {
+  const timer = { intervalMs: 60000, elapsedMs: 0, runningSince: '2026-09-18T11:59:43.000Z', exerciseId: 'squat' };
+  render({ timer });
+  expect(props.onTimerChange).not.toHaveBeenCalled();
   expect(countdown()).toBe('0:53');
+  expect(button('Pause timer')).toBeDefined();
+  expect(button('Enable sound')).toBeDefined();
   advance(200000);
-  expect(countdown()).toBe('0:53');
+  expect(countdown()).toBe('0:33');
   expect(sound.unlock).not.toHaveBeenCalled();
-  await click('Resume timer');
-  expect(sound.schedule.mock.calls[0][0].elapsedMs).toBe(17000);
+  await click('Enable sound');
+  expect(sound.schedule.mock.calls[0][0]).toEqual(timer);
+  expect(props.onTimerChange).not.toHaveBeenCalled();
+  expect(countdown()).toBe('0:33');
+  expect(button('Enable sound')).toBeUndefined();
+});
+
+it('keeps a restored timer running if enabling sound fails', async () => {
+  sound.unlock.mockRejectedValueOnce(new Error('Blocked'));
+  const timer = { intervalMs: 60000, elapsedMs: 0, runningSince: '2026-09-18T11:59:43.000Z', exerciseId: 'squat' };
+  render({ timer });
+  await click('Enable sound');
+  expect(button('Pause timer')).toBeDefined();
+  expect(button('Enable sound')).toBeDefined();
+  advance(5000);
+  expect(countdown()).toBe('0:48');
+  expect(props.onTimerChange).not.toHaveBeenCalled();
+  await click('Enable sound');
+  expect(sound.schedule.mock.calls[0][0]).toEqual(timer);
+  expect(props.onTimerChange).not.toHaveBeenCalled();
 });
 
 it('stays paused after audio failure and retries from the same countdown', async () => {
@@ -192,13 +239,20 @@ it('stays paused after audio failure and retries from the same countdown', async
   expect(sound.schedule).toHaveBeenCalledTimes(1);
 });
 
-it('pauses if an already running audio clock becomes unavailable', async () => {
+it('keeps time when running audio becomes unavailable and enables sound without resetting it', async () => {
   render();
   await click('Start timer');
   advance(19000);
   await act(async () => sound.schedule.mock.calls[0][1](new Error('Interrupted')));
-  expect(props.onTimerChange).toHaveBeenLastCalledWith(expect.objectContaining({ elapsedMs: 19000, runningSince: null }));
-  expect(button('Retry sound')).toBeDefined();
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
+  expect(button('Pause timer')).toBeDefined();
+  expect(button('Enable sound')).toBeDefined();
+  advance(126000);
+  expect(countdown()).toBe('0:45');
+  await click('Enable sound');
+  expect(sound.schedule.mock.calls[1][0]).toEqual(props.onTimerChange.mock.calls[0][0]);
+  expect(props.onTimerChange).toHaveBeenCalledTimes(1);
+  expect(countdown()).toBe('0:45');
 });
 
 it('cancels late audio startup after Stop and after unmount', async () => {

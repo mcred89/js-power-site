@@ -155,4 +155,83 @@ describe('generated service worker', () => {
     expect(skipWaiting).toHaveBeenCalledTimes(1);
     expect(unrelatedWaitUntil).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])('opens a timer notification in the app, reusing an existing window when available: %s', async hasWindow => {
+    const handlers = {};
+    const focus = jest.fn().mockResolvedValue();
+    const openWindow = jest.fn().mockResolvedValue();
+    const matchAll = jest.fn().mockResolvedValue([
+      { url: 'https://other.test/', focus: jest.fn() },
+      ...(hasWindow ? [{ url: 'https://example.test/?profile=local', focus }] : []),
+    ]);
+    const source = fs.readFileSync(templatePath, 'utf8')
+      .replace('__SHELL_CACHE__', 'mcilroy-shell-current')
+      .replace('__PRECACHE_URLS__', '[]');
+    vm.runInNewContext(source, {
+      Set,
+      URL,
+      self: {
+        location: { origin: 'https://example.test' },
+        clients: { matchAll, openWindow },
+        addEventListener: (name, handler) => { handlers[name] = handler; },
+      },
+    });
+    const close = jest.fn();
+    let clicked;
+    handlers.notificationclick({
+      notification: { tag: 'mcilroy-set-timer', close },
+      waitUntil: promise => { clicked = promise; },
+    });
+    await clicked;
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(matchAll).toHaveBeenCalledWith({ type: 'window', includeUncontrolled: true });
+    expect(focus).toHaveBeenCalledTimes(hasWindow ? 1 : 0);
+    if (hasWindow) expect(openWindow).not.toHaveBeenCalled();
+    else expect(openWindow).toHaveBeenCalledWith('/');
+
+    const unrelated = { notification: { tag: 'unrelated', close: jest.fn() }, waitUntil: jest.fn() };
+    handlers.notificationclick(unrelated);
+    expect(unrelated.notification.close).not.toHaveBeenCalled();
+    expect(unrelated.waitUntil).not.toHaveBeenCalled();
+  });
+
+  it('identifies a timer’s browser client and removes snapshots abandoned by reload without clearing another live tab', async () => {
+    const handlers = {};
+    const stale = { data: { type: 'set-timer', clientId: 'before-reload' }, close: jest.fn() };
+    const live = { data: { type: 'set-timer', clientId: 'other-tab' }, close: jest.fn() };
+    const unrelated = { data: { type: 'other' }, close: jest.fn() };
+    const getNotifications = jest.fn().mockResolvedValue([stale, live, unrelated]);
+    const source = fs.readFileSync(templatePath, 'utf8')
+      .replace('__SHELL_CACHE__', 'mcilroy-shell-current')
+      .replace('__PRECACHE_URLS__', '[]');
+    vm.runInNewContext(source, {
+      Set,
+      URL,
+      self: {
+        location: { origin: 'https://example.test' },
+        clients: { matchAll: jest.fn().mockResolvedValue([{ id: 'after-reload' }, { id: 'other-tab' }]) },
+        registration: { getNotifications },
+        addEventListener: (name, handler) => { handlers[name] = handler; },
+      },
+    });
+    const postMessage = jest.fn();
+    handlers.message({
+      data: { type: 'set-timer-client', requestId: 'request' },
+      source: { id: 'after-reload', postMessage },
+    });
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'set-timer-client', requestId: 'request', clientId: 'after-reload',
+    });
+    let cleaned;
+    handlers.message({
+      data: { type: 'cleanup-set-timer-notifications' },
+      waitUntil: promise => { cleaned = promise; },
+    });
+    await cleaned;
+    expect(getNotifications).toHaveBeenCalledWith({ tag: 'mcilroy-set-timer' });
+    expect(stale.close).toHaveBeenCalledTimes(1);
+    expect(live.close).not.toHaveBeenCalled();
+    expect(unrelated.close).not.toHaveBeenCalled();
+  });
 });

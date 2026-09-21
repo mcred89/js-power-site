@@ -24,7 +24,7 @@ module.exports = defineConfig({
   projects: [
     {
       name: 'website-desktop',
-      testMatch: /website\.spec\.js/,
+      testMatch: /(?:website|set-timer-audio)\.spec\.js/,
       use: {
         ...devices['Desktop Chrome'],
         permissions: ['clipboard-read', 'clipboard-write'],
@@ -35,6 +35,8 @@ module.exports = defineConfig({
       testMatch: /pwa\.spec\.js/,
       use: {
         ...devices['Pixel 7'],
+        // Persistent notifications are unavailable in Chromium's headless shell.
+        channel: 'chromium',
         permissions: ['clipboard-read', 'clipboard-write'],
       },
     },

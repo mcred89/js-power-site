@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { createSetTimerAudio } from '../data/setTimerAudio';
 import { getSetTimerElapsedMs, getSetTimerTiming } from '../data/setTimer';
+import { cleanupStaleSetTimerNotifications, createSetTimerNotifications, getSetTimerNotificationPermission } from '../data/setTimerNotifications';
 import './SetTimer.css';
 
 const formatTime = milliseconds => {
@@ -28,16 +29,21 @@ const SetTimer = ({
   onTimerChange,
   onClose,
 }) => {
-  const [localTimer, setLocalTimer] = useState(() => pauseState(timer));
+  const [localTimer, setLocalTimer] = useState(timer);
   const [minutes, setMinutes] = useState(String((timer?.intervalMs || initialIntervalMs) / 60000));
   const [editing, setEditing] = useState(false);
   const [starting, setStarting] = useState(false);
   const [closing, setClosing] = useState(false);
   const [now, setNow] = useState(Date.now);
-  const [notice, setNotice] = useState(timer?.runningSince ? 'Timer paused after reopening. Resume when you are ready.' : '');
-  const [soundUnavailable, setSoundUnavailable] = useState(false);
+  const [notice, setNotice] = useState(timer?.runningSince ? 'The timer kept running. Enable sound to hear the next buzzer.' : '');
+  const [soundUnavailable, setSoundUnavailable] = useState(Boolean(timer?.runningSince));
+  const [notificationPermission, setNotificationPermission] = useState(getSetTimerNotificationPermission);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationPending, setNotificationPending] = useState(false);
+  const [notificationNotice, setNotificationNotice] = useState('');
   const timerRef = useRef(localTimer);
   const audioRef = useRef(null);
+  const notificationsRef = useRef(null);
   const actionRef = useRef(0);
   const saveRevisionRef = useRef(0);
   const requestedRef = useRef(timer);
@@ -104,7 +110,7 @@ const SetTimer = ({
     audioRef.current?.stop();
     if (mountedRef.current) {
       setStarting(false);
-      if (message) setNotice(message);
+      setNotice(message);
     }
     if (timerRef.current) return save(pauseState(timerRef.current));
     return Promise.resolve(true);
@@ -112,27 +118,29 @@ const SetTimer = ({
 
   useEffect(() => {
     mountedRef.current = true;
-    if (timer?.runningSince) save(timerRef.current);
+    cleanupStaleSetTimerNotifications();
     const previousFocus = document.activeElement;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     dialogRef.current?.focus();
-    const hidden = () => {
-      if (document.visibilityState === 'hidden') pause('Timer paused while the app was away. Resume when you are ready.');
+    const refresh = () => {
+      setNow(Date.now());
+      if (document.visibilityState === 'visible') audioRef.current?.sync?.();
     };
-    const pageHide = () => pause('Timer paused while the app was away. Resume when you are ready.');
-    document.addEventListener('visibilitychange', hidden);
-    window.addEventListener('pagehide', pageHide);
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('pageshow', refresh);
     return () => {
       mountedRef.current = false;
       actionRef.current += 1;
       saveRevisionRef.current += 1;
-      document.removeEventListener('visibilitychange', hidden);
-      window.removeEventListener('pagehide', pageHide);
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('pageshow', refresh);
       document.body.style.overflow = previousOverflow;
       if (previousFocus?.isConnected) previousFocus.focus?.();
       audioRef.current?.close()?.catch(() => {});
-      if (timerRef.current?.runningSince) save(pauseState(timerRef.current));
+      notificationsRef.current?.dispose();
+      // The saved wall-clock origin survives navigation and browser suspension.
+      // Only an explicit pause or stop changes it.
     };
     // Restore once. Later prop changes are reconciled separately below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -159,7 +167,7 @@ const SetTimer = ({
 
   useEffect(() => {
     // A timer belongs to the exercise where it was opened. Clear local state
-    // before closing so cleanup cannot save it back as a paused timer.
+    // and its notification when the workout moves to another exercise.
     if (!eligible || exerciseRef.current !== exerciseId) {
       actionRef.current += 1;
       saveRevisionRef.current += 1;
@@ -176,6 +184,51 @@ const SetTimer = ({
     return () => window.clearInterval(tick);
   }, [running]);
 
+  useEffect(() => {
+    const updateNotification = () => notificationsRef.current?.update(timerRef.current, exerciseName);
+    updateNotification();
+    if (!running || !notificationsEnabled) return undefined;
+    const tick = window.setInterval(updateNotification, 1000);
+    document.addEventListener('visibilitychange', updateNotification);
+    window.addEventListener('pageshow', updateNotification);
+    return () => {
+      window.clearInterval(tick);
+      document.removeEventListener('visibilitychange', updateNotification);
+      window.removeEventListener('pageshow', updateNotification);
+    };
+  }, [localTimer, running, exerciseName, notificationsEnabled]);
+
+  const toggleNotifications = async () => {
+    if (notificationPending) return;
+    setNotificationPending(true);
+    setNotificationNotice('');
+    try {
+      if (!notificationsRef.current) notificationsRef.current = createSetTimerNotifications({
+        onError: () => {
+          if (!mountedRef.current) return;
+          setNotificationsEnabled(false);
+          setNotificationNotice('The timer notification could not update. You can try enabling it again.');
+        },
+      });
+      if (notificationsEnabled) {
+        setNotificationsEnabled(false);
+        await notificationsRef.current.close();
+      } else {
+        const enabled = await notificationsRef.current.enable();
+        if (!mountedRef.current) return;
+        const permission = getSetTimerNotificationPermission();
+        setNotificationPermission(permission);
+        setNotificationsEnabled(enabled);
+        if (enabled) notificationsRef.current.update(timerRef.current, exerciseName);
+        else setNotificationNotice(permission === 'denied'
+          ? 'Notifications are blocked. Allow them in your browser or app settings to try again.'
+          : 'Notifications are unavailable. Open the installed app or reload and try again.');
+      }
+    } finally {
+      if (mountedRef.current) setNotificationPending(false);
+    }
+  };
+
   const seconds = Number(minutes) * 60;
   const validInterval = minutes.trim() !== '' && Number.isFinite(seconds)
     && seconds >= 6 && seconds <= 3600 && Math.abs(seconds - Math.round(seconds)) < 0.000001;
@@ -184,7 +237,7 @@ const SetTimer = ({
   const setup = !localTimer || editing;
 
   const start = async () => {
-    if (!eligible || starting || closing || timerRef.current?.runningSince || (!timerRef.current && !validInterval)) return;
+    if (!eligible || starting || closing || (timerRef.current?.runningSince && !soundUnavailable) || (!timerRef.current && !validInterval)) return;
     const action = ++actionRef.current;
     const prepared = timerRef.current || { intervalMs: selectedIntervalMs, elapsedMs: 0, runningSince: null, exerciseId };
     updateLocal(prepared);
@@ -195,19 +248,23 @@ const SetTimer = ({
       if (!audioRef.current) audioRef.current = createSetTimerAudio();
       await audioRef.current.unlock();
       if (!mountedRef.current || action !== actionRef.current) return;
-      const next = { ...prepared, exerciseId, runningSince: new Date().toISOString() };
+      const next = prepared.runningSince ? prepared : { ...prepared, exerciseId, runningSince: new Date().toISOString() };
       audioRef.current.schedule(next, () => {
         if (!mountedRef.current || action !== actionRef.current) return;
         setSoundUnavailable(true);
-        pause('Sound was interrupted. The timer is paused. Retry sound to continue.');
+        setNotice('Sound was interrupted. The timer is still running. Enable sound to hear the next buzzer.');
       });
-      await save(next);
+      if (!prepared.runningSince) await save(next);
     } catch (error) {
       if (!mountedRef.current || action !== actionRef.current) return;
       audioRef.current?.stop();
       setSoundUnavailable(true);
-      setNotice('The buzzer could not start. The timer is paused. Enable sound and retry.');
-      await save({ ...prepared, runningSince: null });
+      if (prepared.runningSince) {
+        setNotice('Sound is unavailable. The timer is still running. Try enabling sound again.');
+      } else {
+        setNotice('The buzzer could not start. The timer is paused. Enable sound and retry.');
+        await save({ ...prepared, runningSince: null });
+      }
     } finally {
       if (mountedRef.current && action === actionRef.current) setStarting(false);
     }
@@ -274,10 +331,19 @@ const SetTimer = ({
           <div className="set-timer-controls">
             <button className="set-timer-primary" type="button" disabled={starting || closing} onClick={running ? () => pause() : start}>{starting ? 'Starting…' : running ? 'Pause timer' : soundUnavailable ? 'Retry sound' : 'Resume timer'}</button>
             <button type="button" onClick={stop} disabled={closing}>Stop timer</button>
+            {running && soundUnavailable && <button className="set-timer-change" type="button" disabled={starting || closing} onClick={start}>Enable sound</button>}
             {!running && !starting && <button className="set-timer-change" type="button" disabled={closing} onClick={() => { setMinutes(String(localTimer.intervalMs / 60000)); setEditing(true); }}>Change interval</button>}
           </div>
           <div className="set-timer-workout-controls">{children}</div>
         </>}
+        <div className="set-timer-background">
+          <p>The clock keeps running when you switch apps. Background buzzers and notification updates depend on your browser.</p>
+          {notificationPermission !== 'unsupported' ? <>
+            <button type="button" onClick={toggleNotifications} disabled={notificationPending || closing}>{notificationPending ? 'Updating notification…' : notificationsEnabled ? 'Hide timer notification' : 'Show timer notification'}</button>
+            <small>The notification shows time left at its last update and the next buzzer time. Updates can pause in the background.</small>
+          </> : <small>This browser does not support timer notifications.</small>}
+          {notificationNotice && <p role="status">{notificationNotice}</p>}
+        </div>
         {notice && <p className="set-timer-notice" role="status">{notice}</p>}
       </div>
     </div>,

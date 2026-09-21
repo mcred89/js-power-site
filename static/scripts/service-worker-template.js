@@ -39,6 +39,32 @@ self.addEventListener('message', event => {
   // Activation is part of the user-requested update action. Extend the message
   // lifetime so browsers cannot terminate this worker before the request lands.
   if (event.data === 'skip-waiting') event.waitUntil(self.skipWaiting());
+  if (event.data?.type === 'set-timer-client' && event.source?.id) {
+    event.source.postMessage({
+      type: 'set-timer-client', requestId: event.data.requestId, clientId: event.source.id,
+    });
+  }
+  if (event.data?.type === 'cleanup-set-timer-notifications') {
+    event.waitUntil((async () => {
+      const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      const activeClients = new Set(windows.map(client => client.id));
+      const notifications = await self.registration.getNotifications({ tag: 'mcilroy-set-timer' });
+      notifications.filter(notification => notification.data?.type === 'set-timer'
+        && !activeClients.has(notification.data.clientId))
+        .forEach(notification => notification.close());
+    })());
+  }
+});
+
+self.addEventListener('notificationclick', event => {
+  if (event.notification.tag !== 'mcilroy-set-timer') return;
+  event.notification.close();
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const existing = windows.find(client => new URL(client.url).origin === self.location.origin);
+    if (existing) await existing.focus();
+    else await self.clients.openWindow('/');
+  })());
 });
 
 const isCacheableRuntimeResponse = response => (

@@ -206,8 +206,16 @@ const readWorkoutSession = async page => page.evaluate(async () => {
 });
 
 test('PWA repeats a set countdown within each exercise and starts each new timer independently', async ({ page }, testInfo) => {
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write', 'notifications']);
   await page.clock.install({ time: new Date('2026-09-18T12:00:00.000Z') });
   await createProfile(page, 'Set Timer Athlete');
+  expect(await page.evaluate(() => Notification.permission)).toBe('granted');
+  await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
+  const readTimerNotifications = () => page.evaluate(async () => {
+    const registration = await navigator.serviceWorker.getRegistration();
+    return (await registration.getNotifications({ tag: 'mcilroy-set-timer' }))
+      .map(notification => ({ title: notification.title, body: notification.body }));
+  });
   await page.getByRole('button', { name: 'Build a routine' }).click();
   await page.getByLabel('Routine name').fill('Timed strength and sprints');
   await fillMaxes(page);
@@ -229,11 +237,24 @@ test('PWA repeats a set countdown within each exercise and starts each new timer
   await expect(timer.getByLabel('Interval (minutes)')).toHaveValue('1.5');
   await timer.getByRole('button', { name: 'Start timer', exact: true }).click();
   await expect(timer.getByRole('timer', { name: 'Get ready time remaining' })).toHaveText('0:10');
+  expect(await readTimerNotifications()).toEqual([]);
+  await timer.getByRole('button', { name: 'Show timer notification', exact: true }).click();
+  await expect.poll(readTimerNotifications).toEqual([{
+    title: expect.stringMatching(/^Set timer ·/),
+    body: expect.stringMatching(/^Get ready: 0:10 left \(updated .+\)\. Next buzzer: /),
+  }]);
   await page.clock.fastForward(10000);
   const countdown = timer.getByRole('timer', { name: 'Interval time remaining' });
   await expect(countdown).toHaveText('1:30');
+  // Each snapshot replaces the prior notification instead of filling the tray.
+  await expect.poll(readTimerNotifications).toEqual([expect.objectContaining({
+    body: expect.stringMatching(/^1:30 left \(updated .+\)\. Next buzzer: /),
+  })]);
   await page.clock.fastForward(20000);
   await expect(countdown).toHaveText('1:10');
+  await expect.poll(readTimerNotifications).toEqual([expect.objectContaining({
+    body: expect.stringMatching(/^1:10 left \(updated .+\)\. Next buzzer: /),
+  })]);
   await timer.getByRole('textbox', { name: 'Weight (lb)' }).fill('225');
   await timer.getByRole('textbox', { name: 'Reps', exact: true }).fill('4');
   await timer.getByRole('button', { name: 'Complete set', exact: true }).dblclick();
@@ -258,6 +279,7 @@ test('PWA repeats a set countdown within each exercise and starts each new timer
     'completed', 'pending', 'pending', 'pending',
   ]);
   await timer.getByRole('button', { name: 'Pause timer', exact: true }).click();
+  await expect.poll(readTimerNotifications).toEqual([]);
   const pausedSession = await readWorkoutSession(page);
   expect(pausedSession.runningSince).toBeTruthy();
   const workoutElapsedAt = (session, timestamp) => session.elapsedSeconds + Math.max(
@@ -274,12 +296,16 @@ test('PWA repeats a set countdown within each exercise and starts each new timer
     actualWeight: '230', actualReps: '5', splitSeconds: elapsedAtPause + 60,
   });
   await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
+  await expect.poll(readTimerNotifications).toEqual([expect.objectContaining({
+    body: expect.stringMatching(/^1:30 left \(updated .+\)\. Next buzzer: /),
+  })]);
   await page.clock.fastForward(15000);
   await expect(countdown).toHaveText('1:15');
   // An immediate stop also flushes an edit that has not reached its debounce deadline.
   await timer.getByRole('textbox', { name: 'Weight (lb)' }).fill('240');
   await timer.getByRole('button', { name: 'Stop timer', exact: true }).click();
   await expect(timer).toHaveCount(0);
+  await expect.poll(readTimerNotifications).toEqual([]);
   await expect(page.getByRole('textbox', { name: 'Weight (lb)' })).toHaveValue('240');
   expect((await readWorkoutSession(page)).setTimer).toBeNull();
 
@@ -315,23 +341,39 @@ test('PWA repeats a set countdown within each exercise and starts each new timer
   await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
   await page.clock.fastForward(17000);
   await expect(countdown).toHaveText('0:38');
+  const runningSetTimer = (await readWorkoutSession(page)).setTimer;
+  expect(runningSetTimer.runningSince).toBeTruthy();
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
     document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('pagehide'));
   });
-  await expect(timer.getByRole('button', { name: 'Resume timer', exact: true })).toBeVisible();
+  await expect(timer.getByRole('button', { name: 'Pause timer', exact: true })).toBeVisible();
+  await page.clock.fastForward(30000);
+  await expect(countdown).toHaveText('0:08');
+  expect((await readWorkoutSession(page)).setTimer).toEqual(runningSetTimer);
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
     document.dispatchEvent(new Event('visibilitychange'));
   });
+  await timer.getByRole('button', { name: 'Show timer notification', exact: true }).click();
+  await expect.poll(async () => (await readTimerNotifications()).length).toBe(1);
   await page.reload();
   await page.getByRole('button', { name: 'Resume workout', exact: true }).click();
-  await expect(timer.getByRole('button', { name: 'Resume timer', exact: true })).toBeVisible();
-  await expect(countdown).toHaveText('0:38');
+  // The prior document's persistent notification must not outlive its owner.
+  await expect.poll(readTimerNotifications).toEqual([]);
+  await expect(timer.getByRole('button', { name: 'Pause timer', exact: true })).toBeVisible();
+  await expect(timer.getByRole('button', { name: 'Enable sound', exact: true })).toBeVisible();
+  await expect(countdown).toHaveText('0:08');
   await page.clock.fastForward(30000);
-  await expect(countdown).toHaveText('0:38');
+  await expect(countdown).toHaveText('0:23');
+  expect((await readWorkoutSession(page)).setTimer).toEqual(runningSetTimer);
+  expect((await readWorkoutSession(page)).exercises[1].sets.map(set => set.status)).toEqual(Array(3).fill('pending'));
   expect((await readWorkoutSession(page)).runningSince).toBeTruthy();
-  await timer.getByRole('button', { name: 'Resume timer', exact: true }).click();
+  await timer.getByRole('button', { name: 'Enable sound', exact: true }).click();
+  await expect(timer.getByRole('button', { name: 'Enable sound', exact: true })).toHaveCount(0);
+  await expect(countdown).toHaveText('0:23');
+  expect((await readWorkoutSession(page)).setTimer).toEqual(runningSetTimer);
   await timer.getByText('More workout controls', { exact: true }).click();
   await timer.getByRole('button', { name: 'Skip exercise', exact: true }).click();
   await expect(timer).toHaveCount(0);

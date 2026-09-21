@@ -40,6 +40,10 @@
 .set-timer-workout-controls .exercise-pager { margin-top:16px; }
 .set-timer-workout-controls .session-footer-actions { margin-top:12px; }
 .set-timer-notice { margin:16px 0 0; padding:10px 12px; border:1px solid #ffffff80; border-radius:9px; line-height:1.45; font-size:13px; }
+.set-timer-background { margin-top:18px; color:#d5e4eb; font-size:13px; line-height:1.45; }
+.set-timer-background p { margin:0 0 8px; }
+.set-timer-background small { display:block; margin-top:8px; font-size:12px; }
+.set-timer-background button { min-height:44px; width:100%; border:1px solid #ffffff80; border-radius:10px; padding:10px 12px; background:transparent; color:#fff; font:inherit; font-weight:750; }
 @media (min-width:360px) {
   .set-timer-workout-controls .current-set-card { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 14px; }
   .set-timer-workout-controls .current-set-card>p,.set-timer-workout-controls .current-set-card>small,.set-timer-workout-controls .current-set-card>button { grid-column:1 / -1; }

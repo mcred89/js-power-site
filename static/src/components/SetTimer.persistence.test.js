@@ -112,11 +112,11 @@ it('keeps a failed Stop visible and paused for retry until clearing storage succ
 
 it('does not let an old failed write pause a newer resumed countdown', async () => {
   const write = deferred();
-  const persist = jest.fn().mockReturnValueOnce(write.promise).mockResolvedValue();
+  const persist = jest.fn().mockResolvedValueOnce().mockReturnValueOnce(write.promise).mockResolvedValue();
   render(persist);
   await click('Start timer');
   act(() => jest.advanceTimersByTime(3000));
-  await act(async () => window.dispatchEvent(new Event('pagehide')));
+  await click('Pause timer');
   await click('Resume timer');
   const stopCount = sound.stop.mock.calls.length;
   await act(async () => write.reject(new Error('Old write failed')));

@@ -26,8 +26,25 @@ one: choose the interval again, prefilled with your last choice, and get a fresh
 10-second preparation countdown. Tabata keeps its own separate timer.
 **Stop timer** returns to the workout with edits and progress intact; starting again uses a fresh
 preparation countdown. Change the interval while paused to restart preparation.
-Switching away or reloading leaves the timer paused until you resume. Keep the
-app open and set your phone's media volume to hear the cues.
+Switching apps and reloading preserve the timer's running clock. On reopening,
+**Enable sound** restores future buzzers without restarting the countdown.
+Only **Pause timer** freezes the clock. Set your phone's media volume to hear
+the cues. Audio repeats on the browser's audio clock, with wall-clock alignment
+and output-latency compensation, rather than waiting for each display update.
+
+**Show timer notification** asks for notification permission and displays one
+quiet notification with the remaining time at its last update and the next
+buzzer's clock time. Pause clears the notification; Resume restores it while
+the feature is enabled. **Hide timer notification** turns it off. This choice
+is per open timer and does not change profile or backup data.
+
+The installed website cannot guarantee background sound or a live notification
+countdown if Android suspends the browser. Its saved clock still catches up
+correctly when reopened; notification snapshots include their update time so
+a suspended update is not presented as live. A guaranteed OS-updated tray
+countdown and background alarm service require a native Android implementation.
+See the [web notification options](https://notifications.spec.whatwg.org/) and
+[Chrome's background timer limits](https://developer.chrome.com/blog/timer-throttling-in-chrome-88/).
 
 ## Tabata sprint finishers
 
