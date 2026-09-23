@@ -72,7 +72,25 @@ test('normal website supports chained mesocycles with increasing maxes', async (
   await page.locator('.cycle-row').nth(1).getByRole('combobox', { name: '' }).last().selectOption('High');
   await page.getByRole('button', { name: /Generate plan/ }).click();
 
-  await expect(page.getByText('Maxes: Squat 315 · Press 185 · Deadlift 405 lb')).toBeVisible();
-  await expect(page.getByText('Maxes: Squat 325 · Press 190 · Deadlift 415 lb')).toBeVisible();
+  await expect(page.getByText('Maxes: Squat 315 lb · Press 185 lb · Deadlift 405 lb')).toBeVisible();
+  await expect(page.getByText('Maxes: Squat 325 lb · Press 190 lb · Deadlift 415 lb')).toBeVisible();
   await expect(page.getByRole('heading', { name: '8 weeks. 30 sessions.' })).toBeVisible();
+});
+
+test('normal website creates mixed progression with fixed deadlift increases', async ({ page }, testInfo) => {
+  await page.goto('/');
+  await fillMaxes(page);
+  await selectWeakPoints(page);
+  await page.getByLabel('Build a mesocycle from multiple cycles').check();
+  await page.getByRole('radio', { name: 'Adapt from completed sets', exact: true }).check();
+  await page.getByRole('combobox', { name: 'Deadlift progression', exact: true }).selectOption('fixed');
+  await page.getByLabel('Deadlift increase').fill('25');
+  await expect(page.getByLabel('Squat increase')).toHaveCount(0);
+  await expect(page.getByLabel('Press increase')).toHaveCount(0);
+  await page.locator('.lift-progression-controls').screenshot({ path: testInfo.outputPath('mixed-progression-creation.png') });
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await expect(page.getByText(/Maxes: Squat 315.*Press 185.*Deadlift 430/)).toBeVisible();
+  await page.getByRole('button', { name: 'Edit your plan' }).click();
+  await expect(page.getByRole('combobox', { name: 'Deadlift progression', exact: true })).toHaveValue('fixed');
+  await expect(page.getByLabel('Deadlift increase')).toHaveValue('25');
 });

@@ -168,7 +168,7 @@ it('reviews weight, progression, event, cycle volume, and accessory changes toge
   const text = container.querySelector('dl').textContent;
   expect(text).toContain('Deadlift starting maxFrom405 lbTo450 lb');
   expect(text).toContain('Max progressionFromKeep maxes the sameToIncrease by set amounts');
-  expect(text).toContain('Deadlift increase per cycleFromNot usedTo20 lb');
+  expect(text).toContain('Deadlift increase per microcycleFromNot usedTo20 lb');
   expect(text).toContain('Deadlift day StrongmanFromSandbag carry · 3 × 5ToFarmer carry · 4 × 5');
   expect(text).toContain('Cycle 1 volumeFromLowToHigh');
   expect(text).toContain('Press accessoryFromShoulders — Dumbbell overhead pressToNone');
@@ -182,4 +182,49 @@ it('reviews weight, progression, event, cycle volume, and accessory changes toge
     pressWeakPoint: '',
     microCycles: [{ duration: '3 weeks', volume: 'High' }, { duration: '5 weeks', volume: 'High' }],
   }));
+});
+
+it('reviews and saves a fixed deadlift increase alongside shared adaptive progression', async () => {
+  const routine = createRoutine('profile', 'Started mesocycle', {
+    ...inputs, mesoMode: true, maxProgressionMode: 'adaptive',
+    microCycles: Array.from({ length: 3 }, () => ({ duration: '5 weeks', volume: 'Low' })),
+  });
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
+  expect(button('Review changes').disabled).toBe(true);
+  expect(container.querySelector('[name="deadliftIncrement"]')).toBeNull();
+  fill('deadliftProgressionMode', 'fixed');
+  fill('deadliftIncrement', '25');
+  expect(container.querySelector('[name="squatIncrement"]')).toBeNull();
+  expect(container.querySelector('[name="pressIncrement"]')).toBeNull();
+  review();
+  expect(container.querySelector('dl').textContent).toContain('Deadlift progressionFromUse shared setting (Adapt from completed sets)ToIncrease by set amounts');
+  expect(container.querySelector('dl').textContent).toContain('Deadlift increase per microcycleFromNot usedTo25 lb');
+  click(button('Back to editing'));
+  expect(container.querySelector('[name="deadliftProgressionMode"]').value).toBe('fixed');
+  expect(container.querySelector('[name="deadliftIncrement"]').value).toBe('25');
+  review();
+  await act(async () => button('Save update').click());
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+    maxProgressionMode: 'adaptive', liftProgressionModes: { deadlift: 'fixed' }, deadliftIncrement: '25',
+  }));
+  expect(routine.inputs.liftProgressionModes).toBeUndefined();
+});
+
+it('restores saved per-lift choices and can return a lift to the shared setting', async () => {
+  const routine = createRoutine('profile', 'Mixed plan', {
+    ...inputs, mesoMode: true, maxProgressionMode: 'adaptive',
+    liftProgressionModes: { deadlift: 'fixed' }, deadliftIncrement: '25',
+    microCycles: [{ duration: '5 weeks', volume: 'Low' }, { duration: '5 weeks', volume: 'Low' }],
+  });
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
+  expect(button('Review changes').disabled).toBe(true);
+  expect(container.querySelector('[name="deadliftProgressionMode"]').value).toBe('fixed');
+  fill('deadliftProgressionMode', '');
+  expect(container.querySelector('[name="deadliftIncrement"]')).toBeNull();
+  review();
+  expect(container.querySelector('dl').textContent).toContain('Deadlift progressionFromIncrease by set amountsToUse shared setting (Adapt from completed sets)');
+  await act(async () => button('Save update').click());
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ liftProgressionModes: {} }));
 });

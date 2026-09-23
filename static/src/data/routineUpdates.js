@@ -1,4 +1,4 @@
-import { MAX_PROGRESSION_MODES } from './routineGeneration';
+import { getLiftProgressionMode, MAX_PROGRESSION_MODES } from './routineGeneration';
 import { hasExerciseOverrides, regenerateFutureWorkouts } from './routineRecalculation';
 import { applyBatch } from './storage';
 
@@ -41,6 +41,19 @@ const updatedInputs = (original, changes) => {
   editableKeys.forEach(key => {
     if (has(changes, key) && changes[key] !== undefined) inputs[key] = changes[key];
   });
+  if (has(changes, 'liftProgressionModes') && changes.liftProgressionModes !== undefined) {
+    const modes = changes.liftProgressionModes;
+    if (!modes || typeof modes !== 'object' || Array.isArray(modes)) {
+      throw new Error('Choose valid progression settings for each lift.');
+    }
+    // Replace the supported overrides (an omitted lift inherits the shared
+    // setting), while retaining unknown saved fields for backup compatibility.
+    inputs.liftProgressionModes = { ...original.liftProgressionModes };
+    liftKeys.forEach(lift => {
+      delete inputs.liftProgressionModes[lift];
+      if (has(modes, lift)) inputs.liftProgressionModes[lift] = modes[lift];
+    });
+  }
   if (has(changes, 'microCycles') && changes.microCycles !== undefined) {
     const cycles = original.microCycles || [];
     if (!Array.isArray(changes.microCycles) || changes.microCycles.length !== cycles.length ||
@@ -59,6 +72,16 @@ const updatedInputs = (original, changes) => {
   ].forEach(([key, label]) => validateNumber(inputs[key], label, 1, 1001));
   const progressionMode = inputs.maxProgressionMode === undefined ? MAX_PROGRESSION_MODES.FIXED : inputs.maxProgressionMode;
   validateChoice(progressionMode, Object.values(MAX_PROGRESSION_MODES), 'max progression');
+  if (inputs.liftProgressionModes !== undefined) {
+    if (!inputs.liftProgressionModes || typeof inputs.liftProgressionModes !== 'object' || Array.isArray(inputs.liftProgressionModes)) {
+      throw new Error('Choose valid progression settings for each lift.');
+    }
+    liftKeys.forEach(lift => {
+      if (has(inputs.liftProgressionModes, lift)) {
+        validateChoice(inputs.liftProgressionModes[lift], Object.values(MAX_PROGRESSION_MODES), `${lift} progression`);
+      }
+    });
+  }
   if (inputs.mesoMode) {
     if (!Array.isArray(inputs.microCycles) || !inputs.microCycles.length) throw new Error('This plan has no cycles to update.');
     inputs.microCycles.forEach(cycle => validateChoice(cycle.volume, ['Low', 'High'], 'cycle volume'));
@@ -81,7 +104,7 @@ const updatedInputs = (original, changes) => {
     const increment = inputs[`${lift}Increment`];
     // The builder keeps hidden fields when their option is disabled. Validate
     // their stored values only when that option will generate future work.
-    if (inputs.mesoMode && progressionMode === MAX_PROGRESSION_MODES.FIXED && !isBlank(increment)) {
+    if (inputs.mesoMode && getLiftProgressionMode(inputs, lift) === MAX_PROGRESSION_MODES.FIXED && !isBlank(increment)) {
       validateNumber(increment, `${label} increase`, 0, 100);
     }
     const movementKey = `${lift}EventMovement`;

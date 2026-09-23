@@ -89,7 +89,7 @@ describe('portable backups', () => {
     expect(() => parseBackup('{"profiles":[]}')).toThrow('not a supported');
   });
 
-  it.each([11, 12, 13, 14, 15])('rejects malformed archive data in version %i instead of discarding it', version => {
+  it.each([11, 12, 13, 14, 15, 16])('rejects malformed archive data in version %i instead of discarding it', version => {
     expect(() => parseBackup(JSON.stringify({
       format: 'mcilroy-method-backup', version,
       profiles: [], routines: [], templates: [], archives: { unknown: 'preserve this' },

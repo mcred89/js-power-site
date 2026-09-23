@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { buildRoutinePlan } from '../data/routineGeneration';
+import { buildRoutinePlan, getLiftProgressionMode } from '../data/routineGeneration';
 import { routineToCsv, routineToMarkdown } from '../data/routineExports';
 
 const TrainingDay = ({ day }) => (
@@ -63,7 +63,11 @@ const Routine = props => {
             {props.mesoMode && (
               <div className="microcycle-heading">
                 <div><p className="eyebrow">Microcycle {cycleIndex + 1}</p><h2>{cycle.duration} · {cycle.volume} volume</h2></div>
-                <p>Maxes: Squat {cycle.effectiveMaxes.maxSquat} · Press {cycle.effectiveMaxes.maxPress} · Deadlift {cycle.effectiveMaxes.maxDead} lb{props.maxProgressionMode === 'adaptive' && cycleIndex > 0 ? ' · projected' : ''}</p>
+                <p>Maxes: {[
+                  ['squat', 'Squat', 'maxSquat'],
+                  ['press', 'Press', 'maxPress'],
+                  ['deadlift', 'Deadlift', 'maxDead'],
+                ].map(([key, label, maxKey]) => `${label} ${cycle.effectiveMaxes[maxKey]} lb${getLiftProgressionMode(props, key) === 'adaptive' && cycleIndex > 0 ? ' (projected)' : ''}`).join(' · ')}</p>
               </div>
             )}
             {cycle.weeks.map((week, weekIndex) => (

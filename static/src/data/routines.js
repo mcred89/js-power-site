@@ -1,5 +1,5 @@
 import { completedPrimaryEstimate, MAIN_LIFTS } from './estimatedMax';
-import { buildRoutinePlan, MAX_PROGRESSION_MODES } from './routineGeneration';
+import { buildRoutinePlan, getEffectiveMaxes, getLiftProgressionMode, MAX_PROGRESSION_MODES } from './routineGeneration';
 import { restoreLegacyEventSlots } from './legacyEventSlots';
 import { isTabataExercise, tabataRoundCount } from './tabata';
 import { getTimerElapsedMs } from './elapsedTimer';
@@ -58,7 +58,10 @@ export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) 
     id: makeId(),
     profileId,
     name,
-    inputs: { ...inputs },
+    inputs: {
+      ...inputs,
+      ...(inputs.liftProgressionModes ? { liftProgressionModes: { ...inputs.liftProgressionModes } } : {}),
+    },
     workouts,
     archived: false,
     createdAt: timestamp,
@@ -588,13 +591,18 @@ const roundToNearestFive = value => Math.round(value / 5) * 5;
 export const adaptiveCycleMaxes = routine => {
   const inputs = routine.inputs || {};
   const cycleCount = inputs.mesoMode ? (inputs.microCycles || []).length : 1;
-  const starting = {
-    maxSquat: Number(inputs.maxSquat),
-    maxPress: Number(inputs.maxPress),
-    maxDead: Number(inputs.maxDead),
-  };
+  const starting = getEffectiveMaxes(inputs, 0);
   const bestByCycle = Array.from({ length: cycleCount }, () => ({}));
+  const floorByCycle = Array.from({ length: cycleCount }, () => ({}));
   (routine.workouts || []).forEach(workout => {
+    const floor = floorByCycle[workout.cycleIndex];
+    const maxKey = maxKeyForLift[workout.name];
+    const snapshotMax = Number(workout.effectiveMaxes?.[maxKey]);
+    // A lift already trained or started at a max must not move backward when
+    // its strategy changes. Other lifts and untouched projections are not floors.
+    if (floor && maxKey && (workout.completedAt || workout.session) && Number.isFinite(snapshotMax) && snapshotMax > 0) {
+      floor[maxKey] = Math.max(floor[maxKey] || 0, snapshotMax);
+    }
     const estimate = completedPrimaryEstimate(workout);
     if (!estimate || !bestByCycle[workout.cycleIndex]) return;
     bestByCycle[workout.cycleIndex][estimate.lift] = Math.max(
@@ -602,28 +610,29 @@ export const adaptiveCycleMaxes = routine => {
       estimate.value,
     );
   });
-  const maxes = [starting];
-  for (let cycleIndex = 1; cycleIndex < cycleCount; cycleIndex += 1) {
-    const previous = maxes[cycleIndex - 1];
-    const previousBest = bestByCycle[cycleIndex - 1];
+  const maxes = [];
+  for (let cycleIndex = 0; cycleIndex < cycleCount; cycleIndex += 1) {
+    const previous = maxes[cycleIndex - 1] || starting;
+    const previousBest = bestByCycle[cycleIndex - 1] || {};
     maxes.push(MAIN_LIFTS.reduce((result, lift) => {
+      if (getLiftProgressionMode(inputs, lift.toLowerCase()) !== MAX_PROGRESSION_MODES.ADAPTIVE) return result;
       const key = maxKeyForLift[lift];
       const estimate = previousBest[lift] ? roundToNearestFive(previousBest[lift]) : previous[key];
-      return { ...result, [key]: Math.max(previous[key], estimate) };
-    }, {}));
+      return { ...result, [key]: Math.max(previous[key], estimate, floorByCycle[cycleIndex][key] || 0) };
+    }, getEffectiveMaxes(inputs, cycleIndex)));
   }
   return maxes;
 };
 
 export const adaptiveStatusForWorkout = (routine, workout) => {
-  if (!routine?.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE || !workout?.cycleIndex) return null;
+  const maxKey = maxKeyForLift[workout?.name];
+  if (!routine?.inputs?.mesoMode || !workout?.cycleIndex || !maxKey ||
+      getLiftProgressionMode(routine.inputs, workout.name.toLowerCase()) !== MAX_PROGRESSION_MODES.ADAPTIVE) return null;
   const previousIndex = workout.cycleIndex - 1;
   const previous = routine.workouts.filter(item => item.cycleIndex === previousIndex);
   const allComplete = previous.length > 0 && previous.every(item => item.completedAt);
   const maxes = adaptiveCycleMaxes(routine);
-  const improved = Object.keys(maxes[workout.cycleIndex] || {}).some(key => (
-    maxes[workout.cycleIndex][key] > maxes[previousIndex][key]
-  ));
+  const improved = maxes[workout.cycleIndex]?.[maxKey] > maxes[previousIndex]?.[maxKey];
   const source = `Cycle ${workout.cycleIndex}`;
   if (improved) return `Adaptive · updated from ${source}`;
   return `Adaptive · ${allComplete ? 'set' : 'projected'} from ${source}`;

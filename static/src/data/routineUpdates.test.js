@@ -168,6 +168,48 @@ describe('updating an existing plan', () => {
     expect(fixed.workouts[15].effectiveMaxes.maxSquat).toBe(525);
   });
 
+  it('changes an existing plan to adaptive squat and press with a 25 lb deadlift increase per microcycle', () => {
+    let routine = makeRoutine({
+      mesoMode: true,
+      microCycles: Array.from({ length: 3 }, () => ({ duration: '5 weeks', volume: 'Low' })),
+    });
+    routine.workouts[0] = {
+      ...routine.workouts[0], completedAt: '2026-09-21T12:00:00.000Z',
+      session: { primaryExerciseId: 'recorded', exercises: [{
+        exerciseId: 'recorded', movement: 'Squat', sets: [{ status: 'completed', actualWeight: 400, actualReps: 10 }],
+      }] },
+    };
+    routine = startWorkoutSession(routine, routine.workouts[1].id);
+    routine.workouts[17].session = { status: 'paused', exercises: [] };
+    routine = updateExercise(routine, routine.workouts[32].id, routine.workouts[32].exercises[0].id, { weight: '455' });
+    const before = JSON.stringify(routine);
+    const updated = updateRoutinePlan(routine, {
+      maxProgressionMode: 'adaptive', liftProgressionModes: { deadlift: 'fixed' }, deadliftIncrement: '25',
+    });
+    expect(updated.inputs.liftProgressionModes).toEqual({ deadlift: 'fixed' });
+    expect(updated.workouts[15].effectiveMaxes).toEqual({ maxSquat: 535, maxPress: 225, maxDead: 625 });
+    expect(updated.workouts[30].effectiveMaxes).toEqual({ maxSquat: 535, maxPress: 225, maxDead: 650 });
+    expect(updated.workouts[32].exercises[0].generated.weight).toBe(425);
+    expect(visibleExercise(updated.workouts[32].exercises[0]).weight).toBe('455');
+    [0, 1, 17].forEach(index => expect(updated.workouts[index]).toBe(routine.workouts[index]));
+    expect(JSON.stringify(routine)).toBe(before);
+    expect(refreshAdaptiveProgression(updated).changed).toBe(false);
+  });
+
+  it('validates only active fixed increments per lift and retains unknown saved progression fields', () => {
+    const routine = makeRoutine({
+      mesoMode: true, maxProgressionMode: 'adaptive', squatIncrement: '-1',
+      liftProgressionModes: { deadlift: 'fixed', futureLift: { keep: true } },
+      microCycles: [{ duration: '5 weeks', volume: 'Low' }, { duration: '5 weeks', volume: 'Low' }],
+    });
+    expect(() => updateRoutinePlan(routine, { deadliftIncrement: '-1' })).toThrow(/Deadlift increase/);
+    expect(() => updateRoutinePlan(routine, { liftProgressionModes: { squat: 'fixed' } })).toThrow(/Squat increase/);
+    const updated = updateRoutinePlan(routine, { liftProgressionModes: {}, deadliftIncrement: '-1' });
+    expect(updated.inputs.liftProgressionModes).toEqual({ futureLift: { keep: true } });
+    expect(updated.workouts[17].effectiveMaxes.maxDead).toBe(600);
+    expect(routine.inputs.liftProgressionModes.deadlift).toBe('fixed');
+  });
+
   it.each([
     { mesoMode: true }, { duration: '3 weeks' }, { includeStrongmanDay: true },
     { microCycles: [{ duration: '5 weeks', volume: 'High' }] },
@@ -188,6 +230,9 @@ describe('updating an existing plan', () => {
     { maxSquat: '' }, { maxPress: Infinity }, { maxDead: 'NaN' }, { maxSquat: 1002 }, { maxPress: 0 },
     { maxSquat: true },
     { maxProgressionMode: 'surprise' }, { maxProgressionMode: '' }, { maxProgressionMode: null },
+    { liftProgressionModes: null }, { liftProgressionModes: [] }, { liftProgressionModes: 'fixed' },
+    { liftProgressionModes: { squat: 'surprise' } }, { liftProgressionModes: { press: '' } },
+    { liftProgressionModes: { deadlift: null } },
     { mainLiftChoice: 'Medium' }, { pressWeakPoint: 'Arms' },
     { deadliftWeakPoint: 'Chest' }, { deadliftTabataEnabled: 'false' },
     { squatEventEnabled: true, squatEventMovement: '   ', squatEventSets: 3, squatEventReps: 8 },

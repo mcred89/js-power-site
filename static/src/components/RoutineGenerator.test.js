@@ -1,4 +1,4 @@
-import { getEffectiveMaxes } from '../data/routineGeneration';
+import { getEffectiveMaxes, getLiftProgressionMode, hasAdaptiveProgression } from '../data/routineGeneration';
 import { routineToCsv, routineToMarkdown } from '../data/routineExports';
 
 describe('mesocycle max progression', () => {
@@ -35,6 +35,28 @@ describe('mesocycle max progression', () => {
       maxSquat: 500, maxPress: 225, maxDead: 600,
     });
   });
+
+  it('defaults every lift to the shared strategy and allows individual overrides', () => {
+    expect(getLiftProgressionMode(plan, 'squat')).toBe('fixed');
+    const mixed = {
+      ...plan,
+      maxProgressionMode: 'adaptive',
+      deadliftIncrement: '25',
+      liftProgressionModes: { press: 'same', deadlift: 'fixed' },
+    };
+    expect(getLiftProgressionMode(mixed, 'squat')).toBe('adaptive');
+    expect(getEffectiveMaxes(mixed, 2)).toEqual({ maxSquat: 500, maxPress: 225, maxDead: 650 });
+    expect(hasAdaptiveProgression(mixed)).toBe(true);
+  });
+
+  it('detects adaptive overrides independently of the shared strategy', () => {
+    expect(hasAdaptiveProgression({ ...plan, liftProgressionModes: { squat: 'adaptive' } })).toBe(true);
+    expect(hasAdaptiveProgression({
+      ...plan,
+      maxProgressionMode: 'adaptive',
+      liftProgressionModes: { squat: 'same', press: 'same', deadlift: 'fixed' },
+    })).toBe(false);
+  });
 });
 
 describe('routine exports', () => {
@@ -69,5 +91,21 @@ describe('routine exports', () => {
     expect(markdown).toContain('### Week 1');
     expect(markdown).toContain('#### Day 1: Squat');
     expect(markdown).toContain('- Squat: 325 lb · 4 × 6');
+  });
+
+  it('labels only adaptive lift maxes as projected in mixed-strategy exports', () => {
+    const markdown = routineToMarkdown({
+      ...routine,
+      mesoMode: true,
+      microCycles: [{ duration: '3 weeks', volume: 'Low' }, { duration: '3 weeks', volume: 'Low' }],
+      maxProgressionMode: 'adaptive',
+      liftProgressionModes: { deadlift: 'fixed', press: 'same' },
+      deadliftIncrement: '25',
+    });
+
+    expect(markdown).toContain('Maxes: Squat 500 lb · Press 225 lb · Deadlift 600 lb');
+    expect(markdown).toContain('Maxes: Squat 500 lb (projected; updates from completed sets) · Press 225 lb · Deadlift 625 lb');
+    expect(markdown).not.toContain('Press 225 lb (projected');
+    expect(markdown).not.toContain('Deadlift 625 lb (projected');
   });
 });

@@ -1,4 +1,4 @@
-import { buildRoutinePlan, MAX_PROGRESSION_MODES } from './routineGeneration';
+import { buildRoutinePlan, getLiftProgressionMode } from './routineGeneration';
 
 // Export formatting belongs to the optional calculator/export UI, not tracker startup.
 const escapeCsv = value => `"${String(value).replace(/"/g, '""')}"`;
@@ -14,8 +14,13 @@ export const routineToCsv = props => {
 };
 
 export const routineToMarkdown = props => buildRoutinePlan(props).map((cycle, cycleIndex) => {
+  const maxes = [
+    ['squat', 'Squat', 'maxSquat'],
+    ['press', 'Press', 'maxPress'],
+    ['deadlift', 'Deadlift', 'maxDead'],
+  ].map(([key, label, maxKey]) => `${label} ${cycle.effectiveMaxes[maxKey]} lb${getLiftProgressionMode(props, key) === 'adaptive' && cycleIndex > 0 ? ' (projected; updates from completed sets)' : ''}`).join(' · ');
   const heading = props.mesoMode
-    ? `## Microcycle ${cycleIndex + 1}: ${cycle.duration}, ${cycle.volume} volume\n\nMaxes: Squat ${cycle.effectiveMaxes.maxSquat} lb · Press ${cycle.effectiveMaxes.maxPress} lb · Deadlift ${cycle.effectiveMaxes.maxDead} lb${props.maxProgressionMode === MAX_PROGRESSION_MODES.ADAPTIVE && cycleIndex > 0 ? ' (projected; updates from completed sets)' : ''}`
+    ? `## Microcycle ${cycleIndex + 1}: ${cycle.duration}, ${cycle.volume} volume\n\nMaxes: ${maxes}`
     : `## ${cycle.duration}, ${cycle.volume} volume`;
   const weeks = cycle.weeks.map((week, weekIndex) => {
     const sessions = week.map(day => {

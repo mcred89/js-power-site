@@ -1,5 +1,5 @@
 import { adaptiveCycleMaxes, createRoutine, visibleExercise } from './routines';
-import { MAX_PROGRESSION_MODES } from './routineGeneration';
+import { hasAdaptiveProgression } from './routineGeneration';
 import { isTabataExercise } from './tabata';
 
 const now = () => new Date().toISOString();
@@ -54,7 +54,7 @@ const mergeGeneratedExercises = (workout, generatedWorkout) => {
 // later refreshes cannot destroy custom work retained by a previous plan edit.
 export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
   const nextRoutine = { ...routine, inputs };
-  const cycleMaxes = inputs.mesoMode && inputs.maxProgressionMode === MAX_PROGRESSION_MODES.ADAPTIVE
+  const cycleMaxes = inputs.mesoMode && hasAdaptiveProgression(inputs)
     ? adaptiveCycleMaxes(nextRoutine)
     : [];
   const regenerated = createRoutine(routine.profileId, routine.name, inputs, cycleMaxes);
@@ -75,7 +75,7 @@ export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
 };
 
 export const refreshAdaptiveProgression = routine => {
-  if (!routine.inputs?.mesoMode || routine.inputs.maxProgressionMode !== MAX_PROGRESSION_MODES.ADAPTIVE) {
+  if (!routine.inputs?.mesoMode || !hasAdaptiveProgression(routine.inputs)) {
     return { routine, changed: false };
   }
   const workouts = regenerateFutureWorkouts(routine);

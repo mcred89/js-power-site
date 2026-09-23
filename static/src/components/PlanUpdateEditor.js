@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import NumberInput from './NumberInput';
+import LiftProgressionControls from './LiftProgressionControls';
+import { getLiftProgressionMode } from '../data/routineGeneration';
 import { getPlanUpdateSummary, updateRoutinePlan } from '../data/routineUpdates';
 import './PlanUpdateEditor.css';
 
@@ -34,6 +36,7 @@ const accessoryChoices = {
 const initialDraft = inputs => ({
   ...inputs,
   maxProgressionMode: inputs.maxProgressionMode || 'fixed',
+  liftProgressionModes: { ...inputs.liftProgressionModes },
   squatIncrement: inputs.squatIncrement ?? 0,
   pressIncrement: inputs.pressIncrement ?? 0,
   deadliftIncrement: inputs.deadliftIncrement ?? 0,
@@ -63,9 +66,15 @@ const describeChanges = (before, after) => {
   lifts.forEach(({ max, label }) => add(`${label} starting max`, `${Number(before[max])} lb`, `${Number(after[max])} lb`));
   if (after.mesoMode) {
     add('Max progression', progressionLabels[before.maxProgressionMode], progressionLabels[after.maxProgressionMode]);
-    if (after.maxProgressionMode === 'fixed') {
-      lifts.forEach(({ key, label }) => add(`${label} increase per cycle`, before.maxProgressionMode === 'fixed' ? `${Number(before[`${key}Increment`])} lb` : 'Not used', `${Number(after[`${key}Increment`])} lb`));
-    }
+    lifts.forEach(({ key, label }) => {
+      const description = inputs => inputs.liftProgressionModes[key]
+        ? progressionLabels[inputs.liftProgressionModes[key]]
+        : `Use shared setting (${progressionLabels[inputs.maxProgressionMode]})`;
+      add(`${label} progression`, description(before), description(after));
+      if (getLiftProgressionMode(after, key) === 'fixed') {
+        add(`${label} increase per microcycle`, getLiftProgressionMode(before, key) === 'fixed' ? `${Number(before[`${key}Increment`])} lb` : 'Not used', `${Number(after[`${key}Increment`])} lb`);
+      }
+    });
   }
   lifts.forEach(({ key, label }) => add(`${label} day Strongman`, eventDescription(before, key), eventDescription(after, key)));
   if (after.mesoMode) {
@@ -194,19 +203,11 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
             </div>
             {draft.mesoMode ? (
               <React.Fragment>
-                <label className="form-field plan-update-progression">
-                  <span className="field-label">Max progression</span>
-                  <select className="select-input" name="maxProgressionMode" value={draft.maxProgressionMode} onChange={changeInput}>
-                    {Object.entries(progressionLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                  </select>
-                </label>
-                {draft.maxProgressionMode === 'adaptive' && <p className="field-help">Later cycles use completed main-lift sets to estimate future maxes. Cycles without enough results remain projections.</p>}
-                {draft.maxProgressionMode === 'fixed' && <div className="increment-section">
-                  <p className="field-help">Max increase after each cycle. Cycle 2 adds this amount once, cycle 3 adds it twice, even when you update the plan midway through.</p>
-                  <div className="field-grid three-fields">
-                    {lifts.map(({ key, label }) => <NumberInput key={key} name={`${key}Increment`} label={`${label} increase`} controlFunc={changeInput} content={draft[`${key}Increment`]} min={0} max={100} />)}
-                  </div>
-                </div>}
+                <LiftProgressionControls inputs={draft} sharedControl="select" onChange={changes => {
+                  setDraft(current => ({ ...current, ...changes }));
+                  setError('');
+                }} />
+                {lifts.some(({ key }) => getLiftProgressionMode(draft, key) === 'fixed') && <p className="field-help">Fixed increases use the cycle 1 starting max. Cycle 2 adds the amount once, cycle 3 adds it twice, even when you update the plan midway through.</p>}
               </React.Fragment>
             ) : <p className="field-help plan-update-note">This plan has one cycle. Its weekly weight progression follows the selected training volume.</p>}
           </fieldset>

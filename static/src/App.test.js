@@ -434,7 +434,7 @@ it('shows every generator setting for a plan', () => {
 
   expect(div.textContent).toContain('315 lb');
   expect(div.textContent).toContain('Cycle 1: 3 weeks, High volume');
-  expect(div.textContent).toContain('Deadlift increase15 lb');
+  expect(div.textContent).toContain('Deadlift progression+15 lb per microcycle');
   expect(div.textContent).toContain('Back-off setsYes');
   expect(div.textContent).toContain("Farmer's carry · 4 sets × 40 reps");
   expect(div.textContent).toContain('Press dayNone');

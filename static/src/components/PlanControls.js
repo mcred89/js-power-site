@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getLiftProgressionMode } from '../data/routineGeneration';
 
 export const RoutineNameEditor = ({ routine, onSave, label = 'Routine' }) => {
   const [editing, setEditing] = useState(false);
@@ -61,12 +62,13 @@ export const PlanSetup = ({ routine }) => {
             <ol className="setup-cycles">
               {(inputs.microCycles || []).map((cycle, index) => <li key={index}>Cycle {index + 1}: {setupValue(cycle.duration)}, {setupValue(cycle.volume)} volume</li>)}
             </ol>
-            <p><strong>Max progression:</strong> {progressionLabel(inputs.maxProgressionMode)}</p>
-            {(inputs.maxProgressionMode || 'fixed') === 'fixed' && <dl className="setup-grid">
-              <div><dt>Squat increase</dt><dd>{setupValue(inputs.squatIncrement)} lb</dd></div>
-              <div><dt>Press increase</dt><dd>{setupValue(inputs.pressIncrement)} lb</dd></div>
-              <div><dt>Deadlift increase</dt><dd>{setupValue(inputs.deadliftIncrement)} lb</dd></div>
-            </dl>}
+            <p><strong>Shared max progression:</strong> {progressionLabel(inputs.maxProgressionMode)}</p>
+            <dl className="setup-grid">
+              {eventLifts.map(([key, label]) => {
+                const mode = getLiftProgressionMode(inputs, key);
+                return <div key={key}><dt>{label.replace(' day', '')} progression</dt><dd>{mode === 'fixed' ? `+${Number(inputs[`${key}Increment`]) || 0} lb per microcycle` : progressionLabel(mode)}</dd></div>;
+              })}
+            </dl>
           </>
         ) : <p>{setupValue(inputs.duration)} · {setupValue(inputs.mainLiftChoice)} volume</p>}
       </div>

@@ -141,10 +141,11 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   const backup = JSON.parse(Buffer.concat(chunks).toString());
-  expect(backup).toMatchObject({ version: 15, dataSchemaVersion: 15 });
+  expect(backup).toMatchObject({ version: 16, dataSchemaVersion: 16 });
   expect(backup.routines).toHaveLength(1);
   expect(backup.routines[0].inputs).toEqual({
     ...seeded.strength.inputs,
+    liftProgressionModes: {},
     squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false,
   });
   expect(backup.routines[0].workouts[0]).toEqual(seeded.strength.workouts[0]);
@@ -184,7 +185,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
     database.close();
     return result;
   });
-  expect(persisted).toEqual({ version: 15, archives: backup.archives });
+  expect(persisted).toEqual({ version: 16, archives: backup.archives });
 });
 
 const readWorkoutSession = async page => page.evaluate(async () => {
@@ -838,12 +839,18 @@ test('PWA updates the current plan while preserving recorded workouts and the wo
   await expect(page.getByLabel('Deadlift max')).toHaveValue('405');
   await page.getByLabel('Add Tabata sprints to Deadlift day').uncheck();
   await page.getByLabel('Deadlift max').fill('450');
-  await page.getByLabel('Deadlift increase').fill('20');
+  await page.getByRole('combobox', { name: 'Max progression', exact: true }).selectOption('adaptive');
+  await page.getByRole('combobox', { name: 'Deadlift progression', exact: true }).selectOption('fixed');
+  await page.getByLabel('Deadlift increase').fill('25');
+  await expect(page.getByLabel('Squat increase')).toHaveCount(0);
+  await expect(page.getByLabel('Press increase')).toHaveCount(0);
   await page.getByLabel('Deadlift event movement').fill('Sandbag carry');
   await page.screenshot({ path: testInfo.outputPath('update-plan-editor.png'), fullPage: true });
   expect(await page.locator('body').evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole('button', { name: 'Review changes', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Review changes', exact: true })).toBeVisible();
+  await expect(page.locator('.plan-update-changes')).toContainText('Deadlift progression');
+  await expect(page.locator('.plan-update-changes')).toContainText('25 lb');
   await page.screenshot({ path: testInfo.outputPath('update-plan-review.png'), fullPage: true });
   expect(await readStoredPlan()).toEqual(before);
   await page.getByRole('button', { name: 'Back to editing', exact: true }).click();
@@ -857,7 +864,8 @@ test('PWA updates the current plan while preserving recorded workouts and the wo
   expect(after.profiles).toEqual(before.profiles);
   expect(after.routine.id).toBe(before.routine.id);
   expect(after.routine.inputs).toMatchObject({
-    maxDead: '450', deadliftIncrement: '20', deadliftEventMovement: 'Sandbag carry',
+    maxDead: '450', deadliftIncrement: '25', deadliftEventMovement: 'Sandbag carry',
+    maxProgressionMode: 'adaptive', liftProgressionModes: { deadlift: 'fixed' },
     squatTabataEnabled: true, pressTabataEnabled: true, deadliftTabataEnabled: false,
   });
   expect(after.routine.workouts.map(workout => [workout.id, workout.sequence])).toEqual(
@@ -869,7 +877,9 @@ test('PWA updates the current plan while preserving recorded workouts and the wo
       expect(workout).toEqual(previous);
       return;
     }
-    expect(workout.effectiveMaxes.maxDead).toBe(450 + workout.cycleIndex * 20);
+    expect(workout.effectiveMaxes.maxDead).toBe(450 + workout.cycleIndex * 25);
+    expect(workout.effectiveMaxes.maxSquat).toBeGreaterThanOrEqual(315);
+    expect(workout.effectiveMaxes.maxPress).toBeGreaterThanOrEqual(185);
     expect(workout.exercises.some(exercise => exercise.generated.movement === 'Tabata sprints')).toBe(workout.name !== 'Deadlift');
     const retained = previous.exercises.filter(exercise => (
       workout.name !== 'Deadlift' || exercise.generated.movement !== 'Tabata sprints'
@@ -891,7 +901,10 @@ test('PWA updates the current plan while preserving recorded workouts and the wo
   await expect(page.getByLabel('Add Tabata sprints to Press day')).toBeChecked();
   await expect(page.getByLabel('Add Tabata sprints to Deadlift day')).not.toBeChecked();
   await expect(page.getByLabel('Deadlift max')).toHaveValue('450');
-  await expect(page.getByLabel('Deadlift increase')).toHaveValue('20');
+  await expect(page.getByLabel('Deadlift increase')).toHaveValue('25');
+  await expect(page.getByRole('combobox', { name: 'Max progression', exact: true })).toHaveValue('adaptive');
+  await expect(page.getByRole('combobox', { name: 'Deadlift progression', exact: true })).toHaveValue('fixed');
+  await expect(page.getByRole('combobox', { name: 'Squat progression', exact: true })).toHaveValue('');
   expect(await readStoredPlan()).toEqual(after);
 });
 

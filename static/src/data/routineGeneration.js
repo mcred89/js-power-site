@@ -38,13 +38,20 @@ export const MAX_PROGRESSION_MODES = {
   ADAPTIVE: 'adaptive',
 };
 
+export const getLiftProgressionMode = (inputs, liftKey) => (
+  inputs.liftProgressionModes?.[liftKey] || inputs.maxProgressionMode || MAX_PROGRESSION_MODES.FIXED
+);
+
+export const hasAdaptiveProgression = inputs => days.some(day => (
+  getLiftProgressionMode(inputs, day.eventKey) === MAX_PROGRESSION_MODES.ADAPTIVE
+));
+
 export const getEffectiveMaxes = (props, cycleIndex) => {
-  const fixed = !props.maxProgressionMode || props.maxProgressionMode === MAX_PROGRESSION_MODES.FIXED;
-  return {
-    maxSquat: Number(props.maxSquat) + (fixed ? (Number(props.squatIncrement) || 0) * cycleIndex : 0),
-    maxPress: Number(props.maxPress) + (fixed ? (Number(props.pressIncrement) || 0) * cycleIndex : 0),
-    maxDead: Number(props.maxDead) + (fixed ? (Number(props.deadliftIncrement) || 0) * cycleIndex : 0),
-  };
+  return days.reduce((maxes, day) => {
+    const fixed = getLiftProgressionMode(props, day.eventKey) === MAX_PROGRESSION_MODES.FIXED;
+    const increment = fixed ? (Number(props[`${day.eventKey}Increment`]) || 0) * cycleIndex : 0;
+    return { ...maxes, [day.max]: Number(props[day.max]) + increment };
+  }, {});
 };
 
 const getSessions = (weekIndexes, includeStrongmanDay, duration) => {

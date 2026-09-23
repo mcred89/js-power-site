@@ -1,5 +1,5 @@
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
-import { BACKUP_VERSION, backupMigrations, migrateBackup } from './storageMigrations';
+import { BACKUP_VERSION, DATABASE_VERSION, backupMigrations, migrateBackup } from './storageMigrations';
 
 describe('set timer compatibility', () => {
   const records = () => ({
@@ -39,7 +39,7 @@ describe('set timer compatibility', () => {
     const original = records();
     const before = JSON.stringify(original);
     const migrated = migrateBackup(original);
-    expect(migrated).toMatchObject({ version: BACKUP_VERSION, dataSchemaVersion: 15, unknown: { preserved: true } });
+    expect(migrated).toMatchObject({ version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION, unknown: { preserved: true } });
     expect(migrated.profiles).toEqual([
       { id: 'default', unknown: true, setTimerIntervalMs: 60000 },
       { id: 'chosen', setTimerIntervalMs: 90000 },
@@ -50,6 +50,6 @@ describe('set timer compatibility', () => {
     expect(migrated.templates).toEqual(original.templates);
     expect(migrated.archives).toBe(original.archives);
     expect(JSON.stringify(original)).toBe(before);
-    expect(backupMigrations[15](original)).toEqual(migrated);
+    expect(backupMigrations[16](backupMigrations[15](original))).toEqual(migrated);
   });
 });

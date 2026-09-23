@@ -2,7 +2,7 @@ import { retireStrongmanData } from './retiredStrongman';
 import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 
-export const DATABASE_VERSION = 15;
+export const DATABASE_VERSION = 16;
 
 // These shipped steps remain available for installations that skipped releases.
 export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
@@ -71,6 +71,16 @@ export const addAccessoryWeakPoints = routine => ({
     deadliftWeakPoint: routine.inputs.deadliftWeakPoint || '',
   } : routine.inputs,
 });
+
+export const addLiftProgressionModes = record => {
+  if (!record.inputs || typeof record.inputs !== 'object' || Array.isArray(record.inputs) ||
+      Object.prototype.hasOwnProperty.call(record.inputs, 'liftProgressionModes')) return record;
+  // An empty map inherits the existing shared strategy for every lift.
+  return {
+    ...record,
+    inputs: { ...record.inputs, liftProgressionModes: {} },
+  };
+};
 
 export const addTabataSprintOptions = record => {
   if (!record.inputs || typeof record.inputs !== 'object' || Array.isArray(record.inputs)) return record;
@@ -268,6 +278,10 @@ export const databaseMigrations = {
     profiles: addSetTimerPreference,
     routines: addSetTimers,
     templates: addSetTimers,
+  }, done),
+  16: ({ transaction, done }) => migrateRecordStores(transaction, 16, {
+    routines: addLiftProgressionModes,
+    templates: addLiftProgressionModes,
   }, done),
 };
 

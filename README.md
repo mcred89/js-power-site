@@ -2,6 +2,25 @@
 
 The code in this repo deploys a serverless React website into AWS S3.
 
+## Progression by lift
+
+When building a mesocycle, **Max progression** sets the shared strategy for all
+lifts. Each lift can keep that shared setting or use its own fixed increase,
+adaptive progression from completed sets, or unchanged max.
+
+For adaptive Squat and Press with a fixed Deadlift target, choose **Adapt from
+completed sets**, then set **Deadlift progression** to **Fixed increase** and
+enter **25**. Fixed amounts increase the training max once per microcycle, not
+once per week: cycle 2 adds 25 lb to the cycle 1 baseline, cycle 3 adds 50 lb.
+Adaptive maxes stay the same when estimates are lower or missing, and retain
+maxes already used in started workouts when changing strategies midway through.
+
+For an existing plan, open **Plans → Update plan → Weights and progression**.
+Review and save the new settings to recalculate unstarted workouts. Completed
+workouts, started or paused sessions, and individual exercise edits are kept.
+Existing plans retain their shared strategy; per-lift choices are included in
+templates, copies, and backups.
+
 ## Optional workout set timer
 
 During a workout, **Start set timer** opens an optional repeating countdown.

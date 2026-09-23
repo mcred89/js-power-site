@@ -1,6 +1,7 @@
 import {
   addEffectiveMaxSnapshots,
   addMaxProgressionMode,
+  addLiftProgressionModes,
   addAccessoryWeakPoints,
   addTabataSprintOptions,
   addSessionActionMetadata,
@@ -76,6 +77,7 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 13 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 14 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 15 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 16 } },
     ]);
   });
 
@@ -114,7 +116,7 @@ describe('IndexedDB migrations', () => {
     });
   });
 
-  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])('upgrades a real version %i database in order', async oldVersion => {
+  it.each([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15])('upgrades a real version %i database in order', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `migration-${oldVersion}`;
     await new Promise((resolve, reject) => {
@@ -136,6 +138,7 @@ describe('IndexedDB migrations', () => {
           id: 'p1',
           unknown: true,
           ...(oldVersion >= 7 ? { activeWorkoutRoutineId: 'r1' } : {}),
+          ...(oldVersion >= 15 ? { setTimerIntervalMs: 60000 } : {}),
         });
         request.transaction.objectStore('routines').put({
           id: 'r1', profileId: 'p1', updatedAt: '2026-01-01', inputs: oldVersion >= 8
@@ -145,7 +148,7 @@ describe('IndexedDB migrations', () => {
           workouts: [{
             id: 'w1',
             ...(oldVersion >= 3 ? { effectiveMaxes: {} } : {}),
-            session: { status: 'inProgress', exercises: [{
+            session: { status: 'inProgress', ...(oldVersion >= 15 ? { setTimer: null } : {}), exercises: [{
               ...(oldVersion >= 6 ? { original: null, substitutedAt: null } : {}),
               sets: [{ ...(oldVersion >= 6 ? { skippedAt: null, skipActionId: null } : {}) }],
             }] },
@@ -197,12 +200,14 @@ describe('IndexedDB migrations', () => {
     expect(routine.inputs).toMatchObject({
       pressWeakPoint: '', deadliftWeakPoint: '',
       squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false,
+      liftProgressionModes: {},
     });
     expect(routine.inputs.maxProgressionMode).toBe('fixed');
     if (oldVersion >= 5) {
       expect(template.inputs).toMatchObject({
         pressWeakPoint: '', deadliftWeakPoint: '', maxProgressionMode: 'fixed',
         squatTabataEnabled: false, pressTabataEnabled: false, deadliftTabataEnabled: false,
+        liftProgressionModes: {},
       });
     } else {
       expect(template).toBeUndefined();
@@ -323,8 +328,8 @@ describe('Tabata sprint compatibility', () => {
   });
 
   it('advances the database and backup versions for independent sprint options', () => {
-    expect(DATABASE_VERSION).toBe(15);
-    expect(BACKUP_VERSION).toBe(15);
+    expect(DATABASE_VERSION).toBe(16);
+    expect(BACKUP_VERSION).toBe(16);
   });
 
   it('adds disabled defaults while preserving explicit options, unknown data, and workout snapshots', () => {
@@ -356,7 +361,8 @@ describe('Tabata sprint compatibility', () => {
     expect(migrated).toEqual({
       ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
       profiles: original.profiles.map(profile => ({ ...profile, setTimerIntervalMs: 60000 })),
-      routines: [addTabataSprintOptions(routine), unknownRecord], templates: [addTabataSprintOptions(template)],
+      routines: [addLiftProgressionModes(addTabataSprintOptions(routine)), unknownRecord],
+      templates: [addLiftProgressionModes(addTabataSprintOptions(template))],
     });
     expect(migrated.routines[0].workouts).toBe(routine.workouts);
     expect(migrated.archives).toBe(original.archives);
@@ -397,8 +403,8 @@ describe('Tabata sprint compatibility', () => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    expect(await read('routines', 'r1')).toEqual(addTabataSprintOptions(routine));
-    expect(await read('templates', 't1')).toEqual(addTabataSprintOptions(template));
+    expect(await read('routines', 'r1')).toEqual(addLiftProgressionModes(addTabataSprintOptions(routine)));
+    expect(await read('templates', 't1')).toEqual(addLiftProgressionModes(addTabataSprintOptions(template)));
     expect(await read('archives', archive.id)).toEqual(archive);
     expect(await read('profiles', 'p1')).toEqual({ id: 'p1', activeRoutineId: 'r1', unknown: true, setTimerIntervalMs: 60000 });
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });

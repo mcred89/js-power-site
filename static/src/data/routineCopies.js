@@ -20,6 +20,7 @@ export const duplicateRoutine = (routine, profileId, name) => {
     inputs: {
       ...routine.inputs,
       microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
+      ...(routine.inputs?.liftProgressionModes ? { liftProgressionModes: { ...routine.inputs.liftProgressionModes } } : {}),
     },
     workouts: routine.workouts.map(workout => ({
       ...workout,
@@ -48,6 +49,7 @@ export const createRoutineTemplate = (routine, name) => {
     inputs: {
       ...routine.inputs,
       microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
+      ...(routine.inputs?.liftProgressionModes ? { liftProgressionModes: { ...routine.inputs.liftProgressionModes } } : {}),
     },
     createdAt: timestamp,
     updatedAt: timestamp,
