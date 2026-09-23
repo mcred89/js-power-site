@@ -6,12 +6,10 @@ import {
   adaptiveStatusForWorkout,
   clearExerciseOverrides,
   completeSessionSet,
-  correctMaxes,
   createRoutine,
   deleteFutureWorkout,
   finishWorkoutSession,
   reopenWorkoutSession,
-  refreshAdaptiveProgression,
   setSessionRpe,
   setWorkoutComplete,
   startWorkoutSession,
@@ -85,7 +83,6 @@ const WorkoutSessionHistory = lazy(() => import('./components/WorkoutSessionHist
 const WorkoutSummary = lazy(() => import('./components/WorkoutSessionHistory').then(module => ({ default: module.WorkoutSummary })));
 const PlansScreen = lazy(() => import('./components/PlansScreen').then(module => ({ default: module.PlansScreen })));
 const SettingsScreen = lazy(() => import('./components/SettingsScreen').then(module => ({ default: module.SettingsScreen })));
-const MaxCorrection = lazy(() => import('./components/PlanControls').then(module => ({ default: module.MaxCorrection })));
 const RoutineNameEditor = lazy(() => import('./components/PlanControls').then(module => ({ default: module.RoutineNameEditor })));
 const PlanSetup = lazy(() => import('./components/PlanControls').then(module => ({ default: module.PlanSetup })));
 const ProfileForm = lazy(() => import('./components/TrackerForms').then(module => ({ default: module.ProfileForm })));
@@ -765,6 +762,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     await changeSelectedRoutine(current => adjustSessionSet(current, workout.id, exerciseId, setId, values));
   };
 
+  const updatePlan = async (item, inputs) => {
+    const { commitPlanUpdate } = await import('./data/routineUpdates');
+    const current = routinesRef.current.find(entry => entry.id === item.id);
+    await commitPlanUpdate(current, inputs, saveRoutine);
+    flash('Plan updated. Completed and started workouts kept unchanged.');
+  };
+
   const changeWorkoutSetTimer = async timer => {
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
     const updated = updateSessionSetTimer(current, workout.id, timer);
@@ -825,6 +829,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const finishActiveWorkout = async () => {
+    const { refreshAdaptiveProgression } = await import('./data/routineRecalculation');
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
     const finished = finishWorkoutSession(current, workout.id);
     const adaptive = refreshAdaptiveProgression(finished);
@@ -878,6 +883,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       return;
     }
     if (target.session) {
+      const { refreshAdaptiveProgression } = await import('./data/routineRecalculation');
       const current = routinesRef.current.find(item => item.id === routine.id) || routine;
       const updatedRoutine = refreshAdaptiveProgression(reopenWorkoutSession(current, target.id)).routine;
       const updatedProfile = profileWithActiveWorkout(profile, routine.id);
@@ -1227,7 +1233,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} MaxCorrection={MaxCorrection} PlanSetup={PlanSetup} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, correct: (item, maxes) => { saveRoutine(correctMaxes(item, maxes)); flash('Future workouts updated.'); }, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, update: updatePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="history" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
             <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />

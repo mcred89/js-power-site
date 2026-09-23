@@ -222,6 +222,10 @@ body { min-width:320px; }
 .plan-status { padding:5px 9px; border-radius:999px; background:var(--accent-soft); }
 .plan-status.completed { color:#52665b; background:#e8eee9; }
 .plan-actions { padding:0 20px 14px; }
+.plan-update-action { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:0 20px 18px; }
+.plan-update-action .field-help { margin:0; }
+.active-plan-setup { padding:0 20px 20px; }
+.active-plan-setup .plan-setup { margin:0; padding:16px; }
 .completed-plan-details { border-top:1px solid var(--line); }
 .completed-plan-details > summary { padding:15px 20px; color:var(--accent); cursor:pointer; font-weight:800; }
 .completed-plan-contents { display:grid; gap:18px; padding:0 20px 20px; }
@@ -244,8 +248,6 @@ body { min-width:320px; }
 .routine-name-editor { display:grid; gap:12px; padding:16px 0 6px; border-top:1px solid var(--line); }
 .routine-name-editor .number-input { max-width:420px; }
 .routine-name-editor .secondary-button { min-height:42px; }
-.max-correction { padding:20px; border-top:1px solid var(--line); background:#fbfcfb; }
-.max-correction .secondary-button { margin-top:16px; }
 .settings-page { display:grid; gap:16px; }
 .settings-page > h1,.settings-page > .eyebrow { margin-bottom:0; }
 .settings-card { box-shadow:none; }
@@ -315,11 +317,11 @@ body { min-width:320px; }
 
 :root[data-theme='dark'] .number-input,:root[data-theme='dark'] .select-input,:root[data-theme='dark'] .option-input:not(:checked) + .option-text,:root[data-theme='dark'] .standalone-check,:root[data-theme='dark'] .exercise-row input,:root[data-theme='dark'] .session-stepper input,:root[data-theme='dark'] .rpe-picker button,:root[data-theme='dark'] .lift-tabs button { background:var(--paper); color:var(--ink); border-color:var(--line); }
 :root[data-theme='dark'] .site-header,:root[data-theme='dark'] .app-header,:root[data-theme='dark'] .session-topbar,:root[data-theme='dark'] .bottom-nav { background:rgba(21,28,24,.96); }
-:root[data-theme='dark'] .day,:root[data-theme='dark'] .max-correction { background:#1a231e; }
+:root[data-theme='dark'] .day { background:#1a231e; }
 @media(prefers-color-scheme:dark) {
   :root[data-theme='system'] .number-input,:root[data-theme='system'] .select-input,:root[data-theme='system'] .option-input:not(:checked) + .option-text,:root[data-theme='system'] .standalone-check,:root[data-theme='system'] .exercise-row input,:root[data-theme='system'] .session-stepper input,:root[data-theme='system'] .rpe-picker button,:root[data-theme='system'] .lift-tabs button { background:var(--paper); color:var(--ink); border-color:var(--line); }
   :root[data-theme='system'] .site-header,:root[data-theme='system'] .app-header,:root[data-theme='system'] .session-topbar,:root[data-theme='system'] .bottom-nav { background:rgba(21,28,24,.96); }
-  :root[data-theme='system'] .day,:root[data-theme='system'] .max-correction { background:#1a231e; }
+  :root[data-theme='system'] .day { background:#1a231e; }
 }
 .session-history { margin-top:28px; }
 .history-summary { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:20px; }

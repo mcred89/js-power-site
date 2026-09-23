@@ -1,14 +1,13 @@
 import {
   adjustSessionSet,
   completeSessionSet,
-  correctMaxes,
   createRoutine,
   reopenWorkoutSession,
-  refreshAdaptiveProgression,
   sessionElapsedSeconds,
   startWorkoutSession,
   substituteSessionExercise,
 } from './routines';
+import { correctMaxes, refreshAdaptiveProgression } from './routineRecalculation';
 import { duplicateRoutine } from './routineCopies';
 
 const inputs = {

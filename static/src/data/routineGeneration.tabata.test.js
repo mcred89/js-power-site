@@ -1,9 +1,10 @@
 import { buildRoutinePlan } from './routineGeneration';
 import { routineToCsv, routineToMarkdown } from './routineExports';
 import {
-  correctMaxes, createRoutine, createRoutineFromTemplate, setWorkoutComplete,
+  createRoutine, createRoutineFromTemplate, setWorkoutComplete,
   updateExercise, visibleExercise,
 } from './routines';
+import { correctMaxes } from './routineRecalculation';
 import { createRoutineTemplate, duplicateRoutine } from './routineCopies';
 
 const inputs = {

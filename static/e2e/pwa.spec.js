@@ -709,6 +709,192 @@ test('PWA bounds long History and Progress DOM while retaining complete metrics'
   await expect(page.locator('.chart-data tbody tr')).toHaveCount(0);
 });
 
+test('PWA updates the current plan while preserving recorded workouts and the workout queue', async ({ page }, testInfo) => {
+  test.setTimeout(60000);
+  await createProfile(page, 'Plan Update Athlete');
+  await page.getByRole('button', { name: 'Build a routine' }).click();
+  await page.getByLabel('Routine name').fill('Adjustable Plan');
+  await fillMaxes(page);
+  await selectVolume(page, 'Low');
+  await selectWeakPoints(page);
+  await page.getByLabel('Build a mesocycle from multiple cycles').check();
+  await page.getByLabel('Add a Strongman event to Deadlift day').check();
+  await page.getByLabel('Movement', { exact: true }).fill("Farmer's carry");
+  await page.getByLabel('Sets', { exact: true }).fill('3');
+  await page.getByLabel('Reps', { exact: true }).fill('1');
+  for (const lift of ['Squat', 'Press', 'Deadlift']) {
+    await page.getByLabel(`Add Tabata sprints to ${lift} day`).check();
+  }
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await expect(page.getByText('Routine created on this phone.')).toBeVisible();
+
+  // Start from a realistic existing plan with both recorded and paused sessions,
+  // plus a manual future exercise edit that a plan update must keep.
+  const before = await page.evaluate(async () => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mcilroy-method');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const records = await Promise.all(['routines', 'profiles'].map(store => new Promise((resolve, reject) => {
+        const request = database.transaction(store).objectStore(store).getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      })));
+      const routine = records[0][0];
+      const timestamp = '2026-09-20T12:00:00.000Z';
+      const completed = routine.workouts.find(workout => workout.name === 'Deadlift');
+      const paused = routine.workouts.find(workout => workout.name === 'Squat');
+      [completed, paused].forEach(workout => {
+        const isCompleted = workout === completed;
+        workout.completedAt = isCompleted ? timestamp : null;
+        workout.session = {
+          status: isCompleted ? 'completed' : 'paused',
+          startedAt: '2026-09-20T11:45:00.000Z',
+          completedAt: workout.completedAt,
+          stoppedAt: timestamp,
+          elapsedSeconds: 900,
+          runningSince: null,
+          setTimer: null,
+          primaryExerciseId: workout.exercises[0].id,
+          rpe: isCompleted ? 8 : null,
+          exercises: workout.exercises.map(exercise => ({
+            exerciseId: exercise.id,
+            movement: exercise.generated.movement,
+            prescription: exercise.generated.prescription,
+            plannedWeight: exercise.generated.weight,
+            original: null,
+            substitutedAt: null,
+            sets: [{
+              id: `${exercise.id}-recorded-set`, number: 1,
+              plannedWeight: exercise.generated.weight, plannedReps: 5,
+              actualWeight: exercise.generated.weight, actualReps: 5,
+              status: isCompleted ? 'completed' : 'pending',
+              completedAt: workout.completedAt, skippedAt: null, skipActionId: null,
+              splitSeconds: isCompleted ? 600 : null,
+            }],
+          })),
+        };
+      });
+      const future = routine.workouts.find(workout => workout.name === 'Deadlift' && !workout.completedAt);
+      future.exercises[0].overrides = { weight: '333' };
+      future.exercises.find(exercise => exercise.generated.movement.startsWith('Strongman event:')).overrides = { weight: '175' };
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction('routines', 'readwrite');
+        transaction.objectStore('routines').put(routine);
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+      });
+      return { routine, profiles: records[1] };
+    } finally {
+      database.close();
+    }
+  });
+  const readStoredPlan = () => page.evaluate(async () => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('mcilroy-method');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const [routines, profiles] = await Promise.all(['routines', 'profiles'].map(store => new Promise((resolve, reject) => {
+        const request = database.transaction(store).objectStore(store).getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      })));
+      return { routine: routines[0], profiles };
+    } finally {
+      database.close();
+    }
+  });
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  const currentPlan = page.locator('.plan-card.selected');
+  await expect(currentPlan).toContainText('Current plan');
+  await expect(currentPlan.getByRole('button', { name: 'Update plan', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('current-plan-update-action.png'), fullPage: true });
+  await currentPlan.getByRole('button', { name: 'Update plan', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Update plan', exact: true })).toBeVisible();
+  const initialReviewButton = page.getByRole('button', { name: 'Review changes', exact: true });
+  await expect(initialReviewButton).toBeInViewport();
+  const reviewButtonBounds = await initialReviewButton.boundingBox();
+  const navigationBounds = await page.getByRole('navigation', { name: 'App navigation' }).boundingBox();
+  expect(reviewButtonBounds.y).toBeGreaterThanOrEqual(0);
+  expect(reviewButtonBounds.y + reviewButtonBounds.height).toBeLessThanOrEqual(navigationBounds.y);
+  await page.screenshot({ path: testInfo.outputPath('update-plan-editor-initial-viewport.png') });
+  await expect(page.getByLabel('Deadlift max')).toHaveValue('405');
+  await expect(page.getByLabel('Deadlift increase')).toHaveValue('10');
+  await expect(page.getByLabel('Add Tabata sprints to Deadlift day')).toBeChecked();
+  await page.getByLabel('Add Tabata sprints to Deadlift day').uncheck();
+  await page.getByLabel('Deadlift max').fill('450');
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Plans', exact: true })).toBeVisible();
+  expect(await readStoredPlan()).toEqual(before);
+
+  await currentPlan.getByRole('button', { name: 'Update plan', exact: true }).click();
+  await expect(page.getByLabel('Add Tabata sprints to Deadlift day')).toBeChecked();
+  await expect(page.getByLabel('Deadlift max')).toHaveValue('405');
+  await page.getByLabel('Add Tabata sprints to Deadlift day').uncheck();
+  await page.getByLabel('Deadlift max').fill('450');
+  await page.getByLabel('Deadlift increase').fill('20');
+  await page.getByLabel('Deadlift event movement').fill('Sandbag carry');
+  await page.screenshot({ path: testInfo.outputPath('update-plan-editor.png'), fullPage: true });
+  expect(await page.locator('body').evaluate(element => element.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Review changes', exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('update-plan-review.png'), fullPage: true });
+  expect(await readStoredPlan()).toEqual(before);
+  await page.getByRole('button', { name: 'Back to editing', exact: true }).click();
+  await expect(page.getByLabel('Deadlift max')).toHaveValue('450');
+  await expect(page.getByLabel('Add Tabata sprints to Deadlift day')).not.toBeChecked();
+  await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+  await page.getByRole('button', { name: 'Save update', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Plans', exact: true })).toBeVisible();
+
+  const after = await readStoredPlan();
+  expect(after.profiles).toEqual(before.profiles);
+  expect(after.routine.id).toBe(before.routine.id);
+  expect(after.routine.inputs).toMatchObject({
+    maxDead: '450', deadliftIncrement: '20', deadliftEventMovement: 'Sandbag carry',
+    squatTabataEnabled: true, pressTabataEnabled: true, deadliftTabataEnabled: false,
+  });
+  expect(after.routine.workouts.map(workout => [workout.id, workout.sequence])).toEqual(
+    before.routine.workouts.map(workout => [workout.id, workout.sequence]),
+  );
+  after.routine.workouts.forEach(workout => {
+    const previous = before.routine.workouts.find(item => item.id === workout.id);
+    if (previous.completedAt || previous.session) {
+      expect(workout).toEqual(previous);
+      return;
+    }
+    expect(workout.effectiveMaxes.maxDead).toBe(450 + workout.cycleIndex * 20);
+    expect(workout.exercises.some(exercise => exercise.generated.movement === 'Tabata sprints')).toBe(workout.name !== 'Deadlift');
+    const retained = previous.exercises.filter(exercise => (
+      workout.name !== 'Deadlift' || exercise.generated.movement !== 'Tabata sprints'
+    ));
+    expect(workout.exercises.map(exercise => exercise.id)).toEqual(retained.map(exercise => exercise.id));
+    expect(workout.exercises.map(exercise => exercise.overrides)).toEqual(retained.map(exercise => exercise.overrides));
+    if (workout.name === 'Deadlift') {
+      expect(workout.exercises.find(exercise => exercise.generated.movement.startsWith('Strongman event:')).generated).toMatchObject({
+        movement: 'Strongman event: Sandbag carry', prescription: '3 × 1',
+      });
+      expect(workout.exercises[0].generated.weight).not.toBe(previous.exercises[0].generated.weight);
+    }
+  });
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  await page.locator('.plan-card.selected').getByRole('button', { name: 'Update plan', exact: true }).click();
+  await expect(page.getByLabel('Add Tabata sprints to Squat day')).toBeChecked();
+  await expect(page.getByLabel('Add Tabata sprints to Press day')).toBeChecked();
+  await expect(page.getByLabel('Add Tabata sprints to Deadlift day')).not.toBeChecked();
+  await expect(page.getByLabel('Deadlift max')).toHaveValue('450');
+  await expect(page.getByLabel('Deadlift increase')).toHaveValue('20');
+  expect(await readStoredPlan()).toEqual(after);
+});
+
 test('PWA tracks an autosaved workout session, history, and max correction', async ({ page }) => {
   await createProfile(page);
   await createRoutine(page);
@@ -761,9 +947,11 @@ test('PWA tracks an autosaved workout session, history, and max correction', asy
   await page.getByLabel('Routine name').fill('Renamed Smoke Plan');
   await page.getByRole('button', { name: 'Save name' }).click();
   await expect(page.getByText('Routine renamed.')).toBeVisible();
+  await page.getByRole('button', { name: 'Update plan', exact: true }).click();
   await page.getByLabel('Squat max').fill('400');
-  await page.getByRole('button', { name: 'Update future workouts' }).click();
-  await expect(page.getByText('Future workouts updated.')).toBeVisible();
+  await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+  await page.getByRole('button', { name: 'Save update', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Plans', exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'History' }).click();
   await squatWorkoutCards().click();

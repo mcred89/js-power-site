@@ -3,14 +3,12 @@ import {
   adaptiveCycleMaxes,
   archiveRoutine,
   completeSessionSet,
-  correctMaxes,
   createRoutine,
   createRoutineFromTemplate,
   deleteFutureWorkout,
   finishWorkoutSession,
   parsePrescription,
   reopenWorkoutSession,
-  refreshAdaptiveProgression,
   restoreRoutine,
   setSessionRpe,
   setWorkoutComplete,
@@ -23,6 +21,7 @@ import {
   updateExercise,
   visibleExercise,
 } from './routines';
+import { correctMaxes, refreshAdaptiveProgression } from './routineRecalculation';
 import { createRoutineTemplate, duplicateRoutine } from './routineCopies';
 import { routineHistoryToCsv, routinePlanToCsv } from './routineCsv';
 

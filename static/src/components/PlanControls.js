@@ -1,31 +1,5 @@
 import React, { useState } from 'react';
 
-export const MaxCorrection = ({ routine, onCorrect }) => {
-  const [maxes, setMaxes] = useState({
-    maxSquat: routine.inputs.maxSquat,
-    maxPress: routine.inputs.maxPress,
-    maxDead: routine.inputs.maxDead,
-  });
-  return (
-    <form className="max-correction" onSubmit={event => { event.preventDefault(); onCorrect(maxes); }}>
-      <p className="field-help">Completed workouts stay unchanged. Future generated weights update immediately.</p>
-      <div className="field-grid three-fields">
-        {[
-          ['maxSquat', 'Squat max'],
-          ['maxPress', 'Press max'],
-          ['maxDead', 'Deadlift max'],
-        ].map(([key, label]) => (
-          <label className="form-field" key={key}>
-            <span className="field-label">{label}</span>
-            <input className="number-input" type="number" min="1" required value={maxes[key]} onChange={event => setMaxes({ ...maxes, [key]: event.target.value })} />
-          </label>
-        ))}
-      </div>
-      <button className="secondary-button" type="submit">Update future workouts</button>
-    </form>
-  );
-};
-
 export const RoutineNameEditor = ({ routine, onSave, label = 'Routine' }) => {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(routine.name);
