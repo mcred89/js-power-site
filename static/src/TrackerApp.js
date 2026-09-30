@@ -77,6 +77,7 @@ const trackerHistoryDepth = state => state?.[TRACKER_HISTORY_KEY]?.depth || 0;
 // Today, workout detail, and the active session stay in this eager graph. Everything reached
 // through secondary navigation is requested on demand and can be added verbatim to precache.
 const RoutineBuilder = lazy(() => import('./components/RoutineBuilderScreen').then(module => ({ default: module.RoutineBuilderScreen })));
+const StrongmanDay = lazy(() => import('./components/StrongmanDay').then(module => ({ default: module.StrongmanDay })));
 const ProgressScreen = lazy(() => import('./components/ProgressScreen').then(module => ({ default: module.ProgressScreen })));
 const HistoryScreen = lazy(() => import('./components/HistoryScreen').then(module => ({ default: module.HistoryScreen })));
 const WorkoutSessionHistory = lazy(() => import('./components/WorkoutSessionHistory').then(module => ({ default: module.WorkoutSessionHistory })));
@@ -232,61 +233,6 @@ export const trackerLoadPolicy = view => ({
   persistence: view === 'settings',
 });
 
-const importConditions = items => items.flatMap(item => [
-  { key: item.imported.id, expected: item.local },
-  ...(item.result.id !== item.imported.id ? [{ key: item.result.id, expected: item.existingResult }] : []),
-]);
-
-export const importPlanBatch = plan => ({
-  puts: {
-    profiles: plan.profiles.filter(item => item.action !== 'skip').map(item => item.result),
-    routines: plan.routines.filter(item => item.action !== 'skip').map(item => item.result),
-    templates: (plan.templates || []).filter(item => item.action !== 'skip').map(item => item.result),
-    ...(plan.archives ? { archives: plan.archives.filter(item => item.action !== 'skip').map(item => item.result) } : {}),
-  },
-  conditions: {
-    profiles: plan.profiles.map(item => ({ key: item.imported.id, expected: item.local })),
-    routines: importConditions(plan.routines),
-    templates: (plan.templates || []).map(item => ({ key: item.imported.id, expected: item.local })),
-    ...(plan.archives ? { archives: importConditions(plan.archives) } : {}),
-  },
-});
-
-export const activateRoutineImport = (plan, destinationProfile, routineId, updatedAt = new Date().toISOString()) => {
-  const sourceRoutineId = routineId;
-  routineId = plan.routines.find(item => item.imported.id === sourceRoutineId)?.result.id || routineId;
-  const updatedProfile = {
-    ...destinationProfile,
-    activeRoutineId: routineId,
-    updatedAt,
-  };
-  const plannedProfile = plan.profiles.find(item => item.result.id === destinationProfile.id);
-  if (!plannedProfile) {
-    return {
-      ...plan,
-      routineActivation: { profileId: destinationProfile.id, routineId: sourceRoutineId },
-      profiles: [...plan.profiles, {
-        type: 'profile',
-        status: 'conflict',
-        action: 'merge',
-        imported: updatedProfile,
-        local: destinationProfile,
-        result: updatedProfile,
-      }],
-    };
-  }
-  return {
-    ...plan,
-    routineActivation: { profileId: destinationProfile.id, routineId: sourceRoutineId },
-    profiles: plan.profiles.map(item => item === plannedProfile ? {
-      ...item,
-      action: item.action === 'skip' ? 'merge' : item.action,
-      imported: { ...item.imported, activeRoutineId: routineId, updatedAt },
-      result: { ...item.result, activeRoutineId: routineId, updatedAt },
-    } : item),
-  };
-};
-
 export const profileWithActiveWorkout = (profile, routineId, updatedAt = new Date().toISOString()) => ({
   ...profile,
   activeWorkoutRoutineId: routineId,
@@ -299,25 +245,20 @@ export const profileAfterFinishedRoutine = (profile, routineId, updatedAt = new 
     : profile
 );
 
-const WorkoutExercises = ({ routine, workout, editable, onChange }) => (
+const WorkoutExerciseEditor = lazy(() => import('./components/WorkoutExerciseEditor'));
+
+const WorkoutExercises = ({ workout, editable, onChange }) => editable ? (
+  <Suspense fallback={<TrackerScreenFallback label="exercise editor" />}>
+    <WorkoutExerciseEditor workout={workout} onChange={onChange} />
+  </Suspense>
+) : (
   <div className="exercise-list">
     {workout.exercises.map(exercise => {
       const shown = visibleExercise(exercise);
       return (
         <div className="exercise-row" key={exercise.id}>
-          {editable ? (
-            <>
-              <input aria-label="Movement" defaultValue={shown.movement} onBlur={event => onChange(exercise.id, { movement: event.target.value })} />
-              <input aria-label="Weight" inputMode="decimal" defaultValue={shown.weight} placeholder="Weight" onBlur={event => onChange(exercise.id, { weight: event.target.value })} />
-              <input aria-label="Prescription" defaultValue={shown.prescription} placeholder="Prescription" onBlur={event => onChange(exercise.id, { prescription: event.target.value })} />
-              <button className="text-button" type="button" onClick={() => onChange(exercise.id, null)}>Use generated</button>
-            </>
-          ) : (
-            <>
-              <div><strong>{shown.movement}</strong><span>{shown.prescription || 'No prescription'}</span></div>
-              {shown.weight !== '' && <b>{shown.weight} lb</b>}
-            </>
-          )}
+          <div><strong>{shown.movement}</strong><span>{shown.prescription || 'No prescription'}</span></div>
+          {shown.weight !== '' && <b>{shown.weight} lb</b>}
         </div>
       );
     })}
@@ -354,17 +295,6 @@ export const templateBuilderInputs = template => ({
   pressIncrement: '',
   deadliftIncrement: '',
 });
-
-const AppearanceControl = ({ appearance, onChange }) => (
-  <label className="form-field appearance-control">
-    <span className="field-label">Appearance</span>
-    <select className="number-input" value={appearance} onChange={event => onChange(event.target.value)}>
-      <option value="system">Use device setting</option>
-      <option value="light">Light</option>
-      <option value="dark">Dark</option>
-    </select>
-  </label>
-);
 
 const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [profiles, setProfiles] = useState([]);
@@ -480,6 +410,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   }, []);
 
   const profile = profiles.find(item => item.id === selectedProfileId);
+  // Strongman records span plans. Fetch this history only when a day is opened;
+  // ordinary Today startup retains its small pointed reads.
+  const needsStrongmanHistory = Boolean(workoutId && routines.some(item => (
+    item.profileId === selectedProfileId && item.workouts?.some(day => day.id === workoutId && day.name === 'Strongman')
+  )));
   const todayRoutineKey = todayRoutineIds(profile).join('|');
   const todayIds = useMemo(() => todayRoutineKey ? todayRoutineKey.split('|') : [], [todayRoutineKey]);
 
@@ -501,7 +436,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   }, [loading, selectedProfileId, todayIds]);
 
   useEffect(() => {
-    if (loading || !selectedProfileId || !trackerLoadPolicy(view).profileRoutines) return;
+    if (loading || !selectedProfileId || (!trackerLoadPolicy(view).profileRoutines && !needsStrongmanHistory)) return;
     if (loadedProfileRoutinesFor.current === selectedProfileId) {
       setProfileRoutinesLoaded(true);
       return;
@@ -529,7 +464,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       setProfileRoutinesError(error.message);
     });
     return () => { profileLoadGeneration.current += 1; };
-  }, [loading, profileRoutinesRetry, selectedProfileId, view]);
+  }, [loading, needsStrongmanHistory, profileRoutinesRetry, selectedProfileId, view]);
 
   useEffect(() => {
     if (loading || !trackerLoadPolicy(view).templates || templatesLoaded) return;
@@ -767,6 +702,21 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const current = routinesRef.current.find(entry => entry.id === item.id);
     await commitPlanUpdate(current, inputs, saveRoutine);
     flash('Plan updated. Completed and started workouts kept unchanged.');
+  };
+
+  const saveStrongmanChanges = async (routineId, action, value) => {
+    const { commitStrongmanChange } = await import('./data/strongmanPersistence');
+    return commitStrongmanChange(routinesRef.current.find(item => item.id === routineId), profile.id, action, value, saveRoutine);
+  };
+
+  const saveStrongmanCompetition = (routineId, value) => saveStrongmanChanges(routineId, 'competition', value);
+
+  const saveStrongmanLog = (routineId, entries) => saveStrongmanChanges(routineId, 'log', entries);
+
+  const completeStrongmanDay = async complete => {
+    const message = await saveStrongmanChanges(routine.id, 'completion', { workoutId: workout.id, complete });
+    setWorkoutId(null);
+    flash(message);
   };
 
   const changeWorkoutSetTimer = async timer => {
@@ -1049,6 +999,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const plan = await runDataTaskInBackground(DATA_TASKS.PLAN_IMPORT, {
       backup: { profiles: incomingProfiles, routines: [incomingRoutine], templates: [] }, ...local,
     });
+    const { activateRoutineImport } = await loadImportTools();
     setImportPlan(activateRoutineImport(plan, destinationProfile, incomingRoutine.id));
   };
 
@@ -1056,7 +1007,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     if (dataTaskBusy) return;
     setDataTaskBusy(true);
     try {
-      const { importPlanSummary } = await loadImportTools();
+      const { importPlanSummary, importPlanBatch } = await loadImportTools();
       // An import preview describes one user decision. All stores commit together so an
       // invalid record, quota error, or abort cannot leave a partially imported backup.
       await applyBatch(importPlanBatch(importPlan));
@@ -1075,6 +1026,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       flash(`Import complete: ${summary.copy} copied, ${summary.merge} merged, ${summary.skip} skipped.`);
     } catch (error) {
       if (error.name === 'BatchConflictError') {
+        const { activateRoutineImport } = await loadImportTools();
         const local = await loadAllData();
         const backup = {
           profiles: importPlan.profiles.map(item => item.imported),
@@ -1191,10 +1143,20 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
           !templatesLoaded ? <TrackerScreenFallback label="routine builder" /> : <Suspense fallback={<TrackerScreenFallback label="routine builder" />}>
             <RoutineBuilder
               profile={profile}
+              routines={profileRoutines}
               count={profileRoutines.length}
               template={builderTemplate}
               onCreate={addRoutine}
               onCancel={() => { setBuilderTemplate(null); goBack(() => setView('plans')); }}
+            />
+          </Suspense>
+        ) : workout?.name === 'Strongman' && workout.session?.status !== 'paused' ? (
+          !profileRoutinesLoaded ? <TrackerScreenFallback label="strongman records" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="strongman day" />}>
+            <StrongmanDay key={workout.id} routine={routine} workout={workout} routines={profileRoutines}
+              onBack={() => goBack(() => setWorkoutId(null))}
+              onSaveCompetition={value => saveStrongmanCompetition(routine.id, value)}
+              onSaveLog={entries => saveStrongmanLog(routine.id, entries)}
+              onComplete={completeStrongmanDay}
             />
           </Suspense>
         ) : workout ? (
@@ -1224,8 +1186,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
                 <div className="next-workout">
                   <p>{pending[0].cycleLabel && <>{pending[0].cycleLabel} · </>}{pending[0].weekLabel}</p>
                   <h2>{pending[0].name}</h2>
-                  <WorkoutMaxes routine={routine} workout={pending[0]} />
-                  <WorkoutExercises routine={routine} workout={pending[0]} editable={false} />
+                  {pending[0].name === 'Strongman' ? <p>Your competition targets and training log are inside. Add the exercises you choose on the day.</p> : <>
+                    <WorkoutMaxes routine={routine} workout={pending[0]} />
+                    <WorkoutExercises routine={routine} workout={pending[0]} editable={false} />
+                  </>}
                   <button className="primary-button" type="button" onClick={() => showWorkout(pending[0])}>Open workout</button>
                 </div>
                 {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
@@ -1233,17 +1197,17 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, update: updatePlan, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, update: updatePlan, saveCompetition: saveStrongmanCompetition, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="history" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
             <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
           </Suspense>
         ) : view === 'progress' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="progress" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="progress" />}>
-            <ProgressScreen profile={profile} routines={progressRoutines} />
+            <ProgressScreen profile={profile} routines={progressRoutines} onSaveLog={saveStrongmanLog} />
           </Suspense>
         ) : (
-          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} busy={dataTaskBusy} refs={{ import: importRef }} AppearanceControl={AppearanceControl} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, backup: async () => { if (dataTaskBusy) return; setDataTaskBusy(true); try { const local = await loadAllData(); download(await runDataTaskInBackground('serialize-backup', local), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`); } catch (error) { flash(error.message); } finally { setDataTaskBusy(false); } }, transfer: makeTransfer, receiveQr: () => setReceivingQr(true), routineTransfer: async () => { const records = await getAllByIndex('routines', 'profileId', profile.id); setRoutines(current => [...current.filter(item => item.profileId !== profile.id), ...records]); setChoosingRoutineTransfer(true); }, importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
+          <Suspense fallback={<TrackerScreenFallback label="settings" />}><SettingsScreen profile={profile} profiles={profiles} defaultProfileId={defaultProfileId} appearance={appearance} persistent={persistent} routine={routine} completedCount={completed.length} hasRoutines={Boolean(routines.length)} busy={dataTaskBusy} refs={{ import: importRef }} actions={{ defaultProfile: async id => { await save('metadata', { key: 'defaultProfileId', value: id }); setDefaultProfileId(id); flash(`${profiles.find(item => item.id === id).name} is now the default profile.`); }, appearance: onAppearanceChange, persistence: async () => { const granted = await requestPersistentStorage(); setPersistent(granted); flash(granted ? 'Persistent storage enabled.' : 'Chrome did not grant persistent storage. Keep a recent backup.'); }, backup: async () => { if (dataTaskBusy) return; setDataTaskBusy(true); try { const local = await loadAllData(); download(await runDataTaskInBackground('serialize-backup', local), `mcilroy-method-backup-${new Date().toISOString().slice(0, 10)}.json`); } catch (error) { flash(error.message); } finally { setDataTaskBusy(false); } }, transfer: makeTransfer, receiveQr: () => setReceivingQr(true), routineTransfer: async () => { const records = await getAllByIndex('routines', 'profileId', profile.id); setRoutines(current => [...current.filter(item => item.profileId !== profile.id), ...records]); setChoosingRoutineTransfer(true); }, importFile: event => { if (event.target.files[0]) importBackupFile(event.target.files[0]); event.target.value = ''; }, deleteProfile }} /></Suspense>
         )}
       </main>
 
@@ -1266,5 +1230,4 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   );
 };
 
-export { AppearanceControl };
 export default TrackerApp;

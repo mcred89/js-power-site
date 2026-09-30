@@ -1,0 +1,46 @@
+.strongman-training { padding:24px; }
+.strongman-training h2,.strongman-training h3,.strongman-result-editor h3,.strongman-result-editor h4 { margin:0; }
+.strongman-training-heading,.strongman-training-entry-heading,.strongman-training-set-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:16px; }
+.strongman-training-entries { display:grid; gap:16px; margin-block:20px; }
+.strongman-training-entry { padding:18px; border:1px solid var(--line); border-radius:14px; background:var(--paper); }
+.strongman-training-entry-heading p { margin:6px 0 0; font-size:13px; }
+.strongman-training-entry-heading h3 { overflow-wrap:anywhere; font-size:18px; }
+.strongman-training-results { padding-left:24px; margin:16px 0; }
+.strongman-training-results li { padding:5px 0 5px 4px; font-variant-numeric:tabular-nums; }
+.strongman-training-attempt { display:inline-block; color:var(--muted); margin-left:10px; font-size:12px; font-weight:700; }
+.strongman-training-notes { white-space:pre-wrap; overflow-wrap:anywhere; color:var(--muted); }
+.strongman-training-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+.strongman-training-actions button,.strongman-training-entry-heading button,.strongman-training-set-heading button { min-height:44px; }
+.strongman-training-delete { margin-top:16px; padding:14px; border:1px solid var(--line); border-radius:10px; }
+.strongman-training-delete p { margin:0 0 12px; }
+.strongman-result-editor { padding:20px; margin-top:20px; border:1px solid var(--line); border-radius:16px; background:var(--paper); color:var(--ink); }
+.strongman-result-editor h3:focus { outline:none; }
+.strongman-result-editor > p { margin:8px 0 20px; }
+.strongman-result-editor fieldset { margin:0; padding:0; border:0; min-width:0; }
+.strongman-result-editor fieldset:disabled { opacity:.75; }
+.strongman-result-editor label { display:grid; gap:7px; min-width:0; }
+.strongman-result-editor .number-input,.strongman-result-editor .select-input { width:100%; min-width:0; color:var(--ink); background:var(--paper); border-color:var(--line); }
+.strongman-result-editor .select-input { min-height:48px; }
+.strongman-result-editor textarea.number-input { height:auto; min-height:82px; padding:12px; resize:vertical; font:inherit; }
+.strongman-training-field { margin-bottom:18px; }
+.strongman-training-identity { display:grid; grid-template-columns:minmax(0,1fr) 170px; gap:14px; margin-bottom:20px; }
+.strongman-training-course { padding:16px; border:1px solid var(--line); border-radius:12px; margin-bottom:20px; }
+.strongman-training-course p { font-size:13px; line-height:1.5; }
+.strongman-training-implement { display:grid; gap:12px; padding-top:14px; margin-top:14px; border-top:1px solid var(--line); }
+.strongman-training-hint { font-size:13px; color:var(--muted); margin:0 0 12px; }
+.strongman-training-sets { display:grid; gap:12px; margin-bottom:12px; }
+.strongman-training-set { padding:16px; border:1px solid var(--line); border-radius:12px; }
+.strongman-training-set-heading { align-items:center; margin-bottom:12px; }
+.strongman-training-set-heading h4 { font-size:15px; }
+.strongman-training-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.strongman-training-outcome { margin-top:12px; }
+.strongman-training-outcome .select-input { max-width:300px; }
+.strongman-result-editor > fieldset > .secondary-button { margin-bottom:20px; }
+.strongman-training-error { color:var(--danger,#a73535); font-weight:650; line-height:1.5; }
+@media (max-width:600px) {
+  .strongman-training { padding:18px; }
+  .strongman-result-editor { padding:16px; }
+  .strongman-training-identity { grid-template-columns:1fr; }
+  .strongman-training-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .strongman-training-set,.strongman-training-course,.strongman-training-entry { padding:14px; }
+}

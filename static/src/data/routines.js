@@ -60,9 +60,12 @@ export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) 
     name,
     inputs: {
       ...inputs,
+      strongmanCompetition: inputs.strongmanCompetition
+        ? JSON.parse(JSON.stringify(inputs.strongmanCompetition)) : null,
       ...(inputs.liftProgressionModes ? { liftProgressionModes: { ...inputs.liftProgressionModes } } : {}),
     },
     workouts,
+    strongmanLog: [],
     archived: false,
     createdAt: timestamp,
     updatedAt: timestamp,

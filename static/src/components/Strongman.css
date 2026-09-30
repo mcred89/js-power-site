@@ -1,0 +1,63 @@
+.strongman-competition-card { margin:20px 0; padding:20px; border:1px solid var(--line); border-radius:16px; background:var(--paper); }
+.strongman-progress-tabs { display:flex; gap:8px; margin-bottom:24px; padding:5px; border:1px solid var(--line); border-radius:12px; background:var(--paper); }
+.strongman-progress-tabs button { flex:1; min-height:44px; border:0; border-radius:8px; color:var(--muted); background:transparent; font:inherit; font-weight:700; cursor:pointer; }
+.strongman-progress-tabs button.selected { color:var(--accent-dark); background:var(--accent-soft); }
+.strongman-card-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.strongman-card-heading h2,.strongman-competition-event h3,.strongman-component h4 { margin:0; }
+.strongman-card-heading .eyebrow { margin-bottom:7px; }
+.strongman-card-heading > .text-button { min-height:44px; margin:-8px 0 0; padding:8px 0 8px 8px; }
+.strongman-help { margin:10px 0 16px; color:var(--muted); font-size:13px; line-height:1.55; }
+.strongman-competition-events { margin-top:16px; }
+.strongman-competition-event + .strongman-competition-event { margin-top:20px; padding-top:20px; border-top:1px solid var(--line); }
+.strongman-target { margin:8px 0 14px; color:var(--accent-dark); font-size:14px; font-weight:650; line-height:1.5; }
+.strongman-event-results { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 16px; margin:0; }
+.strongman-event-results dt { color:var(--muted); font-size:11px; line-height:1.4; }
+.strongman-event-results dd { margin:4px 0 0; font-size:14px; font-weight:650; line-height:1.5; overflow-wrap:anywhere; }
+.strongman-event-results dd small { display:block; color:var(--muted); font-size:11px; font-weight:400; }
+.strongman-medley-components { display:grid; gap:12px; margin-top:16px; }
+.strongman-component { padding:14px; border-left:3px solid var(--line); border-radius:0 10px 10px 0; background:var(--canvas); }
+.strongman-component h4 { font-size:14px; }
+.strongman-component .strongman-target { font-size:13px; }
+.strongman-component > summary { cursor:pointer; font-size:13px; line-height:1.5; }
+.strongman-component-title { display:inline; }
+.strongman-component-title > span { display:block; color:var(--accent-dark); margin:3px 0; }
+.strongman-component > summary > small { display:block; color:var(--muted); font-size:11px; }
+.strongman-component[open] > summary { margin-bottom:12px; }
+.strongman-record-details { margin-top:10px; font-size:12px; }
+.strongman-record-details > summary { min-height:32px; padding:6px 0; color:var(--accent); cursor:pointer; }
+.strongman-record-details[open] > summary { margin-bottom:8px; }
+.strongman-saving-fieldset { min-width:0; margin:0; padding:0; border:0; }
+.strongman-editor-heading-fields,.strongman-event-name-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.strongman-editor-events { display:grid; gap:16px; margin:20px 0 14px; }
+.strongman-editor-event,.strongman-editor-component { min-width:0; margin:0; padding:14px; border:1px solid var(--line); border-radius:12px; }
+.strongman-editor-event > legend,.strongman-editor-component > legend { padding:0 6px; font-size:13px; font-weight:750; }
+.strongman-target-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:14px; }
+.strongman-editor-components { display:grid; gap:12px; margin-top:12px; }
+.strongman-editor-components > .strongman-help { margin:0; }
+.strongman-event-time { max-width:280px; }
+.strongman-time-goal { margin-top:12px; }
+.strongman-remove { min-height:44px; margin-top:6px; padding:8px 0; font-size:12px; }
+.strongman-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
+.strongman-actions .primary-button { width:auto; margin:0; }
+.strongman-record-filters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:18px 0; }
+.strongman-record-summary { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:16px 0; }
+.strongman-record-metric { display:grid; gap:6px; padding:14px; border-radius:12px; background:var(--canvas); }
+.strongman-record-metric > small,.strongman-record-metric > span { color:var(--muted); font-size:12px; line-height:1.5; }
+.strongman-record-metric > strong { font-size:17px; line-height:1.4; }
+.strongman-result-history { display:grid; gap:10px; padding:0; margin:18px 0; list-style:none; }
+.strongman-result-history > li { padding:14px; border:1px solid var(--line); border-radius:12px; }
+.strongman-result-history-heading { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:8px; }
+.strongman-result-history-heading > small { color:var(--muted); }
+.strongman-result-history p { margin:8px 0; font-size:13px; line-height:1.5; }
+.strongman-result-history .strongman-actions { margin-top:4px; }
+.strongman-result-history .text-button { min-height:44px; padding:8px 0; }
+.strongman-result-history .strongman-actions .text-button + .text-button { margin-left:16px; }
+.strongman-result-editor-slot { margin:16px 0; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--canvas); }
+.strongman-delete-confirm { padding:12px; border:1px solid var(--line); border-radius:10px; }
+.strongman-record-select { margin:14px 0; }
+@media (max-width:480px) {
+  .strongman-competition-card { padding:16px; }
+  .strongman-editor-heading-fields,.strongman-event-name-fields,.strongman-record-filters { grid-template-columns:minmax(0,1fr); }
+  .strongman-editor-event,.strongman-editor-component { padding:12px; }
+  .strongman-card-heading { flex-wrap:wrap; }
+}

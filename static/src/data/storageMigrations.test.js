@@ -14,6 +14,7 @@ import {
   migrateBackup,
 } from './storageMigrations';
 import { parseBackup, exportBackup } from './storageBackup';
+import { addStrongmanTracking } from './strongman';
 import { IDBFactory } from 'fake-indexeddb';
 
 // fake-indexeddb follows the browser cloning contract; CRA's Jest runtime predates
@@ -78,6 +79,7 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 14 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 15 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 16 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 17 } },
     ]);
   });
 
@@ -328,8 +330,8 @@ describe('Tabata sprint compatibility', () => {
   });
 
   it('advances the database and backup versions for independent sprint options', () => {
-    expect(DATABASE_VERSION).toBe(16);
-    expect(BACKUP_VERSION).toBe(16);
+    expect(DATABASE_VERSION).toBe(17);
+    expect(BACKUP_VERSION).toBe(17);
   });
 
   it('adds disabled defaults while preserving explicit options, unknown data, and workout snapshots', () => {
@@ -361,8 +363,8 @@ describe('Tabata sprint compatibility', () => {
     expect(migrated).toEqual({
       ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
       profiles: original.profiles.map(profile => ({ ...profile, setTimerIntervalMs: 60000 })),
-      routines: [addLiftProgressionModes(addTabataSprintOptions(routine)), unknownRecord],
-      templates: [addLiftProgressionModes(addTabataSprintOptions(template))],
+      routines: [addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(routine))), unknownRecord],
+      templates: [addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(template)))],
     });
     expect(migrated.routines[0].workouts).toBe(routine.workouts);
     expect(migrated.archives).toBe(original.archives);
@@ -403,8 +405,8 @@ describe('Tabata sprint compatibility', () => {
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    expect(await read('routines', 'r1')).toEqual(addLiftProgressionModes(addTabataSprintOptions(routine)));
-    expect(await read('templates', 't1')).toEqual(addLiftProgressionModes(addTabataSprintOptions(template)));
+    expect(await read('routines', 'r1')).toEqual(addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(routine))));
+    expect(await read('templates', 't1')).toEqual(addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(template))));
     expect(await read('archives', archive.id)).toEqual(archive);
     expect(await read('profiles', 'p1')).toEqual({ id: 'p1', activeRoutineId: 'r1', unknown: true, setTimerIntervalMs: 60000 });
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });

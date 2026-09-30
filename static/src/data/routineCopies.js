@@ -1,4 +1,5 @@
 import { restoreLegacyEventSlots } from './retiredStrongman';
+import { cloneStrongmanCompetition } from './strongman';
 
 // Copy and template creation are loaded only from plan actions.
 const makeId = () => {
@@ -21,7 +22,9 @@ export const duplicateRoutine = (routine, profileId, name) => {
       ...routine.inputs,
       microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
       ...(routine.inputs?.liftProgressionModes ? { liftProgressionModes: { ...routine.inputs.liftProgressionModes } } : {}),
+      ...(routine.inputs?.strongmanCompetition ? { strongmanCompetition: cloneStrongmanCompetition(routine.inputs.strongmanCompetition) } : {}),
     },
+    strongmanLog: [],
     workouts: routine.workouts.map(workout => ({
       ...workout,
       id: makeId(),
@@ -50,6 +53,7 @@ export const createRoutineTemplate = (routine, name) => {
       ...routine.inputs,
       microCycles: routine.inputs?.microCycles?.map(cycle => ({ ...cycle })),
       ...(routine.inputs?.liftProgressionModes ? { liftProgressionModes: { ...routine.inputs.liftProgressionModes } } : {}),
+      ...(routine.inputs?.strongmanCompetition ? { strongmanCompetition: cloneStrongmanCompetition(routine.inputs.strongmanCompetition) } : {}),
     },
     createdAt: timestamp,
     updatedAt: timestamp,

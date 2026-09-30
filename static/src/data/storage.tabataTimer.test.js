@@ -1,4 +1,5 @@
 import { IDBFactory } from 'fake-indexeddb';
+import { addStrongmanTracking } from './strongman';
 import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { DATABASE_VERSION, runDatabaseMigrations, addLiftProgressionModes } from './storageMigrations';
@@ -131,7 +132,7 @@ it('upgrades v13 backups purely and round-trips persisted timer state and unknow
     version: BACKUP_VERSION,
     dataSchemaVersion: DATABASE_VERSION,
     profiles: original.profiles.map(addSetTimerPreference),
-    routines: [addLiftProgressionModes(addSetTimers(addTabataTimers(routine))), unknown],
+    routines: [addStrongmanTracking(addLiftProgressionModes(addSetTimers(addTabataTimers(routine)))), unknown],
   });
   expect(migrated.archives).toBe(original.archives);
   expect(JSON.stringify(original)).toBe(serialized);
@@ -180,10 +181,10 @@ it('upgrades a deployed v13 IndexedDB while retaining mixed history and unrelate
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-  expect(await read('routines', 'r1')).toEqual(addLiftProgressionModes(addSetTimers(addTabataTimers(routine))));
-  expect(await read('routines', 'mixed')).toEqual(addLiftProgressionModes(addSetTimers(mixed)));
+  expect(await read('routines', 'r1')).toEqual(addStrongmanTracking(addLiftProgressionModes(addSetTimers(addTabataTimers(routine)))));
+  expect(await read('routines', 'mixed')).toEqual(addStrongmanTracking(addLiftProgressionModes(addSetTimers(mixed))));
   expect(await read('profiles', 'p1')).toEqual(addSetTimerPreference(profile));
-  expect(await read('templates', 't1')).toEqual(addLiftProgressionModes(template));
+  expect(await read('templates', 't1')).toEqual(addStrongmanTracking(addLiftProgressionModes(template)));
   expect(await read('archives', archive.id)).toEqual(archive);
   expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
   database.close();

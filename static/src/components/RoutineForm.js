@@ -2,6 +2,7 @@ import React, { Component } from 'react';
 import RadioOrCheckGroup from './RadioOrCheckGroup';
 import NumberInput from './NumberInput';
 import LiftProgressionControls from './LiftProgressionControls';
+import { StrongmanCompetitionEditor } from './StrongmanCompetition';
 
 const eventLifts = [
   { key: 'squat', label: 'Squat' },
@@ -30,6 +31,7 @@ const defaultFormState = {
   pressWeakPoint: '',
   deadliftWeakPoint: '',
   includeStrongmanDay: false,
+  strongmanCompetition: null,
   includeBackoffSets: false,
   squatEventEnabled: false,
   squatEventMovement: '',
@@ -243,6 +245,11 @@ export class RoutineForm extends Component {
               <span>Include a dedicated Strongman day</span>
             </label>
           </div>
+          {this.state.includeStrongmanDay && <StrongmanCompetitionEditor
+            value={this.state.strongmanCompetition}
+            knownMovements={this.props.knownMovements}
+            onChange={strongmanCompetition => this.setState({ strongmanCompetition })}
+          />}
           <fieldset className="event-group">
             <legend className="option-title">Strongman events <span className="optional-label">Optional</span></legend>
             <p className="field-help">Add your own event to any main-lift day.</p>

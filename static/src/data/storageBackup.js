@@ -7,9 +7,10 @@ import {
 import { retireStrongmanData } from './retiredStrongman';
 import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
+import { addStrongmanTracking, validateStrongmanRecord } from './strongman';
 
 // Backup preparation runs in the on-demand data task worker, outside startup.
-export const BACKUP_VERSION = 16;
+export const BACKUP_VERSION = 17;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -118,6 +119,13 @@ export const backupMigrations = {
     routines: Array.isArray(backup.routines) ? backup.routines.map(addLiftProgressionModes) : backup.routines,
     templates: Array.isArray(backup.templates) ? backup.templates.map(addLiftProgressionModes) : backup.templates,
   }),
+  17: backup => ({
+    ...backup,
+    version: 17,
+    dataSchemaVersion: 17,
+    routines: Array.isArray(backup.routines) ? backup.routines.map(addStrongmanTracking) : backup.routines,
+    templates: Array.isArray(backup.templates) ? backup.templates.map(addStrongmanTracking) : backup.templates,
+  }),
 };
 
 export const migrateBackup = original => {
@@ -157,5 +165,6 @@ export const parseBackup = contents => {
       !Array.isArray(backup.templates) || !Array.isArray(backup.archives)) {
     throw new Error('This is not a supported McIlroy Method backup.');
   }
+  [...backup.routines, ...backup.templates].forEach(validateStrongmanRecord);
   return backup;
 };

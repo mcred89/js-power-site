@@ -1,4 +1,4 @@
-import { activateRoutineImport, importPlanBatch } from './TrackerApp';
+import { activateRoutineImport, importPlanBatch } from './data/importPersistence';
 
 it('imports archived records atomically without overwriting a conflicting local archive', () => {
   const local = { id: 'routines:event', record: { id: 'event', name: 'Local block' } };

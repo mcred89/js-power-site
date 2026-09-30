@@ -1,8 +1,9 @@
 import { retireStrongmanData } from './retiredStrongman';
 import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
+import { addStrongmanTracking } from './strongman';
 
-export const DATABASE_VERSION = 16;
+export const DATABASE_VERSION = 17;
 
 // These shipped steps remain available for installations that skipped releases.
 export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
@@ -282,6 +283,10 @@ export const databaseMigrations = {
   16: ({ transaction, done }) => migrateRecordStores(transaction, 16, {
     routines: addLiftProgressionModes,
     templates: addLiftProgressionModes,
+  }, done),
+  17: ({ transaction, done }) => migrateRecordStores(transaction, 17, {
+    routines: addStrongmanTracking,
+    templates: addStrongmanTracking,
   }, done),
 };
 

@@ -1,4 +1,5 @@
 import { IDBFactory } from 'fake-indexeddb';
+import { addStrongmanTracking } from './strongman';
 import {
   addLiftProgressionModes, DATABASE_VERSION, runDatabaseMigrations,
 } from './storageMigrations';
@@ -88,15 +89,15 @@ describe('per-lift progression compatibility', () => {
 
     expect(migrated).toEqual({
       ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
-      routines: [addLiftProgressionModes(routine), configured, unknown],
-      templates: [addLiftProgressionModes(template)],
+      routines: [addStrongmanTracking(addLiftProgressionModes(routine)), addStrongmanTracking(configured), unknown],
+      templates: [addStrongmanTracking(addLiftProgressionModes(template))],
     });
     expect(migrated.routines[0].workouts).toBe(routine.workouts);
-    expect(migrated.routines[1]).toBe(configured);
+    expect(migrated.routines[1]).toEqual(addStrongmanTracking(configured));
     expect(migrated.routines[2]).toBe(unknown);
     expect(migrated.archives).toBe(original.archives);
     expect(JSON.stringify(original)).toBe(before);
-    expect(backupMigrations[16](original)).toEqual(migrated);
+    expect(backupMigrations[17](backupMigrations[16](original))).toEqual(migrated);
     const restored = parseBackup(exportBackup(migrated.profiles, migrated.routines, migrated.templates, migrated.archives));
     expect(restored.routines).toEqual(migrated.routines);
     expect(restored.templates).toEqual(migrated.templates);
@@ -141,11 +142,11 @@ describe('per-lift progression compatibility', () => {
       request.onerror = () => reject(request.error);
     });
     for (const routine of routines) {
-      expect(await read('routines', routine.id)).toEqual(addLiftProgressionModes(routine));
+      expect(await read('routines', routine.id)).toEqual(addStrongmanTracking(addLiftProgressionModes(routine)));
     }
-    expect(await read('routines', configured.id)).toEqual(configured);
+    expect(await read('routines', configured.id)).toEqual(addStrongmanTracking(configured));
     expect(await read('routines', unknown.id)).toEqual(unknown);
-    expect(await read('templates', template.id)).toEqual(addLiftProgressionModes(template));
+    expect(await read('templates', template.id)).toEqual(addStrongmanTracking(addLiftProgressionModes(template)));
     expect(await read('profiles', profile.id)).toEqual(profile);
     expect(await read('archives', archive.id)).toEqual(archive);
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });

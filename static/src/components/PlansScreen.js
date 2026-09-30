@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { visibleExercise } from '../data/routines';
 import { PlanUpdateEditor } from './PlanUpdateEditor';
+import { StrongmanCompetitionCard } from './StrongmanCompetition';
 
 export const isPlanComplete = routine => (
   routine.workouts.length > 0 && routine.workouts.every(workout => Boolean(workout.completedAt))
@@ -63,6 +64,11 @@ export const PlansScreen = ({ profile, routines, selectedId, templates, actions,
           <div className="plan-actions"><div className="button-row"><RoutineNameEditor routine={item} onSave={name => actions.rename(item, name)} /><button className="text-button" type="button" onClick={() => actions.copy(item)}>Copy</button><button className="text-button" type="button" onClick={() => actions.saveTemplate(item)}>Save as template</button><button className="text-button danger-text" type="button" onClick={() => actions.delete(item)}>Delete</button></div></div>
           {completed && <CompletedPlanDetails routine={item} PlanSetup={PlanSetup} />}
           {item.id === selectedId && !completed && <div className="active-plan-setup"><PlanSetup routine={item} /></div>}
+          {(item.inputs?.includeStrongmanDay || item.inputs?.strongmanCompetition) && <StrongmanCompetitionCard
+            routine={item}
+            routines={routines}
+            onSaveCompetition={value => actions.saveCompetition(item.id, value)}
+          />}
         </article>;
       })}
       <div className="template-library"><div><p className="eyebrow">Reusable setups</p><h2>Templates</h2><p>Templates regenerate a fresh routine from saved generator settings.</p></div>{!templates.length ? <p>No templates yet. Save one from a routine above.</p> : templates.map(item => <article className="template-card" key={item.id}><strong>{item.name}</strong><div className="button-row"><button className="primary-button small-primary" type="button" onClick={() => actions.useTemplate(item)}>Use template</button><RoutineNameEditor routine={item} label="Template" onSave={name => actions.renameTemplate(item, name)} /><button className="text-button danger-text" type="button" onClick={() => actions.deleteTemplate(item)}>Delete</button></div></article>)}</div>

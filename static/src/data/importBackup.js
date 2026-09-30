@@ -1,13 +1,45 @@
 import { serializedRecordsEqual } from './recordComparison';
 import { isSupportedRoutine, retireStrongmanData } from './retiredStrongman';
+import { validateStrongmanRecord } from './strongman';
+export { importPlanBatch, activateRoutineImport } from './importPersistence';
 
 const mergeRecord = (local, imported) => ({ ...imported, ...local });
+
+// Preserve both versions of a conflicting training entry. Imported copies have
+// stable IDs, so importing the same backup again cannot duplicate history.
+const mergeStrongmanLogs = (local, imported) => {
+  const merged = [...local];
+  const reservedIds = new Set([...local, ...imported].map(entry => entry.id));
+  imported.forEach(entry => {
+    const existing = merged.find(item => item.id === entry.id);
+    if (!existing) { merged.push(entry); return; }
+    if (serializedRecordsEqual(existing, entry) || merged.some(item => (
+      serializedRecordsEqual({ ...item, id: entry.id }, entry)
+    ))) return;
+    const baseId = `${entry.id}:imported-copy`;
+    let id = baseId;
+    let suffix = 2;
+    while (reservedIds.has(id)) {
+      id = `${baseId}:${suffix}`;
+      suffix += 1;
+    }
+    reservedIds.add(id);
+    merged.push({ ...entry, id });
+  });
+  return merged;
+};
 
 const mergeRoutine = (local, imported) => {
   const localWorkouts = Array.isArray(local.workouts) ? local.workouts : [];
   const localWorkoutIds = new Set(localWorkouts.map(workout => workout.id));
   return {
     ...mergeRecord(local, imported),
+    ...((Array.isArray(local.strongmanLog) || Array.isArray(imported.strongmanLog)) ? {
+      strongmanLog: mergeStrongmanLogs(
+        Array.isArray(local.strongmanLog) ? local.strongmanLog : [],
+        Array.isArray(imported.strongmanLog) ? imported.strongmanLog : [],
+      ),
+    } : {}),
     workouts: [
       ...localWorkouts,
       ...(Array.isArray(imported.workouts)
@@ -74,6 +106,7 @@ const reconcileProfile = (profile, routines) => {
 export const createImportPlan = (backup, profiles, routines, templates = [], archives = []) => {
   const incoming = [...backup.routines, ...(backup.templates || [])].some(record => !isSupportedRoutine(record))
     ? retireStrongmanData(backup, { preferScheduled: true }) : backup;
+  [...incoming.routines, ...(incoming.templates || [])].forEach(validateStrongmanRecord);
   const plan = {
     profiles: planStore(incoming.profiles, profiles, 'profile'),
     routines: planStore(incoming.routines, routines, 'routine'),

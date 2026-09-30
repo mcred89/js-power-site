@@ -1,6 +1,17 @@
 import React from 'react';
 
-export const SettingsScreen = ({ profile, profiles, defaultProfileId, appearance, persistent, hasRoutines, busy, refs, actions, AppearanceControl }) => (
+const AppearanceControl = ({ appearance, onChange }) => (
+  <label className="form-field appearance-control">
+    <span className="field-label">Appearance</span>
+    <select className="number-input" value={appearance} onChange={event => onChange(event.target.value)}>
+      <option value="system">Use device setting</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  </label>
+);
+
+export const SettingsScreen = ({ profile, profiles, defaultProfileId, appearance, persistent, hasRoutines, busy, refs, actions }) => (
   <section className="section-page settings-page"><p className="eyebrow">This phone</p><h1>Settings & backup</h1>
     <article className="settings-card"><h2>Default profile</h2><p>Choose the profile that opens automatically when you launch the app.</p><label className="form-field"><span className="field-label">Open with</span><select className="number-input" aria-label="Default profile" value={defaultProfileId || profiles[0].id} onChange={event => actions.defaultProfile(event.target.value)}>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label></article>
     <article className="settings-card"><h2>Appearance</h2><p>Follow this device or choose a theme for the app.</p><AppearanceControl appearance={appearance} onChange={actions.appearance} /></article>
