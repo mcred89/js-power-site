@@ -310,7 +310,7 @@ export const ActiveWorkoutSession = ({
   const rpePicker = exercise.exerciseId === session.primaryExerciseId && <fieldset className="rpe-picker">
     <legend>Main-lift RPE</legend>
     <div>{Array.from({ length: 10 }, (_, index) => index + 1).map(value => (
-      <button className={session.rpe === value ? 'selected' : ''} type="button" onClick={() => { flushAllDrafts(); onRpe(value); }} key={value}>{value}</button>
+      <button className={session.rpe === value ? 'selected' : ''} type="button" aria-pressed={session.rpe === value} onClick={() => { flushAllDrafts(); onRpe(value); }} key={value}>{value}</button>
     ))}</div>
   </fieldset>;
 

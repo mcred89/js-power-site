@@ -1,5 +1,6 @@
 const { expect, test } = require('./fixtures');
 const { checkOptionHighlights, createProfile, createRoutine, fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
+const { assertReadable } = require('./control-contrast.helpers');
 const usesLocalReleaseFixtures = !process.env.SMOKE_BASE_URL;
 
 // Only the intentional failed runtime-image request is expected to reach the
@@ -1081,6 +1082,7 @@ test('PWA deletes a profile only after confirmation', async ({ page }) => {
 
 test('PWA atomically installs updates and preserves release-independent transfers', async ({ page }) => {
   test.skip(!usesLocalReleaseFixtures, 'Release switching is available only from the local smoke server.');
+  await page.addInitScript(() => localStorage.setItem('mcilroy-method-appearance', 'dark'));
   await page.goto('/');
   // Ensure TrackerApp has committed its update listener before asking Chromium
   // to discover the next release.
@@ -1109,6 +1111,8 @@ test('PWA atomically installs updates and preserves release-independent transfer
     (await navigator.serviceWorker.getRegistration()).waiting,
   ))).toBe(true);
   await expect(page.getByText('A new version is ready.')).toBeVisible();
+  await assertReadable(page.locator('.update-banner'));
+  await assertReadable(page.getByRole('button', { name: 'Update now' }));
   const waitingCaches = await page.evaluate(async () => ({
     caches: await caches.keys(),
     waiting: Boolean((await navigator.serviceWorker.getRegistration()).waiting),

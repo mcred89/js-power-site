@@ -25,6 +25,7 @@
 .set-timer-setup input { width:100%; min-height:48px; box-sizing:border-box; padding:10px 12px; border:1px solid #ffffff80; border-radius:8px; color:#142c3b; background:#fff; font:inherit; font-size:20px; }
 .set-timer-setup small { line-height:1.5; color:#d5e4eb; }
 .set-timer-workout-controls { --ink:#163143; --muted:#526773; --paper:#fff; --accent:#146b47; --accent-soft:#e5f1eb; --line:#cbd6d0; --canvas:#eef3ef; color:var(--ink); color-scheme:light; }
+.set-timer-workout-controls :focus-visible { outline-color:var(--accent); }
 .set-timer-workout-controls .current-set-card { margin:0 0 10px; padding:16px; border-radius:14px; background:#fff; }
 .set-timer-workout-controls .current-set-card>p { margin:0 0 12px; }
 .set-timer-workout-controls .session-stepper { margin-bottom:12px; }
