@@ -1,5 +1,40 @@
 # Repository Guidelines
 
+## Default Completion Workflow
+
+Unless the user explicitly says otherwise, every requested repository change
+includes committing the completed work, pushing it, and deploying it to the
+existing production site at `themcilroy.com`. This is standing authorization
+for these routine release steps; do not stop after editing or ask for separate
+confirmation to commit, push, or deploy. Apply this default to application,
+documentation, and repository-instruction changes alike, once the requested
+task is complete rather than after each intermediate edit.
+
+- Honor explicit overrides such as "local changes only", "do not commit",
+  "do not push", or "do not deploy". Do not perform dependent release steps
+  that would contradict the override.
+- Review the working tree and commit only files belonging to the requested
+  work. Preserve unrelated changes and untracked files.
+- Run the validation required for the change, fetch the remote state, and
+  prefer fast-forward-only pulls when an update is needed. Create a focused
+  commit and push it to the intended remote branch without force-pushing.
+- Deploy using the existing local release workflow: `npm run deploy:windows`
+  on Windows or `npm run deploy` on Linux/macOS, from `static/`. Deploy the
+  reviewed, committed work and keep unrelated working-tree edits out of the
+  release. Follow the
+  deployment requirements below, including a dry run when deployment changes
+  are uncertain and successful local and production browser checks.
+- If validation or deployment fails, investigate and fix it, commit and push
+  any corrections, and complete the required deployment checks. Report an
+  actual blocker if completion is prevented; never report a failed release as
+  successful.
+- Respect sandbox and tool approval requirements. This default does not
+  authorize force pushes, discarding user work, unrelated publication, or AWS
+  infrastructure changes.
+- Finish by reporting the commit, push destination, production URL, and
+  validation result. Read-only tasks with no repository changes do not need
+  an empty commit or deployment.
+
 ## Project Structure & Module Organization
 
 The application is a Create React App project in `static/`. It is a client-only,
