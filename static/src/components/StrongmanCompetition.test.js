@@ -1,6 +1,6 @@
 import React, { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { StrongmanCompetitionCard, StrongmanCompetitionEditor } from './StrongmanCompetition';
+import { StrongmanCompetitionCard, StrongmanCompetitionEditor, formatStrongmanTarget } from './StrongmanCompetition';
 
 let container;
 let root;
@@ -36,10 +36,19 @@ it('keeps current-plan evidence separate from lifetime records and includes the 
   const past = { id: 'past', name: 'Past plan', strongmanLog: [record('past-best', '2025-09-01', 620, 100)] };
   act(() => root.render(<StrongmanCompetitionCard routine={current} routines={[current, past]} />));
   const rows = [...container.querySelectorAll('.strongman-event-results > div')];
-  expect(rows.find(row => row.textContent.includes('This plan')).textContent).toContain('580 lb · 50 ft');
-  expect(rows.find(row => row.textContent.includes('Lifetime')).textContent).toContain('620 lb · 100 ft');
+  expect(rows.find(row => row.textContent.includes('This plan · heaviest result')).textContent).toContain('580 lb · 50 ft');
+  expect(rows.find(row => row.textContent.includes('Lifetime · heaviest result')).textContent).toContain('620 lb · 100 ft');
   expect(rows.find(row => row.textContent.includes('Last trained')).textContent).toContain('Sep 21, 2026 · Attempt');
   expect(container.textContent).toContain('Competition: 600 lb · 100 ft');
+});
+
+it('explains that an implement points target alone cannot establish a timed medley task', () => {
+  const event = { id: 'medley', name: 'Scored carry', type: 'medley', components: [
+    { id: 'bag', name: 'Bag', weight: 200, timeGoal: 'points', points: 3 },
+  ] };
+  const routine = { id: 'plan', inputs: { strongmanCompetition: { events: [event] } }, strongmanLog: [] };
+  act(() => root.render(<StrongmanCompetitionCard routine={routine} />));
+  expect(container.textContent).toContain('a points target alone does not define the physical task');
 });
 
 it('allows a medley with three unknown implements without inventing targets', () => {
@@ -91,9 +100,86 @@ it('shows longest hold records instead of rewarding shorter holds', () => {
     ] },
   ] };
   act(() => root.render(<StrongmanCompetitionCard routine={routine} />));
-  const row = [...container.querySelectorAll('.strongman-event-results > div')].find(item => item.textContent.includes('Longest hold'));
+  const row = [...container.querySelectorAll('.strongman-event-results > div')].find(item => item.textContent.includes('This plan · longest hold'));
   expect(row.textContent).toContain('200 lb · 45 sec');
   expect(row.textContent).not.toContain('90 sec');
+});
+
+it('offers seven record goals before their metrics and supports max targets without inventing a weight', () => {
+  let latest;
+  const Editor = () => {
+    const [value, setValue] = useState({ events: [{ id: 'max', name: 'Max axle', type: 'single' }] });
+    latest = value;
+    return <StrongmanCompetitionEditor value={value} onChange={setValue} />;
+  };
+  act(() => root.render(<Editor />));
+  const select = container.querySelector('[aria-label="Event 1 record goal"]');
+  expect([...select.options].map(option => option.textContent)).toEqual([
+    'Faster is better', 'Longer hold is better', 'More reps is better', 'Heavier is better',
+    'Farther is better', 'Higher is better', 'More points is better',
+  ]);
+  change('Event 1 record goal', 'weight');
+  change('Event 1 Reps', '1');
+  expect(latest.events[0]).toMatchObject({ timeGoal: 'weight', reps: '1' });
+  expect(container.querySelector('[aria-label="Event 1 Weight (lb)"]').value).toBe('');
+  expect(container.querySelector('.strongman-time-goal').compareDocumentPosition(container.querySelector('.strongman-target-fields')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(container.textContent).toContain('For a max lift, leave weight blank');
+});
+
+it('keeps height separate from distance and lets pending point events retain unknown rules', () => {
+  let latest;
+  const Editor = () => {
+    const [value, setValue] = useState(competition);
+    latest = value;
+    return <StrongmanCompetitionEditor value={value} onChange={setValue} />;
+  };
+  act(() => root.render(<Editor />));
+  change('Event 1 record goal', 'height');
+  change('Event 1 Height (in)', '156');
+  expect(latest.events[0]).toMatchObject({ height: '156', distance: 100 });
+  expect(formatStrongmanTarget(latest.events[0])).toContain('100 ft · 156 in height');
+  change('Event 1 record goal', 'points');
+  expect(container.querySelector('[aria-label="Event 1 scoring rules"]').required).toBe(false);
+  expect(container.textContent).toContain('Enter scores manually');
+  change('Event 1 Target points', '20');
+  change('Event 1 scoring rules', 'Light stone = 1; heavy stone = 2');
+  expect(latest.events[0]).toMatchObject({ timeGoal: 'points', points: '20', scoringRules: 'Light stone = 1; heavy stone = 2' });
+  expect(formatStrongmanTarget(latest.events[0])).toContain('20 points');
+});
+
+it('offers setup rules for ordinary events, full timed medleys, and their implements', () => {
+  let latest;
+  const Editor = () => {
+    const [value, setValue] = useState(competition);
+    latest = value;
+    return <StrongmanCompetitionEditor value={value} onChange={setValue} />;
+  };
+  act(() => root.render(<Editor />));
+  change('Event 1 scoring rules', 'No drops');
+  expect(latest.events[0].scoringRules).toBe('No drops');
+  change('Event 1 type', 'medley');
+  change('Event 1 scoring rules', 'One lap; no drops');
+  click('Add implement');
+  change('Event 1 implement 1 scoring rules', 'Load onto a platform');
+  expect(latest.events[0]).toMatchObject({ timeGoal: 'fastest', scoringRules: 'One lap; no drops', components: [expect.objectContaining({ scoringRules: 'Load onto a platform' })] });
+});
+
+it.each([
+  ['weight', 'heaviest', { reps: 1 }, { weight: 350, reps: 1 }, { weight: 380, reps: 1 }, '350 lb · 1 rep', '380 lb · 1 rep'],
+  ['distance', 'farthest', { weight: 200, seconds: 60 }, { weight: 200, distance: 110, seconds: 60 }, { weight: 200, distance: 130, seconds: 60 }, '200 lb · 110 ft', '200 lb · 130 ft'],
+  ['height', 'highest', { weight: 40 }, { weight: 40, height: 150 }, { weight: 40, height: 156 }, '40 lb · 150 in height', '40 lb · 156 in height'],
+  ['points', 'most points', { seconds: 60, scoringRules: 'Light = 1; heavy = 2' }, { points: 12, seconds: 60 }, { points: 15, seconds: 60 }, '60 sec · 12 points', '60 sec · 15 points'],
+])('shows %s records in the main card, lifetime details, and collapsed implement summary', (goal, label, target, currentSet, oldSet, currentText, oldText) => {
+  const event = { id: 'event', name: 'Test event', type: 'single', timeGoal: goal, ...target };
+  const entry = (id, set) => ({ id, movement: event.name, date: '2026-09-01', scope: 'movement', eventSnapshot: event, sets: [{ id: `${id}-set`, ...set }] });
+  const routine = { id: 'current', inputs: { strongmanCompetition: { events: [event, { id: 'medley', name: 'Timed course', type: 'medley', components: [{ ...event, id: 'piece' }] }] } }, strongmanLog: [entry('current-entry', currentSet)] };
+  const previous = { id: 'previous', strongmanLog: [entry('previous-entry', oldSet)] };
+  act(() => root.render(<StrongmanCompetitionCard routine={routine} routines={[routine, previous]} />));
+  const rows = [...container.querySelectorAll('.strongman-event-results > div')];
+  expect(rows.find(row => row.textContent.startsWith(`This plan · ${label} at this setup`)).textContent).toContain(currentText);
+  expect(rows.find(row => row.textContent.startsWith(`Lifetime · ${label} at this setup`)).textContent).toContain(oldText);
+  expect(container.querySelector('.strongman-component > summary').textContent).toContain(`This plan · ${label}: ${currentText}`);
+  if (goal === 'points') expect(container.textContent).not.toContain('heaviest result');
 });
 
 it('offers more reps for single events and individual medley implements', () => {
@@ -134,4 +220,14 @@ it('shows comparable rep records prominently while retaining heaviest results', 
   expect(rows.find(row => row.textContent.startsWith('Lifetime · most reps')).textContent).toContain('200 lb · 12 reps · 60 sec');
   expect(rows.find(row => row.textContent.startsWith('This plan · heaviest')).textContent).toContain('220 lb · 2 reps');
   expect(container.querySelector('.strongman-component > summary').textContent).toContain('This plan · most reps: 200 lb · 10 reps');
+});
+
+it('keeps strength progress visible in a collapsed timed implement before a complete run exists', () => {
+  const component = { id: 'bag', name: 'Sandbag carry', weight: 300, distance: 50, timeGoal: 'fastest' };
+  const routine = { id: 'current', inputs: { strongmanCompetition: { events: [
+    { id: 'medley', name: 'Carry medley', type: 'medley', components: [component] },
+  ] } }, strongmanLog: [{ id: 'pickup', movement: component.name, date: '2026-09-01', scope: 'movement',
+    sets: [{ id: 'set', weight: 275, reps: 1, distance: '', seconds: '' }] }] };
+  act(() => root.render(<StrongmanCompetitionCard routine={routine} />));
+  expect(container.querySelector('.strongman-component > summary').textContent).toContain('This plan · heaviest training: 275 lb · 1 rep');
 });

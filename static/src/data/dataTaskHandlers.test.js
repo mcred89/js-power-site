@@ -93,6 +93,19 @@ describe('background data task handlers', () => {
     expect(history.join('')).toBe(routineHistoryToCsv(routine));
   });
 
+  it('retains actual strongman height and point scores in background CSV exports', () => {
+    const scoredRoutine = { ...routine, strongmanLog: [{
+      movement: 'Bag toss', date: '2026-09-01', scope: 'movement',
+      eventSnapshot: { timeGoal: 'height', height: 180 },
+      sets: [{ height: 156.5, points: 12.5 }],
+    }] };
+    const chunks = runDataTask(DATA_TASKS.HISTORY_CSV, { routine: scoredRoutine, chunkSize: 17 });
+    expect(chunks.every(chunk => chunk.length <= 17)).toBe(true);
+    expect(chunks.join('')).toBe(routineHistoryToCsv(scoredRoutine));
+    expect(chunks.join('')).toContain('"Actual height (in)","Actual points"');
+    expect(chunks.join('')).toMatch(/"156\.5","12\.5"$/);
+  });
+
   it('emits bounded CSV before requesting every source row', () => {
     const events = [];
     function* rows() {

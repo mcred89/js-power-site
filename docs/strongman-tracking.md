@@ -27,9 +27,47 @@ does not imply that a shorter, heavier carry is better at the competition task.
 Timed medley records compare saved actual courses, including implement order,
 weights, and distances. Editing a competition cannot rewrite earlier results.
 
-Database and backup version 17 add `inputs.strongmanCompetition` and
+## Record goals and setup
+
+Choose the record goal before filling in the competition details:
+
+| Goal | Score | Setup |
+| --- | --- | --- |
+| Faster is better | Lowest elapsed seconds | Load, distance, repetitions, fixed height, and rules |
+| Longer hold is better | Highest hold duration | Load and task |
+| More reps is better | Highest repetitions | Load, distance, fixed height, and actual time window |
+| Heavier is better | Highest successful load | Exact rep requirement when specified, distance, fixed height, and rules |
+| Farther is better | Greatest horizontal feet | Load, repetitions, fixed height, and optional actual time window |
+| Higher is better | Greatest vertical inches | Implement load, repetitions, distance, and optional actual time window |
+| More points is better | Highest manually entered score | Saved scoring rules, fixed event conditions, and actual time window |
+
+The measure being scored is an optional target, not a comparison condition.
+For a max lift, weight can stay blank. Blank rep requirements allow weight-only
+attempts; a specified rep count compares that exact count. A blank time window
+means untimed work. An elapsed run time is not silently treated as a window for
+a distance or height record. Existing rep comparison behavior remains available.
+
+Height is distinct from horizontal distance. Use the optional height field for
+a fixed loading platform or throwing bar even when the event is scored by reps
+or time. Enter the actual height when logging the work.
+
+Use setup/scoring rules to distinguish routes, allowed drops, equipment, and
+single-attempt versus aggregate scores. Matching ignores capitalization and
+extra spaces, but changed rules produce separate records. Points need explicit
+rules before a result is saved; no weighted-rep formula is guessed. A timed
+medley retains its ordered implements. Other circuits can use a scored event
+and separate logs for component practice. Promoter tie-breakers and partial
+event scores are not automatically converted into an official placing.
+
+The [Iron Podium research sample](strongman-event-research.md) documents 67
+contest events and the design decisions behind these choices.
+
+Database and backup version 17 added `inputs.strongmanCompetition` and
 `routine.strongmanLog`. The migration supplies empty containers without turning
 old prescriptions into results or altering completed sessions. Old retired
 strongman planner archives remain preserved. Backups and device transfers carry
 the new records; a fresh routine copy starts with an empty log. Deleting an
 entire plan deletes its training history, including its Strongman records.
+Version 18 added the rep goal. Version 19 adds max-weight, distance, height,
+and points goals with optional height, points, and scoring-rule fields. Its
+migrations preserve existing records exactly; no historical results are inferred.

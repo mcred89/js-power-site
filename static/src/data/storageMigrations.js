@@ -3,7 +3,7 @@ import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { addStrongmanTracking } from './strongman';
 
-export const DATABASE_VERSION = 18;
+export const DATABASE_VERSION = 19;
 
 // These shipped steps remain available for installations that skipped releases.
 export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
@@ -292,6 +292,12 @@ export const databaseMigrations = {
   // already retain their meaning, so only the schema marker needs to change.
   18: ({ transaction, done }) => {
     transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 18 });
+    done();
+  },
+  // v19 adds optional height, custom points/rules and record goals. Absence is
+  // meaningful in historical attempts; do not fill or reinterpret old records.
+  19: ({ transaction, done }) => {
+    transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 19 });
     done();
   },
 };

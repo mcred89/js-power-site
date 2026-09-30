@@ -156,13 +156,34 @@ it('adds another set directly to a saved exercise while keeping past training of
   act(() => root.render(<StrongmanTraining routine={routine} workout={workout} onSaveLog={onSaveLog} />));
   expect(container.textContent).not.toContain('Historical stone');
   await click('Add set');
-  expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(2);
-  expect(document.activeElement).toBe(container.querySelectorAll('.strongman-training-set')[1].querySelector('input'));
-  change('Weight (lb)', '590', 1);
-  change('Distance (ft)', '25', 1);
+  expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
+  expect(document.activeElement).toBe(container.querySelector('.strongman-training-set input'));
+  change('Weight (lb)', '590');
+  change('Distance (ft)', '25');
   await submit();
   expect(onSaveLog.mock.calls[0][0][0].sets).toHaveLength(2);
+  expect(onSaveLog.mock.calls[0][0][0].sets[0]).toEqual(entry.sets[0]);
   expect(onSaveLog.mock.calls[0][0][1]).toEqual(routine.strongmanLog[1]);
+});
+
+it.each(['rules', 'goal'])('keeps earlier sets untouched when Add set changes the %s for an entry with no rules', async field => {
+  const entry = { id: 'entry', date: '2025-01-10', movement: 'Yoke', scope: 'movement', workoutId: workout.id,
+    sets: [{ id: 'one', weight: 580, distance: 50, successful: true }] };
+  const onSaveLog = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: [entry] }} workout={workout} onSaveLog={onSaveLog} />));
+  await click('Add set');
+  if (field === 'rules') change('Scoring rules', 'No drops');
+  else change('Record goal', 'distance');
+  change('Weight (lb)', '590');
+  change('Distance (ft)', '60');
+  await submit();
+  const saved = onSaveLog.mock.calls[0][0];
+  expect(saved).toHaveLength(2);
+  expect(saved[0]).toEqual(entry);
+  expect(saved[1].id).not.toBe(entry.id);
+  expect(saved[1].sets).toHaveLength(1);
+  expect(saved[1].sets[0]).toMatchObject({ weight: 590, distance: 60 });
+  expect(saved[1].eventSnapshot).toMatchObject(field === 'rules' ? { scoringRules: 'No drops' } : { timeGoal: 'distance' });
 });
 
 it('clears hidden movement metrics when switching to a full medley while retaining time and outcome', async () => {
@@ -179,7 +200,7 @@ it('clears hidden movement metrics when switching to a full medley while retaini
   expect(container.querySelector('.strongman-training-set input').value).toBe('42');
   expect(container.querySelector('.strongman-training-set select').value).toBe('failed');
   change('Exercise', 'event:yoke');
-  expect([...container.querySelectorAll('.strongman-training-set input')].map(input => input.value)).toEqual(['', '', '', '42']);
+  expect([...container.querySelectorAll('.strongman-training-set input')].map(input => input.value)).toEqual(['', '', '', '42', '']);
   change('Exercise', 'event:medley');
   change('Result', 'completed');
   await submit();
@@ -288,7 +309,7 @@ it('rejects blank results without calling persistence', async () => {
   act(() => root.render(<StrongmanResultEditor competition={competition} onSave={onSave} onCancel={() => {}} />));
   change('Exercise', 'event:yoke');
   await submit();
-  expect(container.querySelector('[role="alert"]').textContent).toContain('Enter weight, reps, distance, or time');
+  expect(container.querySelector('[role="alert"]').textContent).toContain('Enter weight, reps, distance, time, height, or points');
   expect(onSave).not.toHaveBeenCalled();
 });
 
@@ -343,6 +364,86 @@ it('lets a new untimed exercise choose more reps before entering its sets', asyn
   change('Reps', '10');
   await submit();
   expect(onSave.mock.calls[0][0]).toMatchObject({ eventSnapshot: { name: 'Axle press', timeGoal: 'reps' }, sets: [{ weight: 180, reps: 10, seconds: '' }] });
+});
+
+it.each([
+  ['weight', { weight: 300, reps: 1 }, [['Weight (lb)', '275'], ['Reps', '1']], { weight: 275, reps: 1, height: '', points: '' }],
+  ['distance', { weight: 200, distance: 100, seconds: 60 }, [['Weight (lb)', '180'], ['Distance (ft)', '75'], ['Time window (s)', '60']], { weight: 180, distance: 75, seconds: 60, height: '' }],
+  ['height', { weight: 40, height: 156 }, [['Weight (lb)', '40'], ['Height (in)', '150']], { weight: 40, height: 150, distance: '', points: '' }],
+])('logs actual %s results without copying competition targets into sets', async (goal, target, values, expected) => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  const event = { id: 'event', name: 'Training event', type: 'single', timeGoal: goal, ...target };
+  act(() => root.render(<StrongmanResultEditor competition={{ events: [event] }} onSave={onSave} onCancel={() => {}} />));
+  change('Exercise', 'event:event');
+  expect([...container.querySelectorAll('.strongman-training-set input')].every(input => input.value === '')).toBe(true);
+  expect(container.querySelector('[aria-label="Record goal"]').value).toBe(goal);
+  values.forEach(([label, value]) => change(label, value));
+  await submit();
+  expect(onSave.mock.calls[0][0]).toMatchObject({ eventSnapshot: { timeGoal: goal, ...target }, sets: [expected] });
+});
+
+it('requires scoring rules for a manual point score and keeps fixed setup separate from actual results', async () => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  const event = { id: 'stones', name: 'Stone challenge', type: 'single', timeGoal: 'points', weight: 200, height: 48, points: 20, seconds: 60 };
+  act(() => root.render(<StrongmanResultEditor competition={{ events: [event] }} onSave={onSave} onCancel={() => {}} />));
+  change('Exercise', 'event:stones');
+  expect([...container.querySelectorAll('.strongman-training-set input')].every(input => input.value === '')).toBe(true);
+  expect(container.textContent).toContain('Enter your actual score manually');
+  expect(container.textContent).toContain('every implement’s weight');
+  change('Points', '12');
+  await submit();
+  expect(onSave).not.toHaveBeenCalled();
+  expect(container.querySelector('[role="alert"]').textContent).toContain('Describe the scoring rules');
+  change('Scoring rules', 'Light = 1; heavy = 2');
+  change('Time window (s)', '60');
+  await submit();
+  expect(onSave.mock.calls[0][0]).toMatchObject({
+    eventSnapshot: { timeGoal: 'points', scoringRules: 'Light = 1; heavy = 2', weight: 200, height: 48, points: 20 },
+    sets: [{ points: 12, seconds: 60, weight: '', height: '', reps: '' }],
+  });
+});
+
+it('lets training use different scoring rules without rewriting the competition', async () => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  const event = { id: 'throw', name: 'Keg throw', type: 'single', timeGoal: 'distance', weight: 30, scoringRules: 'Best of 3 throws' };
+  act(() => root.render(<StrongmanResultEditor competition={{ events: [event] }} onSave={onSave} onCancel={() => {}} />));
+  change('Exercise', 'event:throw');
+  change('Scoring rules', 'Total of 3 throws');
+  change('Weight (lb)', '30');
+  change('Distance (ft)', '75');
+  await submit();
+  expect(onSave.mock.calls[0][0].eventSnapshot.scoringRules).toBe('Total of 3 throws');
+  expect(event.scoringRules).toBe('Best of 3 throws');
+});
+
+it('adds a scored set as a new entry so changing rules preserves the earlier score', async () => {
+  const entry = { id: 'scored', date: '2025-01-10', movement: 'Stone challenge', scope: 'movement', workoutId: workout.id,
+    eventSnapshot: { id: 'stones', name: 'Stone challenge', type: 'single', timeGoal: 'points', scoringRules: 'Light = 1; heavy = 2' },
+    sets: [{ id: 'original-score', points: 12, seconds: 60, successful: true }] };
+  const original = JSON.stringify(entry);
+  const onSaveLog = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: [entry] }} workout={workout} onSaveLog={onSaveLog} />));
+  expect(container.querySelector('.strongman-training-results').textContent).toContain('12 points');
+  await click('Add set');
+  expect(container.querySelector('form h3').textContent).toBe('Add set');
+  expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
+  change('Scoring rules', 'Light = 1; heavy = 3');
+  change('Points', '15');
+  change('Time window (s)', '60');
+  await submit();
+  const saved = onSaveLog.mock.calls[0][0];
+  expect(saved).toHaveLength(2);
+  expect(saved[0]).toBe(entry);
+  expect(JSON.stringify(entry)).toBe(original);
+  expect(saved[1]).toMatchObject({ eventSnapshot: { scoringRules: 'Light = 1; heavy = 3' }, sets: [{ points: 15, seconds: 60 }] });
+  expect(saved[1].id).not.toBe(entry.id);
+});
+
+it('shows logged vertical height independently from horizontal distance', () => {
+  const entry = { id: 'toss', date: '2025-01-10', movement: 'Bag toss', scope: 'movement', workoutId: workout.id,
+    sets: [{ id: 'toss-set', weight: 40, height: 150, distance: 10, successful: true }] };
+  act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: [entry] }} workout={workout} onSaveLog={jest.fn()} />));
+  expect(container.querySelector('.strongman-training-results').textContent).toContain('40 lb · 10 ft · 150 in height');
 });
 
 it('requires explicit delete confirmation and preserves the entry after a failed delete', async () => {

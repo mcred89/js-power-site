@@ -3,8 +3,29 @@ const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
 
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-const metrics = ['weight', 'distance', 'reps', 'seconds'];
+const metrics = ['weight', 'distance', 'reps', 'seconds', 'height', 'points'];
 const blank = value => value === '' || value === null || value === undefined;
+export const STRONGMAN_RECORD_GOALS = [
+  { value: 'fastest', label: 'Faster is better', metric: 'seconds', recordLabel: 'Fastest', summaryKey: 'fastest' },
+  { value: 'longest', label: 'Longer hold is better', metric: 'seconds', recordLabel: 'Longest hold', summaryKey: 'longest' },
+  { value: 'reps', label: 'More reps is better', metric: 'reps', recordLabel: 'Most reps', summaryKey: 'mostReps', timeWindow: true },
+  { value: 'weight', label: 'Heavier is better', metric: 'weight', recordLabel: 'Heaviest', summaryKey: 'heaviest' },
+  { value: 'distance', label: 'Farther is better', metric: 'distance', recordLabel: 'Farthest', summaryKey: 'farthest', timeWindow: true },
+  { value: 'height', label: 'Higher is better', metric: 'height', recordLabel: 'Highest', summaryKey: 'highest', timeWindow: true },
+  { value: 'points', label: 'More points is better', metric: 'points', recordLabel: 'Most points', summaryKey: 'mostPoints', timeWindow: true },
+];
+
+export const getStrongmanRecordGoal = value => STRONGMAN_RECORD_GOALS.find(goal => goal.value === (
+  typeof value === 'string' ? value : value?.type === 'medley' ? 'fastest' : value?.timeGoal
+)) || STRONGMAN_RECORD_GOALS[0];
+
+export const normalizeStrongmanScoringRules = value => String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const scoringRulesFor = value => {
+  if (value.scoringRules !== undefined && value.scoringRules !== null && typeof value.scoringRules !== 'string') {
+    throw new Error('Enter scoring rules as text.');
+  }
+  return String(value.scoringRules || '').trim();
+};
 const numberOrBlank = (value, label) => {
   if (blank(value) || (typeof value === 'string' && !value.trim())) return '';
   const number = Number(value);
@@ -17,7 +38,7 @@ const numberOrBlank = (value, label) => {
 
 const normalizeMetrics = value => Object.fromEntries(metrics.map(key => [key, numberOrBlank(value[key], key)]));
 const metricsForScope = (set, scope) => scope === 'medley'
-  ? { ...set, weight: '', distance: '', reps: '' } : set;
+  ? { ...set, weight: '', distance: '', reps: '', height: '', points: '' } : set;
 const normalizeSetMetrics = (set, scope) => {
   const normalized = normalizeMetrics(metricsForScope(set, scope));
   if (scope === 'medley' && normalized.seconds === '') throw new Error('Enter a time for each full medley run.');
@@ -25,7 +46,7 @@ const normalizeSetMetrics = (set, scope) => {
 };
 const timeGoalFor = value => {
   const timeGoal = value.timeGoal || 'fastest';
-  if (!['fastest', 'longest', 'reps'].includes(timeGoal)) throw new Error('Choose fastest, longest time, or most reps.');
+  if (!STRONGMAN_RECORD_GOALS.some(goal => goal.value === timeGoal)) throw new Error('Choose a valid record goal.');
   return timeGoal;
 };
 
@@ -72,11 +93,12 @@ export const normalizeStrongmanCompetition = value => {
         name: event.name.trim(),
         type,
         timeGoal: timeGoalFor(event),
+        scoringRules: scoringRulesFor(event),
         ...normalizeMetrics(event),
         components: (event.components || []).map(component => {
           if (!isObject(component) || (component.name !== undefined && typeof component.name !== 'string')) throw new Error('Enter a text name for each medley implement.');
           return { ...component, id: uniqueId(component.id), name: String(component.name || '').trim(),
-            timeGoal: timeGoalFor(component), ...normalizeMetrics(component) };
+            timeGoal: timeGoalFor(component), scoringRules: scoringRulesFor(component), ...normalizeMetrics(component) };
         }),
       };
     }),
@@ -125,14 +147,48 @@ export const strongmanSetupKey = event => {
   return JSON.stringify([
     event.type || 'single',
     ...setupMetrics(event).slice(0, 3),
-    (event.components || []).map(component => [normalizeMovementName(component.name), ...setupMetrics(component)]),
+    blank(event.height) ? null : Number(event.height),
+    normalizeStrongmanScoringRules(event.scoringRules),
+    (event.components || []).map(component => [normalizeMovementName(component.name), ...setupMetrics(component),
+      normalizeStrongmanScoringRules(component.scoringRules)]),
   ]);
 };
+
+// A record setup contains only the conditions of an attempt, never its score.
+// Point scores can combine several varying measures, so their fixed conditions
+// come from the saved event setup, not the attempt's component totals.
+export const strongmanRecordSetup = (result, goalOverride) => {
+  if (result.scope === 'medley') return result.eventSnapshot;
+  const goal = getStrongmanRecordGoal(goalOverride || result.eventSnapshot);
+  const source = goal.value === 'points' ? result.eventSnapshot || {} : result;
+  return {
+    type: 'single',
+    timeGoal: goal.value,
+    ...Object.fromEntries(['weight', 'distance', 'reps', 'height'].map(metric => [metric,
+      metric === goal.metric ? '' : source[metric] ?? ''])),
+    ...(goal.timeWindow ? { seconds: result.seconds ?? '' } : {}),
+    scoringRules: result.eventSnapshot?.scoringRules || '',
+  };
+};
+
+export const strongmanRecordSetupKey = snapshot => {
+  if (!snapshot) return '';
+  if (snapshot.type === 'medley') return strongmanSetupKey(snapshot);
+  const goal = getStrongmanRecordGoal(snapshot);
+  return JSON.stringify([goal.value,
+    ...['weight', 'distance', 'reps', 'height'].map(metric => metric === goal.metric || blank(snapshot[metric])
+      ? null : Number(snapshot[metric])),
+    goal.timeWindow && !blank(snapshot.seconds) ? Number(snapshot.seconds) : null,
+    normalizeStrongmanScoringRules(snapshot.scoringRules),
+  ]);
+};
+
+export const strongmanPrimaryRecord = (summary, snapshot) => summary?.[getStrongmanRecordGoal(snapshot).summaryKey] || null;
 
 export const isCompleteStrongmanSetup = event => Boolean(event) && (event.type !== 'medley' ||
   (Array.isArray(event.components) && event.components.length > 0 && event.components.every(component => (
     normalizeMovementName(component.name) && !blank(component.weight) &&
-    ['distance', 'reps', 'seconds'].some(key => !blank(component[key]) && Number(component[key]) > 0)
+    ['distance', 'reps', 'seconds', 'height'].some(key => !blank(component[key]) && Number(component[key]) > 0)
   ))));
 
 export const createStrongmanLogEntry = (values, timestamp = new Date().toISOString()) => {
@@ -151,12 +207,18 @@ export const createStrongmanLogEntry = (values, timestamp = new Date().toISOStri
   const sets = values.sets.map(set => {
     if (!isObject(set)) throw new Error('Enter the result for each set.');
     const normalized = normalizeSetMetrics(set, scope);
-    if (!metrics.some(key => normalized[key] !== '')) throw new Error('Enter weight, reps, distance, or time for each set.');
+    if (!metrics.some(key => normalized[key] !== '')) throw new Error('Enter weight, reps, distance, time, height, or points for each set.');
     const id = set.id || makeId();
     if (setIds.has(id)) throw new Error('Each set must have its own ID.');
     setIds.add(id);
     return { ...set, ...normalized, id, successful: set.successful !== false };
   });
+  const eventSnapshot = values.eventSnapshot ? normalizeStrongmanCompetition({ events: [{
+    ...values.eventSnapshot, name: values.eventSnapshot.name?.trim() || movement,
+  }] }).events[0] : null;
+  if (scope !== 'medley' && eventSnapshot?.timeGoal === 'points' && !eventSnapshot.scoringRules) {
+    throw new Error('Describe the scoring rules before recording a point score.');
+  }
   return {
     ...values,
     id: values.id || makeId(),
@@ -166,9 +228,7 @@ export const createStrongmanLogEntry = (values, timestamp = new Date().toISOStri
     eventId: values.eventId || null,
     componentId: values.componentId || null,
     scope,
-    eventSnapshot: values.eventSnapshot ? normalizeStrongmanCompetition({ events: [{
-      ...values.eventSnapshot, name: values.eventSnapshot.name?.trim() || movement,
-    }] }).events[0] : null,
+    eventSnapshot,
     sets,
     notes: String(values.notes || '').trim(),
     createdAt: values.createdAt || timestamp,
@@ -261,6 +321,11 @@ const successful = result => result.successful !== false && (result.scope === 'm
   : metrics.some(key => positive(result[key])) &&
     !['reps', 'distance', 'seconds'].some(key => !blank(result[key]) && Number(result[key]) === 0));
 const valueOrZero = value => blank(value) || !Number.isFinite(Number(value)) ? 0 : Number(value);
+const matchingMetric = (actual, target, key) => blank(target[key])
+  ? blank(actual[key]) : !blank(actual[key]) && Number(actual[key]) === Number(target[key]);
+const matchingRules = (actual, target) => normalizeStrongmanScoringRules(actual?.scoringRules) ===
+  normalizeStrongmanScoringRules(target?.scoringRules);
+const highestResult = (results, metric) => [...results].sort((left, right) => Number(right[metric]) - Number(left[metric]))[0] || null;
 
 export const summarizeStrongmanResults = (results, { routineId, profileId, movement, scope, eventSnapshot } = {}) => {
   const records = (results || []).filter(result => (
@@ -276,8 +341,9 @@ export const summarizeStrongmanResults = (results, { routineId, profileId, movem
   const timed = completed.filter(result => positive(result.seconds) && Boolean(eventSnapshot) &&
     ((result.scope || 'movement') === 'medley'
       ? strongmanSetupKey(result.eventSnapshot) === strongmanSetupKey(eventSnapshot)
-      : result.eventSnapshot?.timeGoal !== 'reps' && ['weight', 'distance', 'reps'].every(key => blank(eventSnapshot[key])
-        ? blank(result[key]) : !blank(result[key]) && Number(result[key]) === Number(eventSnapshot[key]))));
+      : ['fastest', 'longest'].includes(getStrongmanRecordGoal(result.eventSnapshot).value) &&
+        matchingRules(result.eventSnapshot, eventSnapshot) &&
+        ['weight', 'distance', 'reps', 'height'].every(key => matchingMetric(result, eventSnapshot, key))));
   // Without a selected course, medley times must not be compared against each
   // other. Progress can still list each historical run with its saved setup.
   const comparableTimed = timed.filter(result => result.scope !== 'medley' ||
@@ -286,14 +352,39 @@ export const summarizeStrongmanResults = (results, { routineId, profileId, movem
   // target rep count is a goal, not a constraint on which actual result wins.
   const repeated = completed.filter(result => result.scope !== 'medley' && positive(result.reps) &&
     Boolean(eventSnapshot) && eventSnapshot.type !== 'medley' &&
-    ['weight', 'distance', 'seconds'].every(key => blank(eventSnapshot[key])
-      ? blank(result[key]) : !blank(result[key]) && Number(result[key]) === Number(eventSnapshot[key])));
+    matchingRules(result.eventSnapshot, eventSnapshot) &&
+    ['weight', 'distance', 'height', 'seconds'].every(key => matchingMetric(result, eventSnapshot, key)));
+  const movementAttempts = completed.filter(result => result.scope !== 'medley' &&
+    Boolean(eventSnapshot) && eventSnapshot.type !== 'medley' && matchingRules(result.eventSnapshot, eventSnapshot));
+  // A specified rep requirement is exact: a one-rep maximum is not a five-rep
+  // maximum. Leaving it blank permits weight-only attempts without inventing a
+  // rep count. Attempt duration is contextual, not a max-weight condition.
+  const heavy = movementAttempts.filter(result => positive(result.weight) &&
+    (blank(eventSnapshot.reps) || matchingMetric(result, eventSnapshot, 'reps')) &&
+    ['distance', 'height'].every(key => matchingMetric(result, eventSnapshot, key)));
+  // A duration attached to these new goals is a window, never elapsed run time.
+  // Legacy elapsed times remain available as timed records instead of silently
+  // acquiring a new meaning. Untimed historical attempts remain reusable.
+  const windowAttempts = movementAttempts.filter(result => blank(result.seconds) ||
+    getStrongmanRecordGoal(result.eventSnapshot).timeWindow);
+  const far = windowAttempts.filter(result => positive(result.distance) &&
+    ['weight', 'reps', 'height', 'seconds'].every(key => matchingMetric(result, eventSnapshot, key)));
+  const high = windowAttempts.filter(result => positive(result.height) &&
+    ['weight', 'reps', 'distance', 'seconds'].every(key => matchingMetric(result, eventSnapshot, key)));
+  const scored = movementAttempts.filter(result => positive(result.points) &&
+    result.eventSnapshot?.timeGoal === 'points' && normalizeStrongmanScoringRules(eventSnapshot.scoringRules) &&
+    ['weight', 'reps', 'distance', 'height'].every(key => matchingMetric(result.eventSnapshot, eventSnapshot, key)) &&
+    matchingMetric(result, eventSnapshot, 'seconds'));
   return {
     best: ranked[0] || null,
     latest: records[0] || null,
     fastest: [...comparableTimed].sort((left, right) => Number(left.seconds) - Number(right.seconds))[0] || null,
-    longest: [...comparableTimed].sort((left, right) => Number(right.seconds) - Number(left.seconds))[0] || null,
-    mostReps: [...repeated].sort((left, right) => Number(right.reps) - Number(left.reps))[0] || null,
+    longest: highestResult(comparableTimed, 'seconds'),
+    mostReps: highestResult(repeated, 'reps'),
+    heaviest: highestResult(heavy, 'weight'),
+    farthest: highestResult(far, 'distance'),
+    highest: highestResult(high, 'height'),
+    mostPoints: highestResult(scored, 'points'),
     records,
   };
 };

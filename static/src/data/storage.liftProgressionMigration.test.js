@@ -97,7 +97,7 @@ describe('per-lift progression compatibility', () => {
     expect(migrated.routines[2]).toBe(unknown);
     expect(migrated.archives).toBe(original.archives);
     expect(JSON.stringify(original)).toBe(before);
-    expect(backupMigrations[18](backupMigrations[17](backupMigrations[16](original)))).toEqual(migrated);
+    expect(backupMigrations[19](backupMigrations[18](backupMigrations[17](backupMigrations[16](original))))).toEqual(migrated);
     const restored = parseBackup(exportBackup(migrated.profiles, migrated.routines, migrated.templates, migrated.archives));
     expect(restored.routines).toEqual(migrated.routines);
     expect(restored.templates).toEqual(migrated.templates);

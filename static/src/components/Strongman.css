@@ -36,6 +36,10 @@
 .strongman-editor-components > .strongman-help { margin:0; }
 .strongman-event-time { max-width:280px; }
 .strongman-time-goal { margin-top:12px; }
+.strongman-extra-fields { margin-top:12px; }
+.strongman-extra-fields > summary { min-height:44px; padding:10px 0; color:var(--accent); cursor:pointer; font-size:13px; }
+.strongman-extra-fields > .form-field { max-width:280px; }
+.strongman-scoring-rules { margin-top:14px; }
 .strongman-remove { min-height:44px; margin-top:6px; padding:8px 0; font-size:12px; }
 .strongman-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:18px; }
 .strongman-actions .primary-button { width:auto; margin:0; }

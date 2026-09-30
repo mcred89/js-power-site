@@ -10,7 +10,7 @@ import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { addStrongmanTracking, validateStrongmanRecord } from './strongman';
 
 // Backup preparation runs in the on-demand data task worker, outside startup.
-export const BACKUP_VERSION = 18;
+export const BACKUP_VERSION = 19;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -128,6 +128,8 @@ export const backupMigrations = {
   }),
   // Adding the reps goal does not change the meaning of any existing record.
   18: backup => ({ ...backup, version: 18, dataSchemaVersion: 18 }),
+  // New score fields stay optional, preserving unknown data and saved setups.
+  19: backup => ({ ...backup, version: 19, dataSchemaVersion: 19 }),
 };
 
 export const migrateBackup = original => {

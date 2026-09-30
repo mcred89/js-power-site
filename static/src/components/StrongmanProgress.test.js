@@ -81,6 +81,19 @@ it('compares full medley times only within the selected historical setup', () =>
   expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(3);
 });
 
+it('identifies medley setups and history by their implement rules', () => {
+  const entry = (id, scoringRules, seconds) => ({ id, date: '2026-09-01', movement: 'Carry medley', scope: 'medley',
+    eventSnapshot: { type: 'medley', components: [{ name: 'Bag', weight: 200, distance: 50, scoringRules }] },
+    sets: [{ id: `set-${id}`, seconds }],
+  });
+  act(() => root.render(<StrongmanProgress routines={[{ id: 'plan', name: 'Current plan', strongmanLog: [entry('first', 'No drops', 40), entry('second', 'Unlimited drops', 30)] }]} />));
+  const options = [...container.querySelector('[aria-label="Strongman record setup"]').options].map(option => option.textContent);
+  expect(options).toEqual(['Bag: 200 lb · 50 ft · No drops', 'Bag: 200 lb · 50 ft · Unlimited drops']);
+  const history = [...container.querySelectorAll('.strongman-result-history details')].map(details => details.textContent);
+  expect(history.some(text => text.includes('No drops'))).toBe(true);
+  expect(history.some(text => text.includes('Unlimited drops'))).toBe(true);
+});
+
 it('groups rep records by actual load and time window while keeping plan and lifetime records separate', () => {
   const entry = (id, weight, reps, seconds, successful = true) => ({
     id, date: '2026-09-01', movement: 'Log press', scope: 'movement',
@@ -155,6 +168,46 @@ it('retains legacy timed setups and offers a rep comparison at their shared time
   });
   expect(container.querySelector('.strongman-record-metric strong').textContent).toBe('400 lb · 10 reps · 60 sec');
   expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(2);
+});
+
+it.each([
+  ['weight', { reps: 1 }, { weight: 500, reps: 1 }, { weight: 550, reps: 1 }, { weight: 600, reps: 3 }, '550 lb · 1 rep'],
+  ['distance', { weight: 200, seconds: 60 }, { weight: 200, distance: 100, seconds: 60 }, { weight: 200, distance: 120, seconds: 60 }, { weight: 100, distance: 200, seconds: 60 }, '200 lb · 120 ft · 60 sec'],
+  ['height', { weight: 30 }, { weight: 30, height: 144 }, { weight: 30, height: 156 }, { weight: 20, height: 180 }, '30 lb · 156 in height'],
+])('groups %s records without the scored metric and keeps other setups separate', (timeGoal, fixed, first, better, different, expected) => {
+  const entry = (id, set, rules = 'Same competition rules') => ({
+    id, date: '2026-09-01', movement: 'Test event', scope: 'movement',
+    eventSnapshot: { id: 'event', type: 'single', name: 'Test event', timeGoal, ...fixed, scoringRules: rules },
+    sets: [{ id: `set-${id}`, weight: '', reps: '', distance: '', seconds: '', height: '', ...set }],
+  });
+  const routines = [{ id: 'plan', name: 'Current plan', strongmanLog: [
+    entry('first', first), entry('better', better), entry('different', different),
+    entry('other-rules', different, 'Other competition rules'),
+  ] }];
+  act(() => root.render(<StrongmanProgress routines={routines} />));
+  const select = container.querySelector('[aria-label="Strongman record setup"]');
+  expect(select.options).toHaveLength(3);
+  expect(container.querySelector('.strongman-record-metric strong').textContent).toBe(expected);
+  expect([...select.options].some(option => option.textContent.includes('Other competition rules'))).toBe(true);
+  expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(4);
+});
+
+it('keeps manual points scores separate by their recorded rules and time window', () => {
+  const entry = (id, points, seconds, scoringRules) => ({
+    id, date: '2026-09-01', movement: 'Choice log', scope: 'movement',
+    eventSnapshot: { id: 'event', type: 'single', name: 'Choice log', timeGoal: 'points', scoringRules, seconds: 60 },
+    sets: [{ id: `set-${id}`, points, seconds }],
+  });
+  const routines = [{ id: 'plan', name: 'Current plan', strongmanLog: [
+    entry('first', 10, 60, 'Heavy rep = 5 points; light rep = 1'),
+    entry('better', 15, 60, 'Heavy rep = 5 points; light rep = 1'),
+    entry('longer', 50, 120, 'Heavy rep = 5 points; light rep = 1'),
+    entry('other-rules', 100, 60, 'Heavy rep = 100 points; light rep = 1'),
+  ] }];
+  act(() => root.render(<StrongmanProgress routines={routines} />));
+  expect(container.querySelector('[aria-label="Strongman record setup"]').options).toHaveLength(3);
+  expect(container.querySelector('.strongman-record-metric strong').textContent).toContain('15 points');
+  expect(container.querySelector('.strongman-record-metric strong').textContent).not.toContain('100 points');
 });
 
 it('requires deliberate removal and persists the remaining entries in their original plan', async () => {

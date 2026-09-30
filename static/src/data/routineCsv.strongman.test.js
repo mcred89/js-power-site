@@ -17,3 +17,27 @@ it('exports dated strongman actuals and saved medley setup without inventing pla
   expect(rows[1]).toContain('Sandbag');
   expect(rows[1]).toContain('Full run');
 });
+
+it('exports actual height and points independently of targets and aligns every history row', () => {
+  const routine = {
+    name: 'Scoring prep',
+    workouts: [
+      { id: 'legacy', name: 'Deadlift', completedAt: '2026-09-01', exercises: [{ overrides: {}, generated: { movement: 'Deadlift', weight: 400, prescription: '5 reps' } }] },
+      { id: 'tracked', name: 'Press', completedAt: '2026-09-02', exercises: [], session: { exercises: [{ movement: 'Press', sets: [{ number: 1, status: 'completed', actualWeight: 200, actualReps: 5 }] }] } },
+    ],
+    strongmanLog: [{ date: '2026-09-03', movement: 'Scored event', scope: 'movement',
+      eventSnapshot: { height: 180, points: 100 }, notes: '',
+      sets: [{ height: 156.5, points: 12.5 }, { height: 0, points: 0, successful: false }],
+    }],
+  };
+  // Split on CSV delimiters outside quoted cells, including JSON setup cells.
+  const cells = row => row.match(/"(?:[^"]|"")*"/g);
+  const rows = routineHistoryCsvRows(routine).map(cells);
+  expect(rows).toHaveLength(5);
+  expect(rows.every(row => row.length === rows[0].length)).toBe(true);
+  expect(rows[0].slice(-2)).toEqual(['"Actual height (in)"', '"Actual points"']);
+  expect(rows[1].slice(-2)).toEqual(['""', '""']);
+  expect(rows[2].slice(-2)).toEqual(['""', '""']);
+  expect(rows[3].slice(-2)).toEqual(['"156.5"', '"12.5"']);
+  expect(rows[4].slice(-2)).toEqual(['"0"', '"0"']);
+});

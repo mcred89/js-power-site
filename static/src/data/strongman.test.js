@@ -1,7 +1,8 @@
 import {
   addStrongmanTracking, createStrongmanLogEntry, normalizeStrongmanCompetition,
   removeStrongmanLogEntry, saveStrongmanLogEntry, strongmanResults,
-  strongmanSetupKey, summarizeStrongmanResults,
+  strongmanSetupKey, summarizeStrongmanResults, STRONGMAN_RECORD_GOALS,
+  getStrongmanRecordGoal, strongmanRecordSetup, strongmanRecordSetupKey, strongmanPrimaryRecord,
 } from './strongman';
 import { duplicateRoutine, createRoutineTemplate } from './routineCopies';
 import { createImportPlan } from './importBackup';
@@ -39,7 +40,7 @@ describe('strongman tracking data', () => {
     expect(competition.events.map(item => item.timeGoal)).toEqual(['reps', 'fastest', 'longest', 'fastest']);
     expect(competition.events[1].components[0].timeGoal).toBe('reps');
     expect(() => normalizeStrongmanCompetition({ events: [{ name: 'Log press', timeGoal: 'unknown' }] }))
-      .toThrow('Choose fastest, longest time, or most reps.');
+      .toThrow('Choose a valid record goal.');
   });
 
   it.each([-1, 'Infinity', 'nope', true])('rejects invalid actual weight %p', weight => {
@@ -114,7 +115,7 @@ describe('strongman tracking data', () => {
       sets: [{ id: 'run', weight: 500, distance: 50, reps: 0, seconds: '42', successful: false,
         extension: { preserved: true } }] };
     const saved = log(values);
-    expect(saved.sets[0]).toEqual({ id: 'run', weight: '', distance: '', reps: '', seconds: 42,
+    expect(saved.sets[0]).toEqual({ id: 'run', weight: '', distance: '', reps: '', height: '', points: '', seconds: 42,
       successful: false, extension: { preserved: true } });
     expect(values.sets[0]).toMatchObject({ weight: 500, distance: 50, reps: 0, seconds: '42' });
     expect(() => log({ ...values, sets: [{ weight: 500, reps: 1 }] })).toThrow('time for each full medley');
@@ -234,6 +235,145 @@ describe('strongman tracking data', () => {
     expect(template.inputs.strongmanCompetition).not.toBe(routine.inputs.strongmanCompetition);
     const updated = updateRoutinePlan(routine, { maxSquat: '350' });
     expect(updated.strongmanLog).toBe(routine.strongmanLog);
+  });
+
+  it('accepts all scoring goals, fractional height and custom points while retaining unknown fields', () => {
+    const competition = normalizeStrongmanCompetition({ events: STRONGMAN_RECORD_GOALS.map(goal => ({
+      name: `Event ${goal.value}`, timeGoal: goal.value, height: '204.5', points: '12.5', scoringRules: '  Two points per heavy rep  ',
+      extension: { preserved: true },
+    })) });
+    expect(competition.events.map(item => item.timeGoal)).toEqual(STRONGMAN_RECORD_GOALS.map(goal => goal.value));
+    expect(competition.events[0]).toMatchObject({ height: 204.5, points: 12.5,
+      scoringRules: 'Two points per heavy rep', extension: { preserved: true } });
+    expect(() => normalizeStrongmanCompetition({ events: [{ name: 'Toss', height: -1 }] })).toThrow('height');
+    expect(() => normalizeStrongmanCompetition({ events: [{ name: 'Score', points: 'bad' }] })).toThrow('points');
+    expect(() => normalizeStrongmanCompetition({ events: [{ name: 'Score', scoringRules: {} }] })).toThrow('rules as text');
+    expect(getStrongmanRecordGoal({ type: 'medley', timeGoal: 'points' }).value).toBe('fastest');
+  });
+
+  it('allows pending point-event details but requires scoring rules when recording actual training', () => {
+    expect(normalizeStrongmanCompetition({ events: [{ name: 'Loading', timeGoal: 'points' }] }).events[0].scoringRules).toBe('');
+    expect(() => log({ eventSnapshot: { name: 'Loading', timeGoal: 'points' }, sets: [{ points: 12 }] }))
+      .toThrow('Describe the scoring rules');
+    const saved = log({ eventSnapshot: { name: 'Loading', timeGoal: 'points', scoringRules: '1 point per load' },
+      sets: [{ points: '12.5', extension: true }] });
+    expect(saved.sets[0]).toMatchObject({ points: 12.5, extension: true });
+    expect(() => log({ sets: [{ height: Infinity }] })).toThrow('height');
+    expect(() => log({ sets: [{ points: -1 }] })).toThrow('points');
+  });
+
+  it('ranks max weight at matching tasks and exact requested reps without treating elapsed time as a condition', () => {
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [log({ sets: [
+      { weight: 500, reps: 1, seconds: 15 },
+      { weight: 450, reps: 5 },
+      { weight: 510, reps: 1, height: 18 },
+      { weight: 520, reps: 1, distance: 10 },
+      { weight: 600, reps: 1, successful: false },
+      { weight: 700, reps: 0 },
+    ] })] }]);
+    const snapshot = { timeGoal: 'weight', weight: 600, reps: 5, seconds: 60 };
+    expect(summarizeStrongmanResults(results, { eventSnapshot: snapshot }).heaviest.weight).toBe(450);
+    const unrestricted = summarizeStrongmanResults(results, { eventSnapshot: { timeGoal: 'weight' } });
+    expect(unrestricted.heaviest).toMatchObject({ weight: 500, seconds: 15 });
+    expect(strongmanPrimaryRecord(unrestricted, 'weight')).toBe(unrestricted.heaviest);
+    const weightOnly = strongmanResults([{ id: 'r1', strongmanLog: [log({ sets: [{ weight: 550 }] })] }]);
+    expect(summarizeStrongmanResults(weightOnly, { eventSnapshot: { timeGoal: 'weight' } }).heaviest.weight).toBe(550);
+    expect(summarizeStrongmanResults(weightOnly, { eventSnapshot: snapshot }).heaviest).toBeNull();
+  });
+
+  it('ranks distance only at the same load, task, height and actual time window', () => {
+    const snapshot = { name: 'Husafell', timeGoal: 'distance', weight: 250, seconds: 60 };
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [
+      log({ eventSnapshot: snapshot, sets: [
+        { weight: 250, distance: 100, seconds: 60 }, { weight: 250, distance: 125, seconds: 60 },
+        { weight: 200, distance: 200, seconds: 60 }, { weight: 250, distance: 250, seconds: 90 },
+        { weight: 250, distance: 300, seconds: 60, reps: 2 }, { weight: 250, distance: 350, seconds: 60, height: 48 },
+        { weight: 250, distance: 400, seconds: 60, successful: false }, { weight: 250, distance: 0, seconds: 60 },
+      ] }),
+      log({ eventSnapshot: { ...snapshot, timeGoal: 'fastest' }, sets: [{ weight: 250, distance: 500, seconds: 60 }] }),
+    ] }]);
+    const summary = summarizeStrongmanResults(results, { eventSnapshot: { ...snapshot, distance: 999 } });
+    expect(summary.farthest).toMatchObject({ distance: 125, weight: 250, seconds: 60 });
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...snapshot, weight: '' } }).farthest).toBeNull();
+    expect(summarizeStrongmanResults(results, { eventSnapshot: null }).farthest).toBeNull();
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...snapshot, type: 'medley' } }).farthest).toBeNull();
+  });
+
+  it('ranks cleared height separately from distance with matching implement weight and rules', () => {
+    const snapshot = { name: 'Bag toss', timeGoal: 'height', weight: 35, scoringRules: 'Two hands' };
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [
+      log({ eventSnapshot: snapshot, sets: [{ weight: 35, height: 180 }, { weight: 35, height: 192 },
+        { weight: 30, height: 216 }, { weight: 35, height: 204, distance: 10 },
+        { weight: 35, height: 230, successful: false }, { weight: 35, height: 0 }] }),
+      log({ eventSnapshot: { ...snapshot, scoringRules: 'One hand' }, sets: [{ weight: 35, height: 240 }] }),
+      log({ eventSnapshot: { ...snapshot, scoringRules: '  TWO   hands ' }, sets: [{ weight: 35, height: 200 }] }),
+    ] }]);
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...snapshot, height: 300 } }).highest.height).toBe(200);
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...snapshot, seconds: 60 } }).highest).toBeNull();
+  });
+
+  it('compares manual points only under the same recorded fixed setup, rules and actual window', () => {
+    const snapshot = { name: 'Weighted loading', timeGoal: 'points', weight: 100, height: 48,
+      seconds: 60, scoringRules: 'Light = 1; heavy = 2' };
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [
+      log({ eventSnapshot: snapshot, sets: [{ points: 10, weight: 200, reps: 5, seconds: 60 },
+        { points: 12.5, weight: 100, reps: 8, seconds: 60 }, { points: 30, seconds: 90 },
+        { points: 40, seconds: 60, successful: false }, { points: 0, seconds: 60 }] }),
+      log({ eventSnapshot: { ...snapshot, weight: 80 }, sets: [{ points: 50, seconds: 60 }] }),
+      log({ eventSnapshot: { ...snapshot, scoringRules: 'Light = 1; heavy = 3' }, sets: [{ points: 60, seconds: 60 }] }),
+    ] }]);
+    const summary = summarizeStrongmanResults(results, { eventSnapshot: { ...snapshot, points: 999 } });
+    expect(summary.mostPoints).toMatchObject({ points: 12.5, weight: 100, reps: 8 });
+    expect(summary.fastest).toBeNull();
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...snapshot, scoringRules: '' } }).mostPoints).toBeNull();
+    const legacy = { ...results[0], points: 99, eventSnapshot: { timeGoal: 'points' } };
+    expect(summarizeStrongmanResults([legacy], { eventSnapshot: { timeGoal: 'points' } }).mostPoints).toBeNull();
+  });
+
+  it('keeps scored attempts out of elapsed-time PRs and matches height and rules for existing goals', () => {
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [
+      ...['weight', 'distance', 'height', 'points', 'reps'].map(timeGoal => log({
+        eventSnapshot: { name: 'Lift', timeGoal, scoringRules: 'Same rules' },
+        sets: [{ weight: 200, reps: 5, distance: 50, height: 48, points: 5, seconds: 5 }],
+      })),
+      log({ eventSnapshot: { name: 'Lift', scoringRules: 'Same rules' },
+        sets: [{ weight: 200, reps: 5, distance: 50, height: 48, seconds: 20 }] }),
+    ] }]);
+    const setup = { weight: 200, reps: 5, distance: 50, height: 48, scoringRules: 'Same rules' };
+    expect(summarizeStrongmanResults(results, { eventSnapshot: setup }).fastest.seconds).toBe(20);
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...setup, height: '' } }).fastest).toBeNull();
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...setup, scoringRules: '' } }).fastest).toBeNull();
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { ...setup, timeGoal: 'reps', seconds: 5 } }).mostReps.reps).toBe(5);
+  });
+
+  it('builds stable record setups without score targets and distinguishes windows, height and custom rules', () => {
+    const first = { weight: 200, reps: 8, height: 48, seconds: 60,
+      eventSnapshot: { timeGoal: 'reps', scoringRules: 'Same rules' } };
+    const setup = strongmanRecordSetup(first);
+    expect(setup).toMatchObject({ timeGoal: 'reps', weight: 200, reps: '', height: 48, seconds: 60 });
+    expect(strongmanRecordSetupKey(setup)).toBe(strongmanRecordSetupKey(strongmanRecordSetup({ ...first, reps: 12 })));
+    expect(strongmanRecordSetupKey(setup)).not.toBe(strongmanRecordSetupKey({ ...setup, seconds: 90 }));
+    expect(strongmanRecordSetupKey(setup)).not.toBe(strongmanRecordSetupKey({ ...setup, height: 42 }));
+    expect(strongmanRecordSetupKey(setup)).not.toBe(strongmanRecordSetupKey({ ...setup, scoringRules: 'Other rules' }));
+    const points = strongmanRecordSetup({ ...first, points: 30, eventSnapshot: {
+      timeGoal: 'points', weight: 100, reps: '', height: 48, scoringRules: 'Light 1, heavy 2',
+    } });
+    expect(points).toMatchObject({ weight: 100, reps: '', height: 48, seconds: 60 });
+    expect(strongmanRecordSetup({ ...first, scope: 'medley', eventSnapshot: event })).toBe(event);
+    expect(strongmanSetupKey({ ...event, components: event.components.map(component => ({ ...component, height: 48 })) }))
+      .not.toBe(strongmanSetupKey(event));
+  });
+
+  it('allows floor-height context and zero custom scores without hiding completed strength work', () => {
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [log({
+      eventSnapshot: { name: 'Deadlift', timeGoal: 'weight' },
+      sets: [{ weight: 500, reps: 1, height: 0, points: 0 }],
+    })] }]);
+    const summary = summarizeStrongmanResults(results, { eventSnapshot: { timeGoal: 'weight', reps: 1, height: 0 } });
+    expect(summary.best.weight).toBe(500);
+    expect(summary.heaviest.weight).toBe(500);
+    expect(summary.highest).toBeNull();
+    expect(summary.mostPoints).toBeNull();
   });
 
   it('merges new logs and keeps conflicting imported results without duplicates on repeated import', () => {

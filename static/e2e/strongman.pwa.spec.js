@@ -6,6 +6,62 @@ const competition = page => page.getByRole('region', { name: 'Next competition',
 const exerciseEditor = page => page.locator('.strongman-result-editor');
 test.use({ actionTimeout: 10000 });
 
+test('max weight, distance, height, and manual points keep distinct records after reload', async ({ page }) => {
+  test.setTimeout(90000);
+  await createProfile(page, 'Event scoring athlete');
+  await page.getByRole('button', { name: 'Build a routine' }).click();
+  await page.getByLabel('Routine name').fill('Event scoring prep');
+  await fillMaxes(page);
+  await selectVolume(page);
+  await selectWeakPoints(page);
+  await page.getByLabel('Include a dedicated Strongman day').check();
+  const events = [
+    { name: 'Max axle', goal: 'weight', setup: { Reps: 1 }, sets: [{ 'Weight (lb)': 500, Reps: 1 }, { 'Weight (lb)': 550, Reps: 1 }], best: '550 lb · 1 rep' },
+    { name: 'Bag carry', goal: 'distance', setup: { 'Weight (lb)': 200, 'Time window (sec)': 60 }, sets: [{ 'Weight (lb)': 200, 'Distance (ft)': 100, 'Time window (s)': 60 }, { 'Weight (lb)': 200, 'Distance (ft)': 120, 'Time window (s)': 60 }, { 'Weight (lb)': 100, 'Distance (ft)': 200, 'Time window (s)': 60 }], best: '200 lb · 120 ft · 60 sec' },
+    { name: 'Bag height', goal: 'height', setup: { 'Weight (lb)': 30 }, sets: [{ 'Weight (lb)': 30, 'Height (in)': 144 }, { 'Weight (lb)': 30, 'Height (in)': 156 }, { 'Weight (lb)': 20, 'Height (in)': 180 }], best: '30 lb · 156 in height' },
+    { name: 'Choice overhead', goal: 'points', setup: { 'Time window (sec)': 60 }, rules: 'Heavy rep = 5 points; light rep = 1', sets: [{ Points: 10, 'Time window (s)': 60 }, { Points: 15, 'Time window (s)': 60 }], best: '15 points' },
+  ];
+  for (const [index, event] of events.entries()) {
+    await page.getByRole('button', { name: 'Add event', exact: true }).click();
+    const prefix = `Event ${index + 1}`;
+    await page.getByLabel(`${prefix} name`, { exact: true }).fill(event.name);
+    await page.getByLabel(`${prefix} record goal`, { exact: true }).selectOption(event.goal);
+    for (const [label, value] of Object.entries(event.setup)) await page.getByLabel(`${prefix} ${label}`, { exact: true }).fill(String(value));
+    if (event.rules) await page.getByLabel(`${prefix} scoring rules`, { exact: true }).fill(event.rules);
+  }
+  await page.screenshot({ path: 'test-results/strongman-scoring-setup-mobile.png', fullPage: true });
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await openStrongmanDay(page);
+  const editor = exerciseEditor(page);
+  for (const event of events) {
+    await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
+    await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: event.name });
+    await expect(editor.getByLabel('Record goal', { exact: true })).toHaveValue(event.goal);
+    for (const [index, values] of event.sets.entries()) {
+      if (index) await editor.getByRole('button', { name: 'Add set', exact: true }).click();
+      const set = editor.locator('.strongman-training-set').nth(index);
+      for (const [label, value] of Object.entries(values)) await set.getByLabel(label, { exact: true }).fill(String(value));
+    }
+    await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    const card = competition(page).locator('.strongman-competition-event').filter({ has: page.getByRole('heading', { name: event.name, exact: true }) });
+    await expect(card.locator('.strongman-event-results').first()).toContainText(event.best);
+  }
+  await page.reload();
+  await openStrongmanDay(page);
+  await expect(competition(page)).toContainText('550 lb · 1 rep');
+  await expect(competition(page)).toContainText('156 in height');
+  await page.getByRole('button', { name: '← Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Progress', exact: true }).click();
+  await page.getByRole('tab', { name: 'Strongman records', exact: true }).click();
+  for (const event of events) {
+    await page.getByLabel('Strongman movement', { exact: true }).selectOption({ label: event.name });
+    await expect(page.locator('.strongman-record-metric').first()).toContainText(event.best);
+  }
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/strongman-points-progress-mobile.png', fullPage: true });
+});
+
 test('rep events retain their goal and rank matching loads and time windows', async ({ page }) => {
   test.setTimeout(90000);
   await createProfile(page, 'Rep Athlete');
@@ -103,7 +159,7 @@ test('strongman training supports unknown medleys, backfill, actual sets and rec
   await editor.getByLabel('Distance (ft)', { exact: true }).fill('75');
   await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
   await page.getByRole('button', { name: 'Add set', exact: true }).click();
-  const secondSet = editor.locator('.strongman-training-set').nth(1);
+  const secondSet = editor.locator('.strongman-training-set').first();
   await secondSet.getByLabel('Weight (lb)', { exact: true }).fill('650');
   await secondSet.getByLabel('Distance (ft)', { exact: true }).fill('0');
   await secondSet.getByLabel('Result', { exact: true }).selectOption('failed');

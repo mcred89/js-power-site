@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createStrongmanLogEntry, normalizeMovementName } from '../data/strongman';
+import { createStrongmanLogEntry, normalizeMovementName, STRONGMAN_RECORD_GOALS } from '../data/strongman';
 import './StrongmanTraining.css';
 import { useUnsavedChanges } from './useUnsavedChanges';
 
@@ -12,9 +12,10 @@ const localDate = value => {
 };
 const today = () => localDate();
 
-const emptySet = () => ({ id: makeId(), weight: '', reps: '', distance: '', seconds: '', successful: true });
-const medleySet = set => ({ ...set, weight: '', reps: '', distance: '' });
-const newMedleyRun = entry => {
+const present = value => value !== '' && value !== undefined && value !== null;
+const emptySet = () => ({ id: makeId(), weight: '', reps: '', distance: '', seconds: '', height: '', points: '', successful: true });
+const medleySet = set => ({ ...set, weight: '', reps: '', distance: '', height: '', points: '' });
+const newSetupEntry = entry => {
   const next = { ...entry, id: makeId(), sets: [emptySet()], notes: '' };
   delete next.createdAt;
   delete next.updatedAt;
@@ -25,7 +26,9 @@ const setLabel = set => [
   set.weight !== '' && set.weight != null ? `${set.weight} lb` : '',
   set.reps !== '' && set.reps != null ? `${set.reps} ${Number(set.reps) === 1 ? 'rep' : 'reps'}` : '',
   set.distance !== '' && set.distance != null ? `${set.distance} ft` : '',
+  set.height !== '' && set.height != null ? `${set.height} in height` : '',
   set.seconds !== '' && set.seconds != null ? `${set.seconds} s` : '',
+  set.points !== '' && set.points != null ? `${set.points} points` : '',
 ].filter(Boolean).join(' · ');
 
 const competitionChoices = competition => (competition?.events || []).flatMap(event => (
@@ -46,7 +49,7 @@ const MetricInput = ({ label, value, onChange, whole = false }) => <label>
 
 /** A dated result editor shared by the day logger and Progress backfill. */
 export const StrongmanResultEditor = ({
-  entry = null, competition, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, newRun = false, onSave, onCancel,
+  entry = null, appendToEntry = null, competition, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, newRun = false, newSet = false, onSave, onCancel,
 }) => {
   const [draft, setDraft] = useState(() => entry ? {
     ...entry, sets: entry.sets.map(set => entry.scope === 'medley' ? medleySet(set) : { ...set }),
@@ -67,6 +70,8 @@ export const StrongmanResultEditor = ({
   const movements = [...new Set(knownMovements)].filter(name => name && !choices.some(choice => (
     choice.scope === 'movement' && normalizeMovementName(choice.movement) === normalizeMovementName(name)
   ))).sort((a, b) => a.localeCompare(b));
+  const goal = draft.eventSnapshot?.timeGoal || 'fastest';
+  const timeWindow = draft.scope !== 'medley' && ['reps', 'distance', 'height', 'points'].includes(goal);
 
   useEffect(() => { headingRef.current?.focus(); }, []);
   useEffect(() => {
@@ -76,6 +81,9 @@ export const StrongmanResultEditor = ({
   }, [draft.sets]);
 
   const update = values => { setDraft(current => ({ ...current, ...values })); setError(''); };
+  const updateSnapshot = values => update({ eventSnapshot: {
+    ...(draft.eventSnapshot || { id: makeId(), name: draft.movement, type: 'single', components: [] }), ...values,
+  } });
   const updateSet = (index, values) => setDraft(current => ({
     ...current, sets: current.sets.map((set, setIndex) => setIndex === index ? { ...set, ...values } : set),
   }));
@@ -128,7 +136,10 @@ export const StrongmanResultEditor = ({
     setError('');
     try {
       const normalized = createStrongmanLogEntry(draft);
-      await onSave(normalized);
+      const sameContext = appendToEntry && ['movement', 'date', 'scope', 'eventId', 'componentId', 'workoutId', 'notes']
+        .every(key => (draft[key] || '') === (appendToEntry[key] || '')) &&
+        JSON.stringify(draft.eventSnapshot || null) === JSON.stringify(appendToEntry.eventSnapshot || null);
+      await onSave(sameContext ? { ...appendToEntry, sets: [...appendToEntry.sets, ...normalized.sets], updatedAt: normalized.updatedAt } : normalized);
       onCancel();
     } catch (saveError) {
       setError(saveError.message || 'Could not save this training. Your entries are still here; try again.');
@@ -139,8 +150,9 @@ export const StrongmanResultEditor = ({
   };
 
   return <form className="strongman-result-editor" onSubmit={save}>
-    <h3 tabIndex="-1" ref={headingRef}>{newRun ? 'Add run' : entry ? 'Edit training' : 'Add exercise'}</h3>
+    <h3 tabIndex="-1" ref={headingRef}>{newRun ? 'Add run' : newSet ? 'Add set' : entry ? 'Edit training' : 'Add exercise'}</h3>
     <p className="muted">Record what you actually do. Start with one set and add more as you go.</p>
+    {appendToEntry && <p className="muted">Add your new sets here. Changing the movement, record goal, rules, or notes saves them separately and keeps earlier sets unchanged.</p>}
     <fieldset disabled={saving}>
       {!entry && <label className="strongman-training-field">
         <span className="field-label">Exercise</span>
@@ -185,6 +197,8 @@ export const StrongmanResultEditor = ({
               <MetricInput label="Reps" value={component.reps} whole onChange={value => updateComponent(index, 'reps', value)} />
               <MetricInput label="Time (s)" value={component.seconds} onChange={value => updateComponent(index, 'seconds', value)} />
             </div>
+            <details className="strongman-training-extra" open={present(component.height) || present(component.points) || undefined}><summary>Height or points (optional)</summary><div className="strongman-training-metrics"><MetricInput label="Height (in)" value={component.height} onChange={value => updateComponent(index, 'height', value)} /><MetricInput label="Points" value={component.points} onChange={value => updateComponent(index, 'points', value)} /></div></details>
+            <details className="strongman-training-extra" open={present(component.scoringRules) || undefined}><summary>Implement rules (optional)</summary><label><span className="field-label">Implement {index + 1} scoring rules</span><input className="number-input" value={component.scoringRules || ''} maxLength="2000" onChange={event => updateComponent(index, 'scoringRules', event.target.value)} /></label></details>
             <button type="button" className="text-button" aria-label={`Remove actual implement ${index + 1}`}
               onClick={() => removeComponent(index)}>Remove implement</button>
           </div>)}
@@ -195,15 +209,29 @@ export const StrongmanResultEditor = ({
           : 'Fill in the measures you used. For a pickup, enter 1 rep. Leave measures you did not track blank.'}</p>
         {draft.scope !== 'medley' && <label className="strongman-training-field">
           <span className="field-label">Record goal</span>
-          <select className="select-input" aria-label="Record goal" value={draft.eventSnapshot?.timeGoal || 'fastest'} onChange={event => update({
-            eventSnapshot: { ...(draft.eventSnapshot || { id: makeId(), name: draft.movement, type: 'single', components: [] }), timeGoal: event.target.value },
-          })}>
-            <option value="fastest">Faster is better (run)</option>
-            <option value="longest">Longer is better (hold)</option>
-            <option value="reps">More reps is better</option>
+          <select className="select-input" aria-label="Record goal" value={goal} onChange={event => updateSnapshot({ timeGoal: event.target.value })}>
+            {STRONGMAN_RECORD_GOALS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
         </label>}
-        {draft.scope !== 'medley' && draft.eventSnapshot?.timeGoal === 'reps' && <p className="strongman-training-hint">Enter the time window you actually used, or leave it blank for an untimed set. Rep records compare matching weight, distance, and time window.</p>}
+        {timeWindow && <p className="strongman-training-hint">Enter the time window you actually used, or leave it blank for untimed work. Records compare matching setups and time windows.</p>}
+        {draft.scope !== 'medley' && goal === 'height' && <p className="strongman-training-hint">Record the height you cleared in inches, separately from horizontal distance. Leave an unmeasured height blank.</p>}
+        {draft.scope !== 'medley' && goal === 'weight' && <p className="strongman-training-hint">Record the weight you lifted and actual reps. Failed attempts remain in history but do not count as records.</p>}
+        {(draft.scope === 'medley' || goal !== 'points') && <details className="strongman-training-extra" open={present(draft.eventSnapshot?.scoringRules) || undefined}>
+          <summary>Setup and scoring rules (optional)</summary>
+          <label className="strongman-training-field"><span className="field-label">Scoring rules</span><textarea className="number-input" rows="2" maxLength="2000" value={draft.eventSnapshot?.scoringRules || ''} placeholder="e.g. Best of 3 throws; no drops; 2-inch deficit" onChange={event => updateSnapshot({ scoringRules: event.target.value })} /></label>
+          <p className="strongman-training-hint">Use the rules you actually trained. Every set in this entry shares these rules; editing them changes the setup for all its sets.</p>
+        </details>}
+        {draft.scope !== 'medley' && goal === 'points' && <div className="strongman-training-course">
+          <h4>Scoring setup</h4>
+          <p className="muted">Enter your actual score manually. Include every implement’s weight, required distance or height, and scoring formula in the rules. For example: 200 lb stone = 1 point; 250 lb stone = 2; both over a 48-inch bar. Update the rules if any load or task changes. Every set in this entry shares these rules and setup.</p>
+          <label className="strongman-training-field"><span className="field-label">Scoring rules</span><textarea className="number-input" rows="2" required maxLength="2000" value={draft.eventSnapshot?.scoringRules || ''} placeholder="e.g. 1 point per light stone, 2 per heavy stone; 60 sec" onChange={event => updateSnapshot({ scoringRules: event.target.value })} /></label>
+          <details className="strongman-training-extra"><summary>Fixed event setup (optional)</summary>
+            <p className="muted">These are the event’s fixed conditions, copied from the competition when available. They are not completed results. Update them if you practiced different conditions.</p>
+            <div className="strongman-training-metrics">
+              {[['weight', 'Setup weight (lb)'], ['distance', 'Setup distance (ft)'], ['reps', 'Setup reps'], ['height', 'Setup height (in)']].map(([key, label]) => <MetricInput key={key} label={label} whole={key === 'reps'} value={draft.eventSnapshot?.[key]} onChange={value => updateSnapshot({ [key]: value })} />)}
+            </div>
+          </details>
+        </div>}
         <div className="strongman-training-sets" ref={setsRef}>
           {draft.sets.map((set, index) => <div className="strongman-training-set" key={set.id} data-set-id={set.id}>
             <div className="strongman-training-set-heading">
@@ -213,11 +241,14 @@ export const StrongmanResultEditor = ({
                 onClick={() => update({ sets: draft.sets.filter((_, setIndex) => setIndex !== index) })}>Remove</button>}
             </div>
             <div className="strongman-training-metrics">
+              {draft.scope !== 'medley' && (goal === 'points' || present(set.points)) && <MetricInput label="Points" value={set.points} onChange={value => updateSet(index, { points: value })} />}
+              {draft.scope !== 'medley' && goal === 'height' && <MetricInput label="Height (in)" value={set.height} onChange={value => updateSet(index, { height: value })} />}
               {draft.scope !== 'medley' && <MetricInput label="Weight (lb)" value={set.weight} onChange={value => updateSet(index, { weight: value })} />}
               {draft.scope !== 'medley' && <MetricInput label="Reps" value={set.reps} whole onChange={value => updateSet(index, { reps: value })} />}
               {draft.scope !== 'medley' && <MetricInput label="Distance (ft)" value={set.distance} onChange={value => updateSet(index, { distance: value })} />}
-              <MetricInput label={draft.scope !== 'medley' && draft.eventSnapshot?.timeGoal === 'reps' ? 'Time window (s)' : 'Time (s)'} value={set.seconds} onChange={value => updateSet(index, { seconds: value })} />
+              <MetricInput label={timeWindow ? 'Time window (s)' : 'Time (s)'} value={set.seconds} onChange={value => updateSet(index, { seconds: value })} />
             </div>
+            {draft.scope !== 'medley' && goal !== 'height' && <details className="strongman-training-extra" open={present(set.height) || undefined}><summary>Height or loading platform (optional)</summary><MetricInput label="Height (in)" value={set.height} onChange={value => updateSet(index, { height: value })} /></details>}
             <label className="strongman-training-outcome">
               <span className="field-label">Result</span>
               <select className="select-input" aria-label="Result" value={set.successful === false ? 'failed' : 'completed'}
@@ -297,14 +328,17 @@ export const StrongmanTraining = ({ routine, workout, routines = [], onSaveLog, 
             {set.successful === false && <span className="strongman-training-attempt">Unsuccessful</span>}
           </li>)}
         </ol>
+        {entry.eventSnapshot?.scoringRules && <p className="strongman-training-notes">Scoring: {entry.eventSnapshot.scoringRules}</p>}
         {entry.notes && <p className="strongman-training-notes">{entry.notes}</p>}
         <div className="strongman-training-actions">
           <button type="button" className="secondary-button" disabled={Boolean(editing) || saving}
             onClick={() => {
               setEditing({
-                entry: entry.scope === 'medley' ? newMedleyRun(entry) : { ...entry, sets: [...entry.sets, emptySet()] },
+                entry: newSetupEntry(entry),
+                appendToEntry: entry.scope !== 'medley' && entry.eventSnapshot?.timeGoal !== 'points' && !present(entry.eventSnapshot?.scoringRules) ? entry : null,
                 focusLastSet: true,
                 newRun: entry.scope === 'medley',
+                newSet: entry.scope !== 'medley',
               });
               setDeleteId(null);
             }}>
@@ -325,11 +359,13 @@ export const StrongmanTraining = ({ routine, workout, routines = [], onSaveLog, 
     {error && <p className="strongman-training-error" role="alert">{error}</p>}
     {notice && <p className="muted" role="status">{notice}</p>}
     {editing ? <StrongmanResultEditor key={editing.entry?.id || editing.mode} entry={editing.entry}
+      appendToEntry={editing.appendToEntry}
       competition={routine.inputs?.strongmanCompetition} knownMovements={knownMovements}
       workoutId={editing.mode === 'past' ? null : workout.id}
       initialDate={editing.mode !== 'past' && workout.completedAt ? localDate(workout.completedAt) : undefined}
       focusLastSet={editing.focusLastSet}
       newRun={editing.newRun}
+      newSet={editing.newSet}
       onSave={saveEntry} onCancel={() => setEditing(null)} />
       : <div className="strongman-training-actions">
         <button type="button" className="primary-button" disabled={saving} onClick={() => { setEditing({ mode: 'day' }); setDeleteId(null); }}>Add exercise</button>

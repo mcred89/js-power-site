@@ -34,6 +34,7 @@ export function* routineHistoryCsvRowIterator(routine) {
     'Total seconds', 'Movement', 'Substituted for', 'Set', 'Set status', 'Planned weight (lb)',
     'Planned reps', 'Actual weight (lb)', 'Actual reps', 'RPE', 'Split seconds',
     'Interval seconds', 'Distance (ft)', 'Event time (seconds)', 'Training date', 'Event scope', 'Event setup', 'Notes',
+    'Actual height (in)', 'Actual points',
   ].map(escapeCsv).join(',');
 
   for (const workout of routine.workouts.filter(item => item.completedAt)) {
@@ -44,7 +45,7 @@ export function* routineHistoryCsvRowIterator(routine) {
         yield [
           routine.name, workout.cycleLabel, workout.weekLabel, workout.sequence, workout.name,
           '', workout.completedAt, '', shown.movement, '', '', 'Legacy completed', shown.weight,
-          shown.prescription, '', '', '', '', '', '', '', '', '', '', '',
+          shown.prescription, '', '', '', '', '', '', '', '', '', '', '', '', '',
         ].map(escapeCsv).join(',');
       }
       continue;
@@ -68,7 +69,7 @@ export function* routineHistoryCsvRowIterator(routine) {
           sessionExercise.movement, sessionExercise.original?.movement || '', set.number, set.status, set.plannedWeight, set.plannedReps,
           set.actualWeight, set.actualReps,
           sessionExercise.exerciseId === workout.session.primaryExerciseId ? workout.session.rpe : '',
-          formatSeconds(set.splitSeconds), interval, '', '', '', '', '', '',
+          formatSeconds(set.splitSeconds), interval, '', '', '', '', '', '', '', '',
         ].map(escapeCsv).join(',');
       }
     }
@@ -82,7 +83,7 @@ export function* routineHistoryCsvRowIterator(routine) {
         'Strongman', '', workout?.completedAt, '', entry.movement, '', index + 1,
         set.successful === false ? 'Attempt' : 'Completed', '', '', set.weight, set.reps,
         '', '', '', set.distance, set.seconds, entry.date, entry.scope,
-        entry.eventSnapshot ? JSON.stringify(entry.eventSnapshot) : '', entry.notes,
+        entry.eventSnapshot ? JSON.stringify(entry.eventSnapshot) : '', entry.notes, set.height, set.points,
       ].map(escapeCsv).join(',');
     }
   }

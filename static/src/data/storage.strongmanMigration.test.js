@@ -40,13 +40,13 @@ describe('strongman tracking migration', () => {
     expect(restored.archives).toEqual([archive]);
   });
 
-  it('upgrades v17 backups without adding goals or rewriting records and historical snapshots', () => {
-    const original = { format: 'mcilroy-method-backup', version: 17, dataSchemaVersion: 17,
+  it.each([17, 18])('upgrades v%i backups without adding goals or rewriting records and historical snapshots', version => {
+    const original = { format: 'mcilroy-method-backup', version, dataSchemaVersion: version,
       profiles: [{ id: 'p1' }], routines: [legacyTracking, { id: 'unknown', custom: true }],
       templates: [{ id: 'template', inputs: legacyTracking.inputs }], archives: [archive], extension: { future: true } };
     const before = JSON.stringify(original);
     const migrated = migrateBackup(original);
-    expect(migrated).toEqual({ ...original, version: 18, dataSchemaVersion: 18 });
+    expect(migrated).toEqual({ ...original, version: 19, dataSchemaVersion: 19 });
     expect(migrated.routines).toBe(original.routines);
     expect(migrated.routines[0].inputs.strongmanCompetition.events[0]).not.toHaveProperty('timeGoal');
     expect(migrated.routines[0].strongmanLog[0].eventSnapshot).not.toHaveProperty('timeGoal');
@@ -61,8 +61,25 @@ describe('strongman tracking migration', () => {
         components: [{ id: 'bag', name: 'Sandbag load', weight: 200, reps: 3, timeGoal: 'reps' }] }],
     } }, strongmanLog: [{ ...legacyTracking.strongmanLog[0], eventSnapshot: repsEvent }] };
     const contents = exportBackup([{ id: 'p1' }], [saved]);
-    expect(JSON.parse(contents)).toMatchObject({ version: 18, dataSchemaVersion: 18 });
+    expect(JSON.parse(contents)).toMatchObject({ version: 19, dataSchemaVersion: 19 });
     expect(parseBackup(contents).routines).toEqual([saved]);
+  });
+
+  it('round-trips every new goal, height, custom points and scoring rules without losing extensions', () => {
+    const events = ['weight', 'distance', 'height', 'points'].map((timeGoal, index) => ({
+      id: `goal-${index}`, name: `Event ${index}`, type: 'single', timeGoal,
+      height: 204.5, points: 12.5, scoringRules: 'Heavy rep = 2 points', extension: { preserved: true },
+    }));
+    const saved = { ...legacyTracking, inputs: { ...legacyTracking.inputs, strongmanCompetition: { events } },
+      strongmanLog: events.map(eventSnapshot => createStrongmanLogEntry({
+        movement: eventSnapshot.name, date: '2026-01-01', eventSnapshot,
+        sets: [{ weight: 200, reps: 5, height: 204.5, points: 12.5, seconds: 60, extension: { preserved: true } }],
+      })) };
+    const original = JSON.stringify(saved);
+    const restored = parseBackup(exportBackup([{ id: 'p1' }], [saved], [], [archive]));
+    expect(restored.routines).toEqual([saved]);
+    expect(restored.archives).toEqual([archive]);
+    expect(JSON.stringify(saved)).toBe(original);
   });
 
   it('rejects malformed known strongman data before importing without altering the source', () => {
@@ -82,6 +99,16 @@ describe('strongman tracking migration', () => {
     expect(() => parseBackup(exportBackup([{ id: 'p1' }], [{ ...routine, inputs: {
       ...routine.inputs, strongmanCompetition: { name: { invalid: true }, events: [] },
     } }]))).toThrow('text competition name');
+    const snapshot = { ...legacyEvent, scoringRules: { invalid: true } };
+    expect(() => parseBackup(exportBackup([{ id: 'p1' }], [{ ...legacyTracking,
+      strongmanLog: [{ ...legacyTracking.strongmanLog[0], eventSnapshot: snapshot }],
+    }]))).toThrow('scoring rules as text');
+    ['height', 'points'].forEach(metric => {
+      const invalid = { ...legacyTracking, strongmanLog: [{ ...legacyTracking.strongmanLog[0],
+        sets: [{ ...legacyTracking.strongmanLog[0].sets[0], [metric]: -1 }],
+      }] };
+      expect(() => parseBackup(exportBackup([{ id: 'p1' }], [invalid]))).toThrow(`valid ${metric}`);
+    });
   });
 
   it.each([undefined, null, '', ' ', 7])('rejects saved competition and snapshot IDs of %p without repairing the source', id => {
@@ -130,7 +157,7 @@ describe('strongman tracking migration', () => {
     expect(restored.routines[0]).toEqual(saved);
   });
 
-  it.each([0, 16, 17])('creates or upgrades a v%i database to v18 with untouched snapshots', async oldVersion => {
+  it.each([0, 16, 17, 18])('creates or upgrades a v%i database to v19 with untouched snapshots', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `strongman-migration-${oldVersion}`;
     if (oldVersion) await new Promise((resolve, reject) => {
@@ -140,9 +167,9 @@ describe('strongman tracking migration', () => {
         request.result.createObjectStore('metadata', { keyPath: 'key' });
         request.transaction.objectStore('routines').createIndex('profileId', 'profileId');
         request.transaction.objectStore('archives').createIndex('profileId', 'record.profileId');
-        request.transaction.objectStore('routines').put(oldVersion === 17 ? legacyTracking : routine);
+        request.transaction.objectStore('routines').put(oldVersion >= 17 ? legacyTracking : routine);
         request.transaction.objectStore('routines').put({ id: 'unknown', custom: { preserved: true } });
-        request.transaction.objectStore('templates').put({ id: 't1', inputs: oldVersion === 17 ? legacyTracking.inputs : {} });
+        request.transaction.objectStore('templates').put({ id: 't1', inputs: oldVersion >= 17 ? legacyTracking.inputs : {} });
         request.transaction.objectStore('archives').put(archive);
       };
       request.onerror = () => reject(request.error);
@@ -162,9 +189,9 @@ describe('strongman tracking migration', () => {
     expect(database.objectStoreNames.contains('archives')).toBe(true);
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     if (oldVersion) {
-      expect(await read('routines', 'r1')).toEqual(oldVersion === 17 ? legacyTracking : addStrongmanTracking(routine));
+      expect(await read('routines', 'r1')).toEqual(oldVersion >= 17 ? legacyTracking : addStrongmanTracking(routine));
       expect(await read('routines', 'unknown')).toEqual({ id: 'unknown', custom: { preserved: true } });
-      expect(await read('templates', 't1')).toEqual({ id: 't1', inputs: oldVersion === 17
+      expect(await read('templates', 't1')).toEqual({ id: 't1', inputs: oldVersion >= 17
         ? legacyTracking.inputs : { strongmanCompetition: null } });
       expect(await read('archives', archive.id)).toEqual(archive);
     }
