@@ -2,8 +2,9 @@ import { buildRoutinePlan } from './routineGeneration';
 import { routineToCsv, routineToMarkdown } from './routineExports';
 import {
   createRoutine, createRoutineFromTemplate, setWorkoutComplete,
-  updateExercise, visibleExercise,
+  visibleExercise,
 } from './routines';
+import { updateExercise } from './workoutActions';
 import { correctMaxes } from './routineRecalculation';
 import { createRoutineTemplate, duplicateRoutine } from './routineCopies';
 

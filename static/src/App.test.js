@@ -548,7 +548,7 @@ it('detects an installed standalone app', () => {
   window.matchMedia = originalMatchMedia;
 });
 
-it('edits and trims a routine name', () => {
+it('edits and trims a routine name', async () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const div = document.createElement('div');
   const root = createRoot(div);
@@ -562,7 +562,7 @@ it('edits and trims a routine name', () => {
     setter.call(input, '  New plan  ');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  act(() => div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await act(async () => div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
 
   expect(onSave).toHaveBeenCalledWith('New plan');
   expect(div.textContent).toContain('Rename');

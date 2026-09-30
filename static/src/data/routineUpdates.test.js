@@ -1,10 +1,9 @@
 import {
   createRoutine,
-  deleteFutureWorkout,
   startWorkoutSession,
-  updateExercise,
   visibleExercise,
 } from './routines';
+import { deleteFutureWorkout, updateExercise } from './workoutActions';
 import { correctMaxes, refreshAdaptiveProgression } from './routineRecalculation';
 import { getPlanUpdateSummary, updateRoutinePlan } from './routineUpdates';
 

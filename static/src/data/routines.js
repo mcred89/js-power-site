@@ -351,8 +351,6 @@ export const skipRemainingSessionExercise = (
   timestamp = now(),
 ) => skipSets(routine, workoutId, exerciseId, () => true, timestamp);
 
-export { substituteSessionExercise } from './workoutActions';
-
 export const getLatestSessionAction = session => session.exercises.flatMap(exercise => exercise.sets.flatMap(set => {
   if (set.status === 'completed') return [{
     type: 'completed', actionId: set.id, occurredAt: set.completedAt, exerciseId: exercise.exerciseId,
@@ -493,40 +491,6 @@ export const reopenWorkoutSession = (routine, workoutId, timestamp = now()) => r
     };
   },
 ));
-
-export { deleteFutureWorkout } from './workoutActions';
-
-export const updateExercise = (routine, workoutId, exerciseId, values) => ({
-  ...routine,
-  updatedAt: now(),
-  workouts: routine.workouts.map(workout => (
-    workout.id !== workoutId || workout.completedAt
-      ? workout
-      : {
-        ...workout,
-        exercises: workout.exercises.map(exercise => (
-          exercise.id === exerciseId
-            ? { ...exercise, overrides: { ...exercise.overrides, ...values } }
-            : exercise
-        )),
-      }
-  )),
-});
-
-export const clearExerciseOverrides = (routine, workoutId, exerciseId) => ({
-  ...routine,
-  updatedAt: now(),
-  workouts: routine.workouts.map(workout => (
-    workout.id !== workoutId || workout.completedAt
-      ? workout
-      : {
-        ...workout,
-        exercises: workout.exercises.map(exercise => (
-          exercise.id === exerciseId ? { ...exercise, overrides: {} } : exercise
-        )),
-      }
-  )),
-});
 
 const maxKeyForLift = {
   Squat: 'maxSquat',

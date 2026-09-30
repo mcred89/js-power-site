@@ -53,6 +53,52 @@ describe('strongman tracking migration', () => {
     } }]))).toThrow('text competition name');
   });
 
+  it.each([undefined, null, '', ' ', 7])('rejects saved competition and snapshot IDs of %p without repairing the source', id => {
+    ['competition', 'snapshot'].forEach(location => {
+      ['event', 'component'].forEach(target => {
+        const event = { id: 'event', name: 'Carry medley', type: 'medley',
+          components: [{ id: 'bag', name: 'Sandbag', weight: 200, distance: 50 }] };
+        if (target === 'event') event.id = id;
+        else event.components[0].id = id;
+        const saved = location === 'competition' ? {
+          ...routine, inputs: { ...routine.inputs, strongmanCompetition: { events: [event] } },
+        } : {
+          ...routine, strongmanLog: [{ id: 'entry', date: '2026-01-01', movement: 'Carry medley',
+            scope: 'medley', eventSnapshot: event, sets: [{ id: 'set', seconds: 42 }] }],
+        };
+        const before = JSON.stringify(saved);
+        expect(() => parseBackup(exportBackup([{ id: 'p1' }], [saved]))).toThrow('nonempty text ID');
+        expect(JSON.stringify(saved)).toBe(before);
+      });
+    });
+  });
+
+  it('rejects IDs shared across competition events and implements', () => {
+    const event = { id: 'event', name: 'Carry medley', type: 'medley', components: [
+      { id: 'bag', name: 'Sandbag' }, { id: 'yoke', name: 'Yoke' },
+    ] };
+    const eventsWithDuplicate = [
+      [event, { id: 'event', name: 'Log press' }],
+      [event, { id: 'bag', name: 'Log press' }],
+      [{ ...event, components: [{ id: 'bag', name: 'Sandbag' }, { id: 'bag', name: 'Yoke' }] }],
+    ];
+    eventsWithDuplicate.forEach(events => {
+      const saved = { ...routine, inputs: { ...routine.inputs, strongmanCompetition: { events } } };
+      expect(() => parseBackup(exportBackup([{ id: 'p1' }], [saved]))).toThrow('own ID');
+    });
+  });
+
+  it('preserves legacy medley results with hidden metrics and no time when importing', () => {
+    const entry = createStrongmanLogEntry({ date: '2026-01-01', movement: 'Carry medley', scope: 'medley',
+      eventSnapshot: { id: 'event', name: 'Carry medley', type: 'medley', components: [] },
+      sets: [{ seconds: 42 }] });
+    const untimed = { ...entry, id: 'untimed', sets: [{ ...entry.sets[0], weight: 500, seconds: '' }] };
+    const timed = { ...entry, sets: [{ ...entry.sets[0], reps: 0, extension: { preserved: true } }] };
+    const saved = { ...routine, strongmanLog: [untimed, timed] };
+    const restored = parseBackup(exportBackup([{ id: 'p1' }], [saved]));
+    expect(restored.routines[0]).toEqual(saved);
+  });
+
   it.each([0, 16])('creates or upgrades a v%i database with v17 containers and untouched snapshots', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `strongman-migration-${oldVersion}`;

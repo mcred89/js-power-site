@@ -24,7 +24,7 @@ const resultSetup = result => result.scope === 'medley' ? result.eventSnapshot :
 };
 const setupLabel = setup => setup?.type === 'medley'
   ? (setup.components || []).map((component, index) => `${component.name || `Implement ${index + 1}`}: ${formatStrongmanTarget(component)}`).join(' / ')
-  : formatStrongmanTarget(setup);
+  : `${formatStrongmanTarget(setup)} · ${setup?.timeGoal === 'longest' ? 'Longest hold' : 'Fastest'}`;
 
 const RecordMetric = ({ label, result, empty = 'No results yet' }) => (
   <div className="strongman-record-metric"><small>{label}</small><strong>{result ? formatStrongmanResult(result) : empty}</strong>{result && <span>{formatStrongmanDate(result.date)} · {result.routineName}{result.successful === false ? ' · Unsuccessful attempt' : ''}</span>}</div>
@@ -58,7 +58,8 @@ export const StrongmanProgress = ({ routines = [], onSaveLog, defaultRoutineId }
       if (result.seconds === '' || result.seconds === undefined || result.seconds === null) return;
       const snapshot = resultSetup(result);
       if (!snapshot) return;
-      const key = strongmanSetupKey(snapshot);
+      const courseKey = strongmanSetupKey(snapshot);
+      const key = result.scope === 'medley' ? courseKey : `${courseKey}:${snapshot.timeGoal}`;
       if (!found.has(key)) found.set(key, { key, snapshot, label: setupLabel(snapshot) || 'Full event setup' });
     });
     return [...found.values()];

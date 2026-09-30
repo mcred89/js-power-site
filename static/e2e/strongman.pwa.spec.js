@@ -85,6 +85,9 @@ test('strongman training supports unknown medleys, backfill, actual sets and rec
   await expect(medley).toContainText('275 lb · 1 rep');
   await expect(medley).toContainText('No results yet');
   await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
+  await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Zercher yoke carry' });
+  await editor.getByLabel('Weight (lb)', { exact: true }).fill('600');
+  await editor.getByLabel('Reps', { exact: true }).fill('0');
   await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Carry medley — full event' });
   await editor.locator('.strongman-training-set').getByLabel('Time (s)', { exact: true }).fill('42.5');
   await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();

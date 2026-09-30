@@ -7,10 +7,9 @@ import {
   skipRemainingSessionExercise,
   skipSessionSet,
   startWorkoutSession,
-  substituteSessionExercise,
   undoLatestSessionAction,
-  updateExercise,
 } from './routines';
+import { substituteSessionExercise, updateExercise } from './workoutActions';
 import { TABATA_PRESCRIPTION } from './tabata';
 
 const inputs = {

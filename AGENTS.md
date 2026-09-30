@@ -24,6 +24,9 @@ task is complete rather than after each intermediate edit.
   data integrity, and integration or regression risks. Wait for their reviews,
   resolve actionable findings, and validate any corrections before deploying.
   Have the reviewers recheck corrections affecting their findings.
+  Repeat adversarial review rounds after fixes until a full round reports no
+  actionable findings. Each round must review the complete resulting change,
+  not just confirm that the previous findings were addressed.
 - Deploy using the existing local release workflow: `npm run deploy:windows`
   on Windows or `npm run deploy` on Linux/macOS, from `static/`. Deploy the
   reviewed, committed work and keep unrelated working-tree edits out of the

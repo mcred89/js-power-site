@@ -1,32 +1,49 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { getLiftProgressionMode } from '../data/routineGeneration';
+import { useUnsavedChanges } from './useUnsavedChanges';
 
 export const RoutineNameEditor = ({ routine, onSave, label = 'Routine' }) => {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(routine.name);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const savingRef = useRef(false);
+  useUnsavedChanges(editing, saving);
 
   const cancel = () => {
     setName(routine.name);
+    setError('');
     setEditing(false);
   };
 
   if (!editing) return <button className="text-button" type="button" onClick={() => setEditing(true)}>Rename</button>;
 
   return (
-    <form className="routine-name-editor" onSubmit={event => {
+    <form className="routine-name-editor" onSubmit={async event => {
       event.preventDefault();
       const nextName = name.trim();
-      if (!nextName) return;
-      onSave(nextName);
-      setEditing(false);
+      if (!nextName || savingRef.current) return;
+      savingRef.current = true;
+      setSaving(true);
+      setError('');
+      try {
+        await onSave(nextName);
+        setEditing(false);
+      } catch (failure) {
+        setError(failure.message || 'Could not save this name. Please try again.');
+      } finally {
+        savingRef.current = false;
+        setSaving(false);
+      }
     }}>
       <label className="form-field">
         <span className="field-label">{label} name</span>
-        <input aria-label={`${label} name`} className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus />
+        <input aria-label={`${label} name`} className="number-input" value={name} onChange={event => setName(event.target.value)} disabled={saving} required autoFocus />
       </label>
+      {error && <p className="form-error" role="alert">{error}</p>}
       <div className="button-row">
-        <button className="secondary-button" type="submit">Save name</button>
-        <button className="text-button" type="button" onClick={cancel}>Cancel</button>
+        <button className="secondary-button" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save name'}</button>
+        <button className="text-button" type="button" onClick={cancel} disabled={saving}>Cancel</button>
       </div>
     </form>
   );

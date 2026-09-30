@@ -5,7 +5,6 @@ import { confirmNavigation } from './data/navigationGuard';
 import {
   adjustSessionSet,
   adaptiveStatusForWorkout,
-  clearExerciseOverrides,
   completeSessionSet,
   createRoutine,
   finishWorkoutSession,
@@ -17,7 +16,6 @@ import {
   skipSessionSet,
   undoLatestSessionAction,
   updateSessionSetTimer,
-  updateExercise,
   visibleExercise,
 } from './data/routines';
 import {
@@ -615,7 +613,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const renameRoutine = async (item, name) => {
-    await saveRoutine({ ...item, name, updatedAt: new Date().toISOString() });
+    const { commitRoutineRename } = await import('./data/workoutActions');
+    publishRoutine(await commitRoutineRename(item.id, profile.id, name, routineWriterRef.current));
     flash('Routine renamed.');
   };
 
@@ -860,11 +859,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     flash('Future workout deleted.');
   };
 
-  const editExercise = async (exerciseId, values) => {
-    const updated = values
-      ? updateExercise(routine, workout.id, exerciseId, values)
-      : clearExerciseOverrides(routine, workout.id, exerciseId);
-    await saveRoutine(updated);
+  const editExercise = transform => {
+    const current = routinesRef.current.find(item => item.id === routine.id);
+    const target = current?.workouts.find(item => item.id === workout.id);
+    if (!target || target.completedAt || target.session) return;
+    return saveRoutine(transform(current));
   };
 
   const importBackupFile = async file => {

@@ -5,7 +5,6 @@ import {
   completeSessionSet,
   createRoutine,
   createRoutineFromTemplate,
-  deleteFutureWorkout,
   finishWorkoutSession,
   parsePrescription,
   reopenWorkoutSession,
@@ -15,12 +14,11 @@ import {
   startWorkoutSession,
   skipRemainingSessionExercise,
   skipSessionSet,
-  substituteSessionExercise,
   undoLatestSessionAction,
   undoLatestSessionSet,
-  updateExercise,
   visibleExercise,
 } from './routines';
+import { deleteFutureWorkout, substituteSessionExercise, updateExercise } from './workoutActions';
 import { correctMaxes, refreshAdaptiveProgression } from './routineRecalculation';
 import { createRoutineTemplate, duplicateRoutine } from './routineCopies';
 import { routineHistoryToCsv, routinePlanToCsv } from './routineCsv';

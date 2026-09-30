@@ -1,4 +1,5 @@
-import { adaptiveCycleMaxes, adaptiveStatusForWorkout, createRoutine, createRoutineFromTemplate, startWorkoutSession, updateExercise } from './routines';
+import { adaptiveCycleMaxes, adaptiveStatusForWorkout, createRoutine, createRoutineFromTemplate, startWorkoutSession } from './routines';
+import { updateExercise } from './workoutActions';
 import { createRoutineTemplate, duplicateRoutine } from './routineCopies';
 import { refreshAdaptiveProgression } from './routineRecalculation';
 import { updateRoutinePlan } from './routineUpdates';

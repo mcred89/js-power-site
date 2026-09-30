@@ -95,6 +95,37 @@ describe('strongman tracking data', () => {
     expect(strongmanSetupKey({ ...event, id: 'another-meet', seconds: 60 })).toBe(strongmanSetupKey(event));
   });
 
+  it('saves full runs by their visible time and preserves the outcome and unknown fields', () => {
+    const values = { movement: 'Carry medley', scope: 'medley', eventSnapshot: event,
+      sets: [{ id: 'run', weight: 500, distance: 50, reps: 0, seconds: '42', successful: false,
+        extension: { preserved: true } }] };
+    const saved = log(values);
+    expect(saved.sets[0]).toEqual({ id: 'run', weight: '', distance: '', reps: '', seconds: 42,
+      successful: false, extension: { preserved: true } });
+    expect(values.sets[0]).toMatchObject({ weight: 500, distance: 50, reps: 0, seconds: '42' });
+    expect(() => log({ ...values, sets: [{ weight: 500, reps: 1 }] })).toThrow('time for each full medley');
+  });
+
+  it('recovers previously saved full runs with hidden metrics without rewriting their history', () => {
+    const entry = log({ movement: 'Carry medley', scope: 'medley', eventSnapshot: event,
+      sets: [{ id: 'run', seconds: 42 }] });
+    const legacy = { ...entry, sets: [{ ...entry.sets[0], weight: 500, distance: 0, reps: 0 }] };
+    const untimed = { ...legacy, id: 'untimed', sets: [{ ...legacy.sets[0], seconds: '' }] };
+    const failed = { ...legacy, id: 'failed', sets: [{ ...legacy.sets[0], seconds: 20, successful: false }] };
+    const routine = { id: 'plan', strongmanLog: [legacy, untimed, failed] };
+    const before = JSON.stringify(routine);
+    const results = strongmanResults([routine]);
+    const summary = summarizeStrongmanResults(results, { scope: 'medley', eventSnapshot: event });
+    expect(summary.fastest).toMatchObject({ seconds: 42, weight: '', distance: '', reps: '' });
+    expect(summary.records).toHaveLength(3);
+    expect(summarizeStrongmanResults(results.filter(result => result.entryId === 'untimed'), {
+      scope: 'medley', eventSnapshot: event,
+    })).toMatchObject({ best: null, fastest: null });
+    const corrected = saveStrongmanLogEntry(routine, legacy);
+    expect(corrected.strongmanLog[0].sets[0]).toMatchObject({ seconds: 42, weight: '', distance: '', reps: '', successful: true });
+    expect(JSON.stringify(routine)).toBe(before);
+  });
+
   it('requires matching weight and distance for timed carries and supports longest holds', () => {
     const results = strongmanResults([{ id: 'r1', strongmanLog: [
       log({ sets: [{ weight: 200, distance: 10, seconds: 5 }] }),

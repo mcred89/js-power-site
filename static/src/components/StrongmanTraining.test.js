@@ -165,6 +165,65 @@ it('adds another set directly to a saved exercise while keeping past training of
   expect(onSaveLog.mock.calls[0][0][1]).toEqual(routine.strongmanLog[1]);
 });
 
+it('clears hidden movement metrics when switching to a full medley while retaining time and outcome', async () => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanResultEditor competition={competition} onSave={onSave} onCancel={() => {}} />));
+  change('Exercise', 'event:yoke');
+  change('Weight (lb)', '600');
+  change('Reps', '0');
+  change('Distance (ft)', '0');
+  change('Time (s)', '42');
+  change('Result', 'failed');
+  change('Exercise', 'event:medley');
+  expect(container.querySelectorAll('.strongman-training-set input')).toHaveLength(1);
+  expect(container.querySelector('.strongman-training-set input').value).toBe('42');
+  expect(container.querySelector('.strongman-training-set select').value).toBe('failed');
+  change('Exercise', 'event:yoke');
+  expect([...container.querySelectorAll('.strongman-training-set input')].map(input => input.value)).toEqual(['', '', '', '42']);
+  change('Exercise', 'event:medley');
+  change('Result', 'completed');
+  await submit();
+  expect(onSave.mock.calls[0][0].sets).toEqual([
+    expect.objectContaining({ weight: '', reps: '', distance: '', seconds: 42, successful: true }),
+  ]);
+});
+
+it('corrects an existing full medley without retaining hidden movement metrics or changing its setup', async () => {
+  const entry = { id: 'legacy-medley', date: '2025-01-10', movement: 'Carry medley', scope: 'medley',
+    eventSnapshot: competition.events[1], sets: [{ id: 'run', weight: 600, reps: 0, distance: 0, seconds: 42, successful: true }] };
+  const original = JSON.stringify(entry);
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanResultEditor entry={entry} competition={competition} onSave={onSave} onCancel={() => {}} />));
+  expect(container.querySelectorAll('.strongman-training-set input')).toHaveLength(1);
+  expect(container.querySelector('.strongman-training-set input').value).toBe('42');
+  await submit();
+  expect(onSave.mock.calls[0][0].sets).toEqual([
+    expect.objectContaining({ id: 'run', weight: '', reps: '', distance: '', seconds: 42, successful: true }),
+  ]);
+  expect(onSave.mock.calls[0][0].eventSnapshot.components).toEqual(competition.events[1].components.map(component => expect.objectContaining(component)));
+  expect(JSON.stringify(entry)).toBe(original);
+});
+
+it.each(['switched', 'saved'])('requires a visible run time for a %s medley with old movement metrics', async mode => {
+  const entry = mode === 'saved' ? { id: 'legacy-medley', date: '2025-01-10', movement: 'Carry medley', scope: 'medley',
+    eventSnapshot: competition.events[1], sets: [{ id: 'run', weight: 600, reps: 1, distance: 50, seconds: '', successful: true }] } : null;
+  const onSave = jest.fn();
+  const onCancel = jest.fn();
+  act(() => root.render(<StrongmanResultEditor entry={entry} competition={competition} onSave={onSave} onCancel={onCancel} />));
+  if (!entry) {
+    change('Exercise', 'event:yoke');
+    change('Weight (lb)', '600');
+    change('Reps', '1');
+    change('Distance (ft)', '50');
+    change('Exercise', 'event:medley');
+  }
+  await submit();
+  expect(container.querySelector('[role="alert"]').textContent).toMatch(/time/i);
+  expect(onSave).not.toHaveBeenCalled();
+  expect(onCancel).not.toHaveBeenCalled();
+  expect(container.querySelector('.strongman-training-set input').value).toBe('');
+});
+
 it('adds a saved medley run as a new entry so changing its setup cannot rewrite earlier runs', async () => {
   const entry = {
     id: 'old-medley', date: '2025-01-10', movement: 'Carry medley', scope: 'medley', workoutId: workout.id,

@@ -16,6 +16,13 @@ const numberOrBlank = (value, label) => {
 };
 
 const normalizeMetrics = value => Object.fromEntries(metrics.map(key => [key, numberOrBlank(value[key], key)]));
+const metricsForScope = (set, scope) => scope === 'medley'
+  ? { ...set, weight: '', distance: '', reps: '' } : set;
+const normalizeSetMetrics = (set, scope) => {
+  const normalized = normalizeMetrics(metricsForScope(set, scope));
+  if (scope === 'medley' && normalized.seconds === '') throw new Error('Enter a time for each full medley run.');
+  return normalized;
+};
 const timeGoalFor = value => {
   const timeGoal = value.timeGoal || 'fastest';
   if (!['fastest', 'longest'].includes(timeGoal)) throw new Error('Choose fastest or longest time.');
@@ -84,6 +91,17 @@ export const cloneStrongmanCompetition = value => !isObject(value) ? value : {
   })) : value.events,
 };
 
+const validateStoredCompetition = value => {
+  normalizeStrongmanCompetition(value);
+  // Drafts may allocate IDs, but imported IDs must already be safe for the
+  // editor's update/remove operations. Validation never rewrites the backup.
+  value.events.forEach(event => [event, ...(event.components || [])].forEach(item => {
+    if (typeof item.id !== 'string' || !item.id.trim()) {
+      throw new Error('Each saved event and implement must have a nonempty text ID.');
+    }
+  }));
+};
+
 // v17 only adds the new containers. Existing sessions, retired archives and
 // unrecognized records remain untouched; historical prescriptions are not logs.
 export const addStrongmanTracking = record => {
@@ -132,7 +150,7 @@ export const createStrongmanLogEntry = (values, timestamp = new Date().toISOStri
   const setIds = new Set();
   const sets = values.sets.map(set => {
     if (!isObject(set)) throw new Error('Enter the result for each set.');
-    const normalized = normalizeMetrics(set);
+    const normalized = normalizeSetMetrics(set, scope);
     if (!metrics.some(key => normalized[key] !== '')) throw new Error('Enter weight, reps, distance, or time for each set.');
     const id = set.id || makeId();
     if (setIds.has(id)) throw new Error('Each set must have its own ID.');
@@ -184,7 +202,7 @@ export const removeStrongmanLogEntry = (routine, id) => ({
 export const validateStrongmanRecord = record => {
   if (!isObject(record) || record.kind === 'strongman') return;
   try {
-    if (record.inputs?.strongmanCompetition != null) normalizeStrongmanCompetition(record.inputs.strongmanCompetition);
+    if (record.inputs?.strongmanCompetition != null) validateStoredCompetition(record.inputs.strongmanCompetition);
     if (record.strongmanLog === undefined) return;
     if (!Array.isArray(record.strongmanLog)) throw new Error('Training history must be a list.');
     const ids = new Set();
@@ -198,12 +216,14 @@ export const validateStrongmanRecord = record => {
       ids.add(entry.id);
       if (entry.notes !== undefined && typeof entry.notes !== 'string') throw new Error('Training notes must be text.');
       if (entry.scope === 'medley' && entry.eventSnapshot?.type !== 'medley') throw new Error('A full medley needs its recorded setup.');
-      if (entry.eventSnapshot) normalizeStrongmanCompetition({ events: [entry.eventSnapshot] });
+      if (entry.eventSnapshot) validateStoredCompetition({ events: [entry.eventSnapshot] });
       const setIds = new Set();
       entry.sets.forEach(set => {
         if (!isObject(set) || typeof set.id !== 'string' || !set.id || setIds.has(set.id) ||
             (set.successful !== undefined && typeof set.successful !== 'boolean')) throw new Error('Check each training set.');
         setIds.add(set.id);
+        // Older versions could save a medley with only hidden movement fields.
+        // Keep that history importable; new saves require an actual run time.
         const normalized = normalizeMetrics(set);
         if (!metrics.some(key => normalized[key] !== '')) throw new Error('Each set needs an actual result.');
       });
@@ -215,24 +235,31 @@ export const validateStrongmanRecord = record => {
 
 export const strongmanResults = routines => (routines || []).flatMap(routine => (
   (Array.isArray(routine.strongmanLog) ? routine.strongmanLog : []).flatMap(entry => (
-    (Array.isArray(entry.sets) ? entry.sets : []).map((set, setIndex) => ({
-      ...entry,
-      ...set,
-      id: `${entry.id}:${set.id}`,
-      entryId: entry.id,
-      setId: set.id,
-      setIndex,
-      set,
-      routineId: routine.id,
-      routineName: routine.name,
-      profileId: routine.profileId,
-    }))
+    (Array.isArray(entry.sets) ? entry.sets : []).map((set, setIndex) => {
+      // Older entries could retain hidden movement fields after choosing a
+      // medley. Interpret these runs by their time without rewriting history.
+      const result = metricsForScope(set, entry.scope);
+      return {
+        ...entry,
+        ...result,
+        id: `${entry.id}:${set.id}`,
+        entryId: entry.id,
+        setId: set.id,
+        setIndex,
+        set: result,
+        routineId: routine.id,
+        routineName: routine.name,
+        profileId: routine.profileId,
+      };
+    })
   ))
 ));
 
 const positive = value => !blank(value) && Number.isFinite(Number(value)) && Number(value) > 0;
-const successful = result => result.successful !== false && metrics.some(key => positive(result[key])) &&
-  !['reps', 'distance', 'seconds'].some(key => !blank(result[key]) && Number(result[key]) === 0);
+const successful = result => result.successful !== false && (result.scope === 'medley'
+  ? positive(result.seconds)
+  : metrics.some(key => positive(result[key])) &&
+    !['reps', 'distance', 'seconds'].some(key => !blank(result[key]) && Number(result[key]) === 0));
 const valueOrZero = value => blank(value) || !Number.isFinite(Number(value)) ? 0 : Number(value);
 
 export const summarizeStrongmanResults = (results, { routineId, profileId, movement, scope, eventSnapshot } = {}) => {

@@ -1,8 +1,9 @@
 import {
   adjustSessionSet, completeSessionSet, finishWorkoutSession, sessionElapsedSeconds,
-  skipRemainingSessionExercise, skipSessionSet, startWorkoutSession, substituteSessionExercise,
+  skipRemainingSessionExercise, skipSessionSet, startWorkoutSession,
   undoLatestSessionAction, updateSessionSetTimer,
 } from './routines';
+import { substituteSessionExercise } from './workoutActions';
 import { getSetTimerElapsedMs, getSetTimerTiming } from './setTimer';
 import { TABATA_PRESCRIPTION } from './tabata';
 

@@ -7,7 +7,7 @@ it('edits actual visible overrides on blur and lets the user restore the generat
   const container = document.createElement('div');
   const root = createRoot(container);
   const onChange = jest.fn();
-  const workout = { exercises: [{ id: 'squat', generated: {
+  const workout = { id: 'day', exercises: [{ id: 'squat', generated: {
     movement: 'Squat', weight: 300, prescription: '4 × 6',
   }, overrides: { weight: '315' } }] };
   act(() => root.render(<WorkoutExerciseEditor workout={workout} onChange={onChange} />));
@@ -19,9 +19,15 @@ it('edits actual visible overrides on blur and lets the user restore the generat
     weight.value = '320';
     weight.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
   });
-  expect(onChange).toHaveBeenLastCalledWith('squat', { weight: '320' });
+  const routine = { id: 'plan', workouts: [workout] };
+  expect(onChange).toHaveBeenLastCalledWith(expect.any(Function));
+  const edited = onChange.mock.calls[0][0](routine);
+  expect(edited.workouts[0].exercises[0].overrides).toEqual({ weight: '320' });
   act(() => container.querySelector('button').click());
-  expect(onChange).toHaveBeenLastCalledWith('squat', null);
+  expect(onChange).toHaveBeenLastCalledWith(expect.any(Function));
+  const restored = onChange.mock.calls[1][0](edited);
+  expect(restored.workouts[0].exercises[0].overrides).toEqual({});
+  expect(restored.workouts[0].exercises[0].generated).toEqual(workout.exercises[0].generated);
   expect(workout.exercises[0].overrides.weight).toBe('315');
   act(() => root.unmount());
 });

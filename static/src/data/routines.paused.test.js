@@ -5,8 +5,8 @@ import {
   reopenWorkoutSession,
   sessionElapsedSeconds,
   startWorkoutSession,
-  substituteSessionExercise,
 } from './routines';
+import { substituteSessionExercise } from './workoutActions';
 import { correctMaxes, refreshAdaptiveProgression } from './routineRecalculation';
 import { duplicateRoutine } from './routineCopies';
 

@@ -1,7 +1,41 @@
 const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
   ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
+export { commitRoutineRename } from './routineRename';
+
 // Optional workout actions load when requested, outside the initial shell.
+export const updateExercise = (routine, workoutId, exerciseId, values) => ({
+  ...routine,
+  updatedAt: new Date().toISOString(),
+  workouts: routine.workouts.map(workout => (
+    workout.id !== workoutId || workout.completedAt
+      ? workout
+      : {
+        ...workout,
+        exercises: workout.exercises.map(exercise => (
+          exercise.id === exerciseId
+            ? { ...exercise, overrides: { ...exercise.overrides, ...values } }
+            : exercise
+        )),
+      }
+  )),
+});
+
+export const clearExerciseOverrides = (routine, workoutId, exerciseId) => ({
+  ...routine,
+  updatedAt: new Date().toISOString(),
+  workouts: routine.workouts.map(workout => (
+    workout.id !== workoutId || workout.completedAt
+      ? workout
+      : {
+        ...workout,
+        exercises: workout.exercises.map(exercise => (
+          exercise.id === exerciseId ? { ...exercise, overrides: {} } : exercise
+        )),
+      }
+  )),
+});
+
 export const substituteSessionExercise = (
   routine,
   workoutId,

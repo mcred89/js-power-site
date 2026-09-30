@@ -29,20 +29,56 @@ it('retains lifetime records when the selected plan has no matching training', (
   expect(container.textContent).toContain('No attempts in this plan yet.');
 });
 
+it('keeps both timing directions selectable for the same movement setup', () => {
+  const entry = (id, date, seconds, timeGoal) => ({
+    id, date, movement: 'Hercules hold', scope: 'movement', eventSnapshot: { timeGoal },
+    sets: [{ id: `set-${id}`, weight: 200, distance: '', reps: '', seconds, successful: true }],
+  });
+  const routines = [{ id: 'plan', name: 'Current plan', strongmanLog: [
+    entry('first', '2026-09-01', 30, 'fastest'),
+    entry('second', '2026-09-02', 60, 'longest'),
+  ] }];
+  act(() => root.render(<StrongmanProgress routines={routines} />));
+  const select = container.querySelector('[aria-label="Strongman timed setup"]');
+  expect([...select.options].map(option => option.textContent)).toEqual([
+    '200 lb · Fastest', '200 lb · Longest hold',
+  ]);
+  const timedCard = () => [...container.querySelectorAll('.strongman-record-metric')]
+    .find(card => card.querySelector('small').textContent.endsWith(' · same setup'));
+  expect(timedCard().querySelector('small').textContent).toBe('Fastest · same setup');
+  expect(timedCard().querySelector('strong').textContent).toBe('200 lb · 30 sec');
+  act(() => {
+    select.value = select.options[1].value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(timedCard().querySelector('small').textContent).toBe('Longest hold · same setup');
+  expect(timedCard().querySelector('strong').textContent).toBe('200 lb · 60 sec');
+  act(() => {
+    select.value = select.options[0].value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(timedCard().querySelector('strong').textContent).toBe('200 lb · 30 sec');
+  expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(2);
+});
+
 it('compares full medley times only within the selected historical setup', () => {
   const setup = weight => ({ id: 'medley', name: 'Carry medley', type: 'medley', weight: '', reps: '', distance: '', seconds: '', components: [{ id: 'bag', name: 'Sandbag', weight, distance: 100, reps: '', seconds: '' }] });
   const entry = (id, weight, seconds) => ({ id, date: '2026-09-01', movement: 'Carry medley', scope: 'medley', eventSnapshot: setup(weight), sets: [{ id: `set-${id}`, weight: '', distance: '', reps: '', seconds }] });
-  const routines = [{ id: 'plan', name: 'Current plan', strongmanLog: [entry('heavy', 250, 45), entry('light', 150, 20)] }];
+  const repeatedCourse = { ...entry('repeat', 250, 40), eventSnapshot: { ...setup(250), id: 'another-meet', seconds: 90 } };
+  const routines = [{ id: 'plan', name: 'Current plan', strongmanLog: [entry('heavy', 250, 45), entry('light', 150, 20), repeatedCourse] }];
   act(() => root.render(<StrongmanProgress routines={routines} />));
   const select = container.querySelector('[aria-label="Strongman timed setup"]');
   expect(select.options).toHaveLength(2);
-  expect(container.querySelector('.strongman-record-metric').textContent).toContain('45 sec');
+  expect([...select.options].map(option => option.textContent)).toEqual([
+    'Sandbag: 250 lb · 100 ft', 'Sandbag: 150 lb · 100 ft',
+  ]);
+  expect(container.querySelector('.strongman-record-metric').textContent).toContain('40 sec');
   act(() => {
     select.value = select.options[1].value;
     select.dispatchEvent(new Event('change', { bubbles: true }));
   });
   expect(container.querySelector('.strongman-record-metric').textContent).toContain('20 sec');
-  expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(2);
+  expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(3);
 });
 
 it('requires deliberate removal and persists the remaining entries in their original plan', async () => {

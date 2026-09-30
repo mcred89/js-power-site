@@ -13,6 +13,7 @@ const localDate = value => {
 const today = () => localDate();
 
 const emptySet = () => ({ id: makeId(), weight: '', reps: '', distance: '', seconds: '', successful: true });
+const medleySet = set => ({ ...set, weight: '', reps: '', distance: '' });
 const newMedleyRun = entry => {
   const next = { ...entry, id: makeId(), sets: [emptySet()], notes: '' };
   delete next.createdAt;
@@ -48,7 +49,7 @@ export const StrongmanResultEditor = ({
   entry = null, competition, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, newRun = false, onSave, onCancel,
 }) => {
   const [draft, setDraft] = useState(() => entry ? {
-    ...entry, sets: entry.sets.map(set => ({ ...set })),
+    ...entry, sets: entry.sets.map(set => entry.scope === 'medley' ? medleySet(set) : { ...set }),
     eventSnapshot: entry.eventSnapshot ? JSON.parse(JSON.stringify(entry.eventSnapshot)) : null,
   } : {
     id: makeId(), date: initialDate || today(), workoutId, movement: '', eventId: null, componentId: null,
@@ -85,6 +86,7 @@ export const StrongmanResultEditor = ({
       movement: choice?.movement || (value.startsWith('past:') ? value.slice(5) : ''),
       eventId: choice?.event.id || null, componentId: choice?.component?.id || null,
       scope: choice?.scope || 'movement',
+      ...(choice?.scope === 'medley' ? { sets: draft.sets.map(medleySet) } : {}),
       eventSnapshot: choice ? JSON.parse(JSON.stringify(choice.component
         ? { ...choice.component, type: 'single', components: [] } : choice.event)) : null,
     });
