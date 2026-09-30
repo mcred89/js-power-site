@@ -18,6 +18,12 @@ task is complete rather than after each intermediate edit.
 - Run the validation required for the change, fetch the remote state, and
   prefer fast-forward-only pulls when an update is needed. Create a focused
   commit and push it to the intended remote branch without force-pushing.
+- Before every production deployment, after implementation is complete,
+  spin up a team of critical-review subagents. Prefer reviewers who did not
+  implement the changes, and divide the review across relevant user flows,
+  data integrity, and integration or regression risks. Wait for their reviews,
+  resolve actionable findings, and validate any corrections before deploying.
+  Have the reviewers recheck corrections affecting their findings.
 - Deploy using the existing local release workflow: `npm run deploy:windows`
   on Windows or `npm run deploy` on Linux/macOS, from `static/`. Deploy the
   reviewed, committed work and keep unrelated working-tree edits out of the

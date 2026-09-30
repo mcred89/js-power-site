@@ -1,13 +1,13 @@
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActiveWorkoutScreen } from './components/EagerTrackerScreens';
 import { isTabataExercise } from './data/tabata';
+import { confirmNavigation } from './data/navigationGuard';
 import {
   adjustSessionSet,
   adaptiveStatusForWorkout,
   clearExerciseOverrides,
   completeSessionSet,
   createRoutine,
-  deleteFutureWorkout,
   finishWorkoutSession,
   reopenWorkoutSession,
   setSessionRpe,
@@ -15,7 +15,6 @@ import {
   startWorkoutSession,
   skipRemainingSessionExercise,
   skipSessionSet,
-  substituteSessionExercise,
   undoLatestSessionAction,
   updateSessionSetTimer,
   updateExercise,
@@ -351,6 +350,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const restoreHistory = event => {
       const route = trackerRouteFromHistory(event.state);
       if (!route) return;
+      if (!confirmNavigation(event)) return;
       applyingHistoryRef.current = true;
       setView(route.view);
       setWorkoutId(route.workoutId);
@@ -381,6 +381,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   }, [addingProfile, view, workoutId]);
 
   const goBack = fallback => {
+    if (!confirmNavigation(true)) return;
     if (trackerHistoryDepth(window.history.state) > 0) {
       // Update immediately for button and accessibility activation; popstate then confirms
       // the same route when the browser completes its asynchronous history traversal.
@@ -632,6 +633,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const confirmRoutineCopy = async (destination, name) => {
+    if (destination !== profile.id && !confirmNavigation()) return;
     const { duplicateRoutine } = await import('./data/routineCopies');
     const item = duplicateRoutine(copyRequest.item, destination, name);
     await addCopiedRoutine(item);
@@ -760,6 +762,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const substituteWorkoutExercise = async (exerciseId, values) => {
+    const { substituteSessionExercise } = await import('./data/workoutActions');
     await changeSelectedRoutine(current => substituteSessionExercise(current, workout.id, exerciseId, values));
   };
 
@@ -849,6 +852,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
 
   const confirmDeleteWorkout = async () => {
     if (!workoutToDelete || workoutToDelete.completedAt) return;
+    const { deleteFutureWorkout } = await import('./data/workoutActions');
     await saveRoutine(deleteFutureWorkout(routine, workoutToDelete.id));
     setWorkoutToDelete(null);
     setWorkoutId(null);
@@ -1103,9 +1107,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       {notices}
       {workout?.session?.status !== 'inProgress' && <header className="app-header">
         <div className="header-inner">
-          <button className="brand compact-brand" type="button" onClick={() => { setView('today'); setWorkoutId(null); }}><span className="brand-mark">TM</span><span>The McIlroy Method</span></button>
+          <button className="brand compact-brand" type="button" onClick={() => { if (!confirmNavigation()) return; setView('today'); setWorkoutId(null); }}><span className="brand-mark">TM</span><span>The McIlroy Method</span></button>
           <div className="profile-switcher">
             <select aria-label="Current profile" value={profile.id} onChange={event => {
+              if (!confirmNavigation()) return;
               const nextProfileId = event.target.value;
               setTodayRoutinesLoaded(false);
               setProfileRoutinesLoaded(false);
@@ -1115,7 +1120,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             }}>
               {profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}
             </select>
-            <button type="button" aria-label="Add profile" onClick={() => setAddingProfile(true)}>+</button>
+            <button type="button" aria-label="Add profile" onClick={() => { if (confirmNavigation()) setAddingProfile(true); }}>+</button>
           </div>
         </div>
       </header>}
@@ -1157,6 +1162,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
               onSaveCompetition={value => saveStrongmanCompetition(routine.id, value)}
               onSaveLog={entries => saveStrongmanLog(routine.id, entries)}
               onComplete={completeStrongmanDay}
+              onDelete={() => setWorkoutToDelete(workout)}
             />
           </Suspense>
         ) : workout ? (
@@ -1186,7 +1192,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
                 <div className="next-workout">
                   <p>{pending[0].cycleLabel && <>{pending[0].cycleLabel} · </>}{pending[0].weekLabel}</p>
                   <h2>{pending[0].name}</h2>
-                  {pending[0].name === 'Strongman' ? <p>Your competition targets and training log are inside. Add the exercises you choose on the day.</p> : <>
+                  {pending[0].name === 'Strongman' ? <p>Open competition targets and log your training.</p> : <>
                     <WorkoutMaxes routine={routine} workout={pending[0]} />
                     <WorkoutExercises routine={routine} workout={pending[0]} editable={false} />
                   </>}
@@ -1197,7 +1203,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} actions={{ newRoutine: () => { setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, update: updatePlan, saveCompetition: saveStrongmanCompetition, useTemplate: item => { setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} actions={{ newRoutine: () => { if (!confirmNavigation()) return; setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, update: updatePlan, saveCompetition: saveStrongmanCompetition, useTemplate: item => { if (!confirmNavigation()) return; setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="history" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
             <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />
@@ -1211,7 +1217,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         )}
       </main>
 
-      {workoutToDelete && <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={() => setWorkoutToDelete(null)} onConfirm={confirmDeleteWorkout}>This removes {workoutToDelete.weekLabel} · {workoutToDelete.name} from this routine. It will not be marked complete or appear in history.</ConfirmationModal>}
+      {workoutToDelete && <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={() => setWorkoutToDelete(null)} onConfirm={confirmDeleteWorkout}>This removes {workoutToDelete.weekLabel} · {workoutToDelete.name} from this routine. It will not be marked complete. Any saved Strongman results remain in Progress.</ConfirmationModal>}
       {finishPrompt && <ConfirmationModal title="Finish this workout?" confirmLabel="Finish workout" onCancel={() => setFinishPrompt(null)} onConfirm={finishActiveWorkout}>{finishPrompt.pendingSets ? `${finishPrompt.pendingSets} planned set${finishPrompt.pendingSets === 1 ? '' : 's'} will be recorded as skipped. ` : ''}{finishPrompt.missingRpe ? 'The main-lift RPE is still blank.' : ''}</ConfirmationModal>}
       <Suspense fallback={null}>
       {importPlan && <ImportPreview plan={importPlan} busy={dataTaskBusy} onCancel={() => { if (!dataTaskBusy) setImportPlan(null); }} onConfirm={confirmImport} />}
@@ -1225,7 +1231,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       {templateToDelete && <ConfirmationModal title="Delete template?" confirmLabel="Delete template" onCancel={() => setTemplateToDelete(null)} onConfirm={deleteTemplate}>Delete {templateToDelete.name}? Routines already created from it will not be affected.</ConfirmationModal>}
       {planToDelete && <ConfirmationModal title="Delete this plan?" confirmLabel="Delete plan" requiredText="yes" onCancel={() => setPlanToDelete(null)} onConfirm={deletePlan}>Are you sure? Deleting {planToDelete.name} permanently removes its workouts and completion history from this phone. This cannot be undone.</ConfirmationModal>}
 
-      {view !== 'builder' && !workout && !workoutSummary && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => setView(key)} key={key}>{label}</button>)}</nav>}
+      {view !== 'builder' && !workout && !workoutSummary && <nav className="bottom-nav" aria-label="App navigation">{navItems.map(([key, label]) => <button className={view === key ? 'active' : ''} type="button" onClick={() => { if (view !== key && confirmNavigation()) setView(key); }} key={key}>{label}</button>)}</nav>}
     </div>
   );
 };

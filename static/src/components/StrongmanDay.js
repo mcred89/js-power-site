@@ -4,7 +4,7 @@ import { StrongmanTraining } from './StrongmanTraining';
 import { WorkoutSessionHistory } from './WorkoutSessionHistory';
 import { visibleExercise } from '../data/routines';
 
-export const StrongmanDay = ({ routine, workout, routines, onBack, onSaveCompetition, onSaveLog, onComplete }) => {
+export const StrongmanDay = ({ routine, workout, routines, onBack, onSaveCompetition, onSaveLog, onComplete, onDelete }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
@@ -12,10 +12,6 @@ export const StrongmanDay = ({ routine, workout, routines, onBack, onSaveCompeti
   const legacyExercises = (workout.exercises || []).map(visibleExercise).filter(exercise => (
     exercise.movement !== 'Strongman day' || exercise.weight !== '' || exercise.prescription
   ));
-  const leave = () => {
-    if ((editing || editingCompetition) && !window.confirm('Discard unsaved changes and leave this day?')) return;
-    onBack();
-  };
   const complete = async () => {
     if (busy) return;
     setBusy(true);
@@ -29,7 +25,7 @@ export const StrongmanDay = ({ routine, workout, routines, onBack, onSaveCompeti
     }
   };
   return <section className="workout-detail strongman-day">
-    <button className="text-button" type="button" onClick={leave} disabled={busy}>← Back</button>
+    <button className="text-button" type="button" onClick={onBack} disabled={busy}>← Back</button>
     <p className="eyebrow">{routine.name} · {workout.weekLabel}</p>
     <h1>Strongman day</h1>
     <p>{workout.completedAt ? 'Your recorded training. You can add or correct results here.' : 'Choose what to work on today. Record each effort as you go.'}</p>
@@ -51,5 +47,6 @@ export const StrongmanDay = ({ routine, workout, routines, onBack, onSaveCompeti
       {busy ? 'Saving…' : workout.completedAt ? 'Return to workout queue' : 'Finish strongman day'}
     </button>
     {(editing || editingCompetition) && <p className="field-help">Save or cancel your changes before finishing the day.</p>}
+    {!workout.completedAt && onDelete && <button className="danger-button full-button" type="button" onClick={onDelete} disabled={busy || editing || editingCompetition}>Delete future workout</button>}
   </section>;
 };

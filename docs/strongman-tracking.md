@@ -6,11 +6,17 @@ reference information and never generate prescribed weights, sets, or reps.
 - Add competition details when building a routine, from its card in Plans, or
   from any Strongman day. Leave unannounced details blank. A medley contains
   independently editable implements plus its own full-event results.
+- Each saved medley's Add run action starts a separate result with its own
+  actual setup. Its implements can be corrected later without changing other
+  results. Multiple runs entered together share the setup shown in that editor.
 - Add an exercise on the day, enter one actual set, and add sets as needed.
   Record a pickup with reps, a carry with distance, and a run or hold with time.
   Unsuccessful attempts stay in history without becoming successful records.
 - Log past training with its original date to backfill a plan already underway.
   A backfill belongs to that plan without fabricating a completed workout.
+- Deleting an unfinished Strongman day keeps saved actual results as dated
+  history in Progress. Leaving an open editor requires confirming discard;
+  save each exercise to retain it.
 - Progress includes Strongman records across all plans for the selected profile.
   Reusing the same movement name, ignoring capitalization and extra spaces,
   brings those records forward. Use distinct names for different variations.

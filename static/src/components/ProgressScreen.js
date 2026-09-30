@@ -1,6 +1,7 @@
 import React, { memo, useState } from 'react';
 import { ProgressDashboard } from './ProgressDashboard';
 import { StrongmanProgress } from './StrongmanProgress';
+import { confirmNavigation } from '../data/navigationGuard';
 
 // Shell-only notifications must not repeat the history aggregation and chart render.
 export const ProgressScreen = memo(({ profile, routines, onSaveLog, onScreenRender }) => {
@@ -16,10 +17,11 @@ export const ProgressScreen = memo(({ profile, routines, onSaveLog, onScreenRend
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault();
             const next = event.key === 'Home' ? 'strength' : event.key === 'End' ? 'strongman' : key === 'strength' ? 'strongman' : 'strength';
+            if (next !== section && !confirmNavigation()) return;
             setSection(next);
             document.getElementById(`progress-tab-${next}`)?.focus();
           }}
-          onClick={() => setSection(key)}>{label}</button>
+          onClick={() => { if (key !== section && confirmNavigation()) setSection(key); }}>{label}</button>
       ))}
     </div>
     <div role="tabpanel" id={`progress-panel-${section}`} aria-labelledby={`progress-tab-${section}`}>

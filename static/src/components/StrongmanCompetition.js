@@ -6,6 +6,7 @@ import {
   summarizeStrongmanResults,
 } from '../data/strongman';
 import './Strongman.css';
+import { useUnsavedChanges } from './useUnsavedChanges';
 
 const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
   ? crypto.randomUUID() : `event-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -156,6 +157,7 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], onSaveCompeti
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const editing = draft !== null;
+  useUnsavedChanges(editing, saving);
   useEffect(() => {
     onEditingChange?.(editing);
     return () => onEditingChange?.(false);

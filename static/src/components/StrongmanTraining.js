@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createStrongmanLogEntry, normalizeMovementName } from '../data/strongman';
 import './StrongmanTraining.css';
+import { useUnsavedChanges } from './useUnsavedChanges';
 
 const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
   ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -12,6 +13,12 @@ const localDate = value => {
 const today = () => localDate();
 
 const emptySet = () => ({ id: makeId(), weight: '', reps: '', distance: '', seconds: '', successful: true });
+const newMedleyRun = entry => {
+  const next = { ...entry, id: makeId(), sets: [emptySet()], notes: '' };
+  delete next.createdAt;
+  delete next.updatedAt;
+  return next;
+};
 const dateLabel = date => new Date(`${date}T12:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 const setLabel = set => [
   set.weight !== '' && set.weight != null ? `${set.weight} lb` : '',
@@ -38,7 +45,7 @@ const MetricInput = ({ label, value, onChange, whole = false }) => <label>
 
 /** A dated result editor shared by the day logger and Progress backfill. */
 export const StrongmanResultEditor = ({
-  entry = null, competition, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, onSave, onCancel,
+  entry = null, competition, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, newRun = false, onSave, onCancel,
 }) => {
   const [draft, setDraft] = useState(() => entry ? {
     ...entry, sets: entry.sets.map(set => ({ ...set })),
@@ -49,6 +56,7 @@ export const StrongmanResultEditor = ({
   });
   const [selected, setSelected] = useState(() => entry ? 'custom' : '');
   const [saving, setSaving] = useState(false);
+  useUnsavedChanges(true, saving);
   const [error, setError] = useState('');
   const savingRef = useRef(false);
   const headingRef = useRef(null);
@@ -94,6 +102,22 @@ export const StrongmanResultEditor = ({
       )),
     },
   }));
+  const addComponent = () => update({
+    eventSnapshot: {
+      ...draft.eventSnapshot,
+      name: draft.eventSnapshot?.name || draft.movement,
+      type: 'medley',
+      components: [...(draft.eventSnapshot?.components || []), {
+        id: makeId(), name: '', weight: '', distance: '', reps: '', seconds: '',
+      }],
+    },
+  });
+  const removeComponent = index => update({
+    eventSnapshot: {
+      ...draft.eventSnapshot,
+      components: draft.eventSnapshot.components.filter((_, componentIndex) => componentIndex !== index),
+    },
+  });
   const save = async event => {
     event.preventDefault();
     if (savingRef.current) return;
@@ -113,7 +137,7 @@ export const StrongmanResultEditor = ({
   };
 
   return <form className="strongman-result-editor" onSubmit={save}>
-    <h3 tabIndex="-1" ref={headingRef}>{entry ? 'Edit training' : 'Add exercise'}</h3>
+    <h3 tabIndex="-1" ref={headingRef}>{newRun ? 'Add run' : entry ? 'Edit training' : 'Add exercise'}</h3>
     <p className="muted">Record what you actually do. Start with one set and add more as you go.</p>
     <fieldset disabled={saving}>
       {!entry && <label className="strongman-training-field">
@@ -145,7 +169,8 @@ export const StrongmanResultEditor = ({
         {draft.scope === 'medley' && <div className="strongman-training-course">
           <h4>Actual event setup</h4>
           <p className="muted">Check the implements you used. Best times compare matching setups; individual implement work is logged separately.</p>
-          {(draft.eventSnapshot?.components || []).length === 0 && <p>Add the implements to your competition before logging a full event.</p>}
+          <p className="muted">Every run in this entry shares this setup. For a different setup, save this entry, then choose Add run on the saved event.</p>
+          {(draft.eventSnapshot?.components || []).length === 0 && <p>Add the implements you actually used here. Leave details blank if you do not know them yet.</p>}
           {(draft.eventSnapshot?.components || []).map((component, index) => <div className="strongman-training-implement" key={component.id || index}>
             <label>
               <span className="field-label">Implement {index + 1}</span>
@@ -158,7 +183,10 @@ export const StrongmanResultEditor = ({
               <MetricInput label="Reps" value={component.reps} whole onChange={value => updateComponent(index, 'reps', value)} />
               <MetricInput label="Time (s)" value={component.seconds} onChange={value => updateComponent(index, 'seconds', value)} />
             </div>
+            <button type="button" className="text-button" aria-label={`Remove actual implement ${index + 1}`}
+              onClick={() => removeComponent(index)}>Remove implement</button>
           </div>)}
+          <button type="button" className="secondary-button" onClick={addComponent}>Add actual implement</button>
         </div>}
         <p className="strongman-training-hint">{draft.scope === 'medley'
           ? 'Record your time and whether you completed the full event.'
@@ -268,7 +296,14 @@ export const StrongmanTraining = ({ routine, workout, routines = [], onSaveLog, 
         {entry.notes && <p className="strongman-training-notes">{entry.notes}</p>}
         <div className="strongman-training-actions">
           <button type="button" className="secondary-button" disabled={Boolean(editing) || saving}
-            onClick={() => { setEditing({ entry: { ...entry, sets: [...entry.sets, emptySet()] }, focusLastSet: true }); setDeleteId(null); }}>
+            onClick={() => {
+              setEditing({
+                entry: entry.scope === 'medley' ? newMedleyRun(entry) : { ...entry, sets: [...entry.sets, emptySet()] },
+                focusLastSet: true,
+                newRun: entry.scope === 'medley',
+              });
+              setDeleteId(null);
+            }}>
             {entry.scope === 'medley' ? 'Add run' : 'Add set'}
           </button>
           <button type="button" className="text-button" disabled={Boolean(editing) || saving}
@@ -290,6 +325,7 @@ export const StrongmanTraining = ({ routine, workout, routines = [], onSaveLog, 
       workoutId={editing.mode === 'past' ? null : workout.id}
       initialDate={editing.mode !== 'past' && workout.completedAt ? localDate(workout.completedAt) : undefined}
       focusLastSet={editing.focusLastSet}
+      newRun={editing.newRun}
       onSave={saveEntry} onCancel={() => setEditing(null)} />
       : <div className="strongman-training-actions">
         <button type="button" className="primary-button" disabled={saving} onClick={() => { setEditing({ mode: 'day' }); setDeleteId(null); }}>Add exercise</button>

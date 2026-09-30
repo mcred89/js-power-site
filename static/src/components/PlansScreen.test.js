@@ -87,3 +87,49 @@ it('puts the current plan first and opens an update for the chosen plan without 
   expect(div.querySelectorAll('.plan-card')).toHaveLength(2);
   act(() => root.unmount());
 });
+
+it('keeps a competition draft when plan-update navigation is cancelled and discards only after approval', () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+  const routine = {
+    id: 'current', name: 'Current plan', workouts: [{ completedAt: null }],
+    inputs: { includeStrongmanDay: true, strongmanCompetition: {
+      name: 'Fall meet', events: [{ id: 'yoke', name: 'Yoke carry', type: 'single', weight: 600 }],
+    } },
+  };
+  const localActions = { ...actions, saveCompetition: jest.fn(), update: jest.fn() };
+  const click = text => [...div.querySelectorAll('button')].find(button => button.textContent === text).click();
+  try {
+    act(() => root.render(<PlansScreen profile={{ name: 'Alex' }} routines={[routine]}
+      selectedId="current" templates={[]} actions={localActions}
+      RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} />));
+    act(() => click('Edit competition'));
+    act(() => {
+      const name = div.querySelector('[aria-label="Competition name"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(name, 'Unsaved new meet');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    act(() => click('Update plan'));
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(div.querySelector('[aria-label="Competition name"]').value).toBe('Unsaved new meet');
+    expect(div.textContent).not.toContain('Updating Current plan');
+    expect(localActions.saveCompetition).not.toHaveBeenCalled();
+    expect(localActions.update).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    act(() => click('Update plan'));
+
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(div.textContent).toContain('Updating Current plan');
+    expect(div.querySelector('[aria-label="Competition name"]')).toBeNull();
+    expect(routine.inputs.strongmanCompetition.name).toBe('Fall meet');
+    expect(localActions.saveCompetition).not.toHaveBeenCalled();
+  } finally {
+    act(() => root.unmount());
+    confirm.mockRestore();
+  }
+});

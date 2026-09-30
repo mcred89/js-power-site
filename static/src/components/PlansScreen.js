@@ -2,6 +2,7 @@ import React, { useRef, useState } from 'react';
 import { visibleExercise } from '../data/routines';
 import { PlanUpdateEditor } from './PlanUpdateEditor';
 import { StrongmanCompetitionCard } from './StrongmanCompetition';
+import { confirmNavigation } from '../data/navigationGuard';
 
 export const isPlanComplete = routine => (
   routine.workouts.length > 0 && routine.workouts.every(workout => Boolean(workout.completedAt))
@@ -60,7 +61,7 @@ export const PlansScreen = ({ profile, routines, selectedId, templates, actions,
           {!completed && <div className="plan-update-action"><button ref={button => {
             if (button) updateButtons.current.set(item.id, button);
             else updateButtons.current.delete(item.id);
-          }} className="primary-button small-primary" type="button" onClick={() => setEditingId(item.id)}>Update plan</button><p className="field-help">Adjust the workouts ahead of you.</p></div>}
+          }} className="primary-button small-primary" type="button" onClick={() => { if (confirmNavigation()) setEditingId(item.id); }}>Update plan</button><p className="field-help">Adjust the workouts ahead of you.</p></div>}
           <div className="plan-actions"><div className="button-row"><RoutineNameEditor routine={item} onSave={name => actions.rename(item, name)} /><button className="text-button" type="button" onClick={() => actions.copy(item)}>Copy</button><button className="text-button" type="button" onClick={() => actions.saveTemplate(item)}>Save as template</button><button className="text-button danger-text" type="button" onClick={() => actions.delete(item)}>Delete</button></div></div>
           {completed && <CompletedPlanDetails routine={item} PlanSetup={PlanSetup} />}
           {item.id === selectedId && !completed && <div className="active-plan-setup"><PlanSetup routine={item} /></div>}

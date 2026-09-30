@@ -341,6 +341,19 @@ describe('tracked routines', () => {
     expect(deleteFutureWorkout(routine, routine.workouts[0].id).workouts).toHaveLength(15);
   });
 
+  it('keeps actual Strongman results as dated history when deleting an unfinished day', () => {
+    const routine = createRoutine('profile-1', 'Test plan', { ...inputs, includeStrongmanDay: true });
+    const day = routine.workouts.find(workout => workout.name === 'Strongman');
+    const entry = { id: 'actual-result', workoutId: day.id, date: '2026-08-17', movement: 'Yoke', sets: [{ id: 'set', weight: 580, distance: 50 }] };
+    routine.strongmanLog = [entry];
+    const updated = deleteFutureWorkout(routine, day.id);
+    expect(updated.workouts.some(workout => workout.id === day.id)).toBe(false);
+    expect(updated.strongmanLog).toEqual([{ ...entry, workoutId: null }]);
+    expect(routine.strongmanLog[0]).toEqual(entry);
+    const completed = setWorkoutComplete(routine, day.id, true);
+    expect(deleteFutureWorkout(completed, day.id).strongmanLog).toEqual([entry]);
+  });
+
   it('recalculates the matching generated workouts after one is deleted', () => {
     let routine = createRoutine('profile-1', 'Test plan', inputs);
     routine = deleteFutureWorkout(routine, routine.workouts[1].id);

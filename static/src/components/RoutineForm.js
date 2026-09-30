@@ -3,6 +3,7 @@ import RadioOrCheckGroup from './RadioOrCheckGroup';
 import NumberInput from './NumberInput';
 import LiftProgressionControls from './LiftProgressionControls';
 import { StrongmanCompetitionEditor } from './StrongmanCompetition';
+import { normalizeStrongmanCompetition } from '../data/strongman';
 
 const eventLifts = [
   { key: 'squat', label: 'Squat' },
@@ -72,7 +73,7 @@ const initialFormState = initialInputs => {
 export class RoutineForm extends Component {
   constructor(props) {
     super(props);
-    this.state = initialFormState(props.initialInputs);
+    this.state = { ...initialFormState(props.initialInputs), competitionError: '' };
     this.handleChange = this.handleChange.bind(this);
     this.handleCheckbox = this.handleCheckbox.bind(this);
     this.handleSubmit = this.handleSubmit.bind(this);
@@ -86,7 +87,10 @@ export class RoutineForm extends Component {
   }
 
   handleCheckbox(event) {
-    this.setState({ [event.target.name]: event.target.checked });
+    this.setState({
+      [event.target.name]: event.target.checked,
+      ...(event.target.name === 'includeStrongmanDay' ? { competitionError: '' } : {}),
+    });
   }
 
   handleCycleChange(event) {
@@ -112,11 +116,22 @@ export class RoutineForm extends Component {
 
   handleSubmit(event) {
     event.preventDefault();
-    if (this.props.onCreate) {
-      this.props.onCreate(this.state);
+    let strongmanCompetition;
+    try {
+      strongmanCompetition = this.state.includeStrongmanDay
+        ? normalizeStrongmanCompetition(this.state.strongmanCompetition) : null;
+    } catch (error) {
+      this.setState({ competitionError: error.message });
       return;
     }
-    this.setState({ needsToFillOutForm: false });
+    const submitted = { ...this.state, strongmanCompetition };
+    delete submitted.competitionError;
+    if (this.props.onCreate) {
+      this.setState({ competitionError: '' });
+      this.props.onCreate(submitted);
+      return;
+    }
+    this.setState({ ...submitted, competitionError: '', needsToFillOutForm: false });
   }
 
   resetForm() {
@@ -248,8 +263,9 @@ export class RoutineForm extends Component {
           {this.state.includeStrongmanDay && <StrongmanCompetitionEditor
             value={this.state.strongmanCompetition}
             knownMovements={this.props.knownMovements}
-            onChange={strongmanCompetition => this.setState({ strongmanCompetition })}
+            onChange={strongmanCompetition => this.setState({ strongmanCompetition, competitionError: '' })}
           />}
+          {this.state.competitionError && <p className="form-error" role="alert">{this.state.competitionError}</p>}
           <fieldset className="event-group">
             <legend className="option-title">Strongman events <span className="optional-label">Optional</span></legend>
             <p className="field-help">Add your own event to any main-lift day.</p>

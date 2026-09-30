@@ -165,6 +165,65 @@ it('adds another set directly to a saved exercise while keeping past training of
   expect(onSaveLog.mock.calls[0][0][1]).toEqual(routine.strongmanLog[1]);
 });
 
+it('adds a saved medley run as a new entry so changing its setup cannot rewrite earlier runs', async () => {
+  const entry = {
+    id: 'old-medley', date: '2025-01-10', movement: 'Carry medley', scope: 'medley', workoutId: workout.id,
+    eventId: 'medley', componentId: null, notes: 'Old setup felt heavy',
+    createdAt: '2025-01-10T12:00:00.000Z', updatedAt: '2025-01-10T12:30:00.000Z',
+    eventSnapshot: { ...competition.events[1], components: competition.events[1].components.map(component => ({ ...component })) },
+    sets: [{ id: 'old-run-one', seconds: 50, successful: true }, { id: 'old-run-two', seconds: 45, successful: true }],
+  };
+  const original = JSON.stringify(entry);
+  const onSaveLog = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: [entry] }} workout={workout} onSaveLog={onSaveLog} />));
+  await click('Add run');
+  expect(container.querySelector('form h3').textContent).toBe('Add run');
+  expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
+  expect(container.querySelector('.strongman-training-set input').value).toBe('');
+  expect(container.querySelector('input[type="date"]').value).toBe(entry.date);
+  expect(container.textContent).toContain('Every run in this entry shares this setup.');
+  change('Weight (lb)', '275', 0);
+  change('Time (s)', '42', 3);
+  await submit();
+  const saved = onSaveLog.mock.calls[0][0];
+  expect(saved).toHaveLength(2);
+  expect(saved[0]).toBe(entry);
+  expect(JSON.stringify(entry)).toBe(original);
+  expect(saved[1]).toMatchObject({ date: entry.date, workoutId: workout.id, eventId: 'medley', notes: '',
+    sets: [expect.objectContaining({ seconds: 42, successful: true })] });
+  expect(saved[1].id).not.toBe(entry.id);
+  expect(saved[1].sets[0].id).not.toBe(entry.sets[0].id);
+  expect(saved[1].createdAt).not.toBe(entry.createdAt);
+  expect(saved[1].updatedAt).not.toBe(entry.updatedAt);
+  expect(saved[1].eventSnapshot.components[0].weight).toBe(275);
+  expect(saved[0].eventSnapshot.components[0].weight).toBe(250);
+});
+
+it('repairs an empty historical medley setup by adding and removing actual implements', async () => {
+  const entry = { id: 'unknown-medley', date: '2025-01-10', movement: 'Carry medley', scope: 'medley',
+    workoutId: workout.id, eventId: 'medley', eventSnapshot: { id: 'medley', name: 'Carry medley', type: 'medley', components: [] },
+    sets: [{ id: 'old-run', seconds: 50, successful: true }] };
+  const original = JSON.stringify(entry);
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanResultEditor entry={entry} competition={competition} onSave={onSave} onCancel={() => {}} />));
+  expect(container.querySelectorAll('.strongman-training-implement')).toHaveLength(0);
+  await click('Add actual implement');
+  change('Implement 1', 'Wrong implement');
+  await click('Add actual implement');
+  change('Implement 2', 'Sandbag');
+  change('Weight (lb)', '250', 1);
+  change('Distance (ft)', '50', 1);
+  await act(async () => { container.querySelector('[aria-label="Remove actual implement 1"]').click(); });
+  expect(container.querySelectorAll('.strongman-training-implement')).toHaveLength(1);
+  await submit();
+  const saved = onSave.mock.calls[0][0];
+  expect(saved.id).toBe(entry.id);
+  expect(saved.eventSnapshot.components).toEqual([expect.objectContaining({ name: 'Sandbag', weight: 250, distance: 50 })]);
+  expect(saved.sets).toEqual([expect.objectContaining({ id: 'old-run', seconds: 50 })]);
+  expect(JSON.stringify(entry)).toBe(original);
+  expect(competition.events[1].components).toHaveLength(3);
+});
+
 it('rejects blank results without calling persistence', async () => {
   const onSave = jest.fn();
   act(() => root.render(<StrongmanResultEditor competition={competition} onSave={onSave} onCancel={() => {}} />));

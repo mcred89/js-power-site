@@ -1,6 +1,7 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RoutineForm } from './RoutineForm';
+import { validateStrongmanRecord } from '../data/strongman';
 
 it('offers same, fixed, and adaptive mesocycle max progression', () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -130,4 +131,92 @@ it('lets every lifting day combine Tabata sprints and Strongman events independe
     deadliftTabataEnabled: true,
   }));
   act(() => root.unmount());
+});
+
+describe('competition submission', () => {
+  let div;
+  let root;
+  let onCreate;
+  const submit = () => act(() => div.querySelector('form').dispatchEvent(new Event('submit', {
+    bubbles: true, cancelable: true,
+  })));
+
+  beforeEach(() => {
+    global.IS_REACT_ACT_ENVIRONMENT = true;
+    div = document.createElement('div');
+    root = createRoot(div);
+    onCreate = jest.fn();
+  });
+
+  afterEach(() => act(() => root.unmount()));
+
+  it('normalizes enabled targets and keeps unannounced medley details valid for backups', () => {
+    const competition = { name: '  Fall meet  ', date: '', events: [
+      { id: 'carry', name: '  Zercher yoke carry  ', type: 'single', weight: '600', distance: '100' },
+      { id: 'medley', name: 'Carry medley', type: 'medley', components: [{ id: 'unknown', name: '' }] },
+    ] };
+    act(() => root.render(<RoutineForm initialInputs={{ includeStrongmanDay: true, strongmanCompetition: competition }} onCreate={onCreate} />));
+
+    submit();
+
+    const inputs = onCreate.mock.calls[0][0];
+    expect(inputs.strongmanCompetition).toMatchObject({ name: 'Fall meet', events: [
+      { name: 'Zercher yoke carry', weight: 600, distance: 100, reps: '', seconds: '' },
+      { name: 'Carry medley', components: [{ name: '', weight: '', distance: '' }] },
+    ] });
+    expect(inputs.competitionError).toBeUndefined();
+    expect(() => validateStrongmanRecord({ inputs, strongmanLog: [] })).not.toThrow();
+    expect(competition.events[0].weight).toBe('600');
+  });
+
+  it('rejects whitespace-only event names inline and submits after the name is corrected', () => {
+    act(() => root.render(<RoutineForm initialInputs={{ includeStrongmanDay: true,
+      strongmanCompetition: { events: [{ id: 'event', name: '   ', weight: 600 }] },
+    }} onCreate={onCreate} />));
+
+    submit();
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(div.querySelector('[role="alert"]').textContent).toContain('Name each competition event');
+    act(() => {
+      const name = div.querySelector('[aria-label="Event 1 name"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(name, 'Yoke carry');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(div.querySelector('[role="alert"]')).toBeNull();
+    submit();
+    expect(onCreate.mock.calls[0][0].strongmanCompetition.events[0].name).toBe('Yoke carry');
+  });
+
+  it('submits no competition when Strongman is disabled without destroying the hidden draft', () => {
+    act(() => root.render(<RoutineForm onCreate={onCreate} />));
+    act(() => div.querySelector('[name="includeStrongmanDay"]').click());
+    act(() => [...div.querySelectorAll('button')].find(button => button.textContent === 'Add event').click());
+    expect(div.querySelector('[aria-label="Event 1 name"]').value).toBe('');
+    act(() => div.querySelector('[name="includeStrongmanDay"]').click());
+
+    submit();
+
+    const inputs = onCreate.mock.calls[0][0];
+    expect(inputs).toMatchObject({ includeStrongmanDay: false, strongmanCompetition: null });
+    expect(() => validateStrongmanRecord({ inputs, strongmanLog: [] })).not.toThrow();
+    act(() => div.querySelector('[name="includeStrongmanDay"]').click());
+    expect(div.querySelector('[aria-label="Event 1 name"]').value).toBe('');
+    submit();
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(div.querySelector('[role="alert"]').textContent).toContain('Name each competition event');
+  });
+
+  it('blocks invalid nested targets before a routine is created', () => {
+    act(() => root.render(<RoutineForm initialInputs={{ includeStrongmanDay: true,
+      strongmanCompetition: { events: [{ id: 'medley', name: 'Carry medley', type: 'medley',
+        components: [{ id: 'bag', name: 'Sandbag', reps: 1.5 }],
+      }] },
+    }} onCreate={onCreate} />));
+
+    submit();
+
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(div.querySelector('[role="alert"]').textContent).toContain('whole-number reps');
+  });
 });

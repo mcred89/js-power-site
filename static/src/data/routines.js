@@ -351,56 +351,7 @@ export const skipRemainingSessionExercise = (
   timestamp = now(),
 ) => skipSets(routine, workoutId, exerciseId, () => true, timestamp);
 
-export const substituteSessionExercise = (
-  routine,
-  workoutId,
-  exerciseId,
-  values,
-  timestamp = now(),
-) => updateWorkout(routine, workoutId, workout => {
-  if (workout.session?.status !== 'inProgress') return workout;
-  const remainingSetCount = Math.max(1, Number(values.setCount) || 1);
-  const exercises = workout.session.exercises.map(exercise => {
-    if (exercise.exerciseId !== exerciseId) return exercise;
-    const settled = exercise.sets.filter(set => set.status !== 'pending');
-    const original = exercise.original || {
-      movement: exercise.movement,
-      prescription: exercise.prescription,
-      plannedWeight: exercise.plannedWeight,
-    };
-    const pending = Array.from({ length: remainingSetCount }, (_, index) => ({
-      id: makeId(),
-      number: settled.length + index + 1,
-      plannedWeight: values.weight,
-      plannedReps: values.reps,
-      actualWeight: values.weight,
-      actualReps: values.reps,
-      status: 'pending',
-      completedAt: null,
-      skippedAt: null,
-      skipActionId: null,
-      splitSeconds: null,
-    }));
-    return {
-      ...exercise,
-      movement: values.movement,
-      prescription: `${remainingSetCount} × ${values.reps}`,
-      plannedWeight: values.weight,
-      original,
-      substitutedAt: timestamp,
-      sets: [...settled, ...pending],
-    };
-  });
-  return {
-    ...workout,
-    session: {
-      ...workout.session,
-      exercises,
-      runningSince: workout.session.runningSince || timestamp,
-      stoppedAt: null,
-    },
-  };
-});
+export { substituteSessionExercise } from './workoutActions';
 
 export const getLatestSessionAction = session => session.exercises.flatMap(exercise => exercise.sets.flatMap(set => {
   if (set.status === 'completed') return [{
@@ -543,13 +494,7 @@ export const reopenWorkoutSession = (routine, workoutId, timestamp = now()) => r
   },
 ));
 
-export const deleteFutureWorkout = (routine, workoutId) => ({
-  ...routine,
-  updatedAt: now(),
-  workouts: routine.workouts.filter(workout => (
-    workout.id !== workoutId || workout.completedAt
-  )),
-});
+export { deleteFutureWorkout } from './workoutActions';
 
 export const updateExercise = (routine, workoutId, exerciseId, values) => ({
   ...routine,
