@@ -311,9 +311,38 @@ it('preserves longer-is-better hold records and lets custom timed work choose th
   expect(onSave.mock.calls[0][0].eventSnapshot.timeGoal).toBe('longest');
   change('Exercise', 'custom');
   change('Movement', 'Grip hold');
-  change('Time record', 'longest');
+  change('Record goal', 'longest');
   await submit();
   expect(onSave.mock.calls[1][0].eventSnapshot).toEqual(expect.objectContaining({ name: 'Grip hold', type: 'single', timeGoal: 'longest' }));
+});
+
+it('uses the reps goal from a competition without inventing an actual time window', async () => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  const events = { events: [{ id: 'log', name: 'Log press', type: 'single', timeGoal: 'reps', weight: 200, seconds: 60 }] };
+  act(() => root.render(<StrongmanResultEditor competition={events} onSave={onSave} onCancel={() => {}} />));
+  change('Exercise', 'event:log');
+  expect(container.querySelector('[aria-label="Record goal"]').value).toBe('reps');
+  const windowInput = [...container.querySelectorAll('label')].find(label => label.textContent === 'Time window (s)').querySelector('input');
+  expect(windowInput.value).toBe('');
+  change('Weight (lb)', '200');
+  change('Reps', '8');
+  await submit();
+  expect(onSave.mock.calls[0][0]).toMatchObject({ eventSnapshot: { timeGoal: 'reps', seconds: 60 }, sets: [{ weight: 200, reps: 8, seconds: '' }] });
+  change('Time window (s)', '60');
+  await submit();
+  expect(onSave.mock.calls[1][0].sets[0].seconds).toBe(60);
+});
+
+it('lets a new untimed exercise choose more reps before entering its sets', async () => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanResultEditor onSave={onSave} onCancel={() => {}} />));
+  change('Exercise', 'custom');
+  change('Movement', 'Axle press');
+  change('Record goal', 'reps');
+  change('Weight (lb)', '180');
+  change('Reps', '10');
+  await submit();
+  expect(onSave.mock.calls[0][0]).toMatchObject({ eventSnapshot: { name: 'Axle press', timeGoal: 'reps' }, sets: [{ weight: 180, reps: 10, seconds: '' }] });
 });
 
 it('requires explicit delete confirmation and preserves the entry after a failed delete', async () => {

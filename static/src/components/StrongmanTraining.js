@@ -193,15 +193,17 @@ export const StrongmanResultEditor = ({
         <p className="strongman-training-hint">{draft.scope === 'medley'
           ? 'Record your time and whether you completed the full event.'
           : 'Fill in the measures you used. For a pickup, enter 1 rep. Leave measures you did not track blank.'}</p>
-        {draft.scope !== 'medley' && draft.sets.some(set => set.seconds !== '' && set.seconds != null) && <label className="strongman-training-field">
-          <span className="field-label">Time record</span>
-          <select className="select-input" aria-label="Time record" value={draft.eventSnapshot?.timeGoal || 'fastest'} onChange={event => update({
+        {draft.scope !== 'medley' && <label className="strongman-training-field">
+          <span className="field-label">Record goal</span>
+          <select className="select-input" aria-label="Record goal" value={draft.eventSnapshot?.timeGoal || 'fastest'} onChange={event => update({
             eventSnapshot: { ...(draft.eventSnapshot || { id: makeId(), name: draft.movement, type: 'single', components: [] }), timeGoal: event.target.value },
           })}>
             <option value="fastest">Faster is better (run)</option>
             <option value="longest">Longer is better (hold)</option>
+            <option value="reps">More reps is better</option>
           </select>
         </label>}
+        {draft.scope !== 'medley' && draft.eventSnapshot?.timeGoal === 'reps' && <p className="strongman-training-hint">Enter the time window you actually used, or leave it blank for an untimed set. Rep records compare matching weight, distance, and time window.</p>}
         <div className="strongman-training-sets" ref={setsRef}>
           {draft.sets.map((set, index) => <div className="strongman-training-set" key={set.id} data-set-id={set.id}>
             <div className="strongman-training-set-heading">
@@ -214,7 +216,7 @@ export const StrongmanResultEditor = ({
               {draft.scope !== 'medley' && <MetricInput label="Weight (lb)" value={set.weight} onChange={value => updateSet(index, { weight: value })} />}
               {draft.scope !== 'medley' && <MetricInput label="Reps" value={set.reps} whole onChange={value => updateSet(index, { reps: value })} />}
               {draft.scope !== 'medley' && <MetricInput label="Distance (ft)" value={set.distance} onChange={value => updateSet(index, { distance: value })} />}
-              <MetricInput label="Time (s)" value={set.seconds} onChange={value => updateSet(index, { seconds: value })} />
+              <MetricInput label={draft.scope !== 'medley' && draft.eventSnapshot?.timeGoal === 'reps' ? 'Time window (s)' : 'Time (s)'} value={set.seconds} onChange={value => updateSet(index, { seconds: value })} />
             </div>
             <label className="strongman-training-outcome">
               <span className="field-label">Result</span>

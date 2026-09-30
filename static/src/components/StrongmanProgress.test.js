@@ -39,7 +39,7 @@ it('keeps both timing directions selectable for the same movement setup', () => 
     entry('second', '2026-09-02', 60, 'longest'),
   ] }];
   act(() => root.render(<StrongmanProgress routines={routines} />));
-  const select = container.querySelector('[aria-label="Strongman timed setup"]');
+  const select = container.querySelector('[aria-label="Strongman record setup"]');
   expect([...select.options].map(option => option.textContent)).toEqual([
     '200 lb · Fastest', '200 lb · Longest hold',
   ]);
@@ -67,7 +67,7 @@ it('compares full medley times only within the selected historical setup', () =>
   const repeatedCourse = { ...entry('repeat', 250, 40), eventSnapshot: { ...setup(250), id: 'another-meet', seconds: 90 } };
   const routines = [{ id: 'plan', name: 'Current plan', strongmanLog: [entry('heavy', 250, 45), entry('light', 150, 20), repeatedCourse] }];
   act(() => root.render(<StrongmanProgress routines={routines} />));
-  const select = container.querySelector('[aria-label="Strongman timed setup"]');
+  const select = container.querySelector('[aria-label="Strongman record setup"]');
   expect(select.options).toHaveLength(2);
   expect([...select.options].map(option => option.textContent)).toEqual([
     'Sandbag: 250 lb · 100 ft', 'Sandbag: 150 lb · 100 ft',
@@ -79,6 +79,82 @@ it('compares full medley times only within the selected historical setup', () =>
   });
   expect(container.querySelector('.strongman-record-metric').textContent).toContain('20 sec');
   expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(3);
+});
+
+it('groups rep records by actual load and time window while keeping plan and lifetime records separate', () => {
+  const entry = (id, weight, reps, seconds, successful = true) => ({
+    id, date: '2026-09-01', movement: 'Log press', scope: 'movement',
+    eventSnapshot: { timeGoal: 'reps', weight: 200, reps: id === 'past' ? 99 : 1, seconds: 60 },
+    sets: [{ id: `set-${id}`, weight, distance: '', reps, seconds, successful }],
+  });
+  const routines = [
+    { id: 'current', name: 'Current plan', strongmanLog: [
+      entry('current', 200, 8, 60), entry('lighter', 150, 20, 60),
+      entry('longer', 200, 30, 120), entry('untimed', 200, 12, ''),
+      entry('heavier', 250, 1, 60), entry('failed', 200, 99, 60, false),
+    ] },
+    { id: 'past', name: 'Past plan', strongmanLog: [entry('past', 200, 10, 60)] },
+  ];
+  act(() => root.render(<StrongmanProgress routines={routines} />));
+  const select = container.querySelector('[aria-label="Strongman record setup"]');
+  expect([...select.options].map(option => option.textContent)).toEqual([
+    '200 lb · 60 sec time window · Most reps',
+    '150 lb · 60 sec time window · Most reps',
+    '200 lb · 120 sec time window · Most reps',
+    '200 lb · Untimed · Most reps',
+    '250 lb · 60 sec time window · Most reps',
+  ]);
+  const metric = label => [...container.querySelectorAll('.strongman-record-metric')]
+    .find(card => card.querySelector('small').textContent === label).querySelector('strong').textContent;
+  expect(metric('Most reps at this setup · all plans')).toBe('200 lb · 10 reps · 60 sec');
+  act(() => {
+    const plan = container.querySelector('[aria-label="Strongman plan"]');
+    plan.value = 'current';
+    plan.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(metric('Most reps at this setup · selected plan')).toBe('200 lb · 8 reps · 60 sec');
+  expect(metric('Lifetime most reps · same setup')).toBe('200 lb · 10 reps · 60 sec');
+  expect(metric('Heaviest result · selected plan')).toBe('250 lb · 1 rep · 60 sec');
+  expect(metric('Lifetime heaviest result')).toBe('250 lb · 1 rep · 60 sec');
+  act(() => {
+    select.value = select.options[3].value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(metric('Most reps at this setup · selected plan')).toBe('200 lb · 12 reps');
+  expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(6);
+});
+
+it('reuses untimed historical reps without changing their saved event goal', () => {
+  const entry = (id, reps) => ({
+    id, date: '2025-09-01', movement: 'Axle press', scope: 'movement',
+    sets: [{ id: `set-${id}`, weight: 180, distance: '', reps, seconds: '', successful: true }],
+  });
+  const routines = [{ id: 'past', name: 'Past plan', strongmanLog: [entry('eight', 8), entry('ten', 10)] }];
+  const original = JSON.stringify(routines);
+  act(() => root.render(<StrongmanProgress routines={routines} />));
+  const select = container.querySelector('[aria-label="Strongman record setup"]');
+  expect([...select.options].map(option => option.textContent)).toEqual(['180 lb · Untimed · Most reps']);
+  expect(container.querySelector('.strongman-record-metric strong').textContent).toBe('180 lb · 10 reps');
+  expect(JSON.stringify(routines)).toBe(original);
+});
+
+it('retains legacy timed setups and offers a rep comparison at their shared time window', () => {
+  const entry = (id, reps) => ({
+    id, date: '2025-09-01', movement: 'Deadlift', scope: 'movement', eventSnapshot: { timeGoal: 'fastest' },
+    sets: [{ id: `set-${id}`, weight: 400, distance: '', reps, seconds: 60, successful: true }],
+  });
+  const routines = [{ id: 'past', name: 'Past plan', strongmanLog: [entry('eight', 8), entry('ten', 10)] }];
+  act(() => root.render(<StrongmanProgress routines={routines} />));
+  const select = container.querySelector('[aria-label="Strongman record setup"]');
+  expect([...select.options].map(option => option.textContent)).toEqual([
+    '400 lb · 8 reps · Fastest', '400 lb · 60 sec time window · Most reps', '400 lb · 10 reps · Fastest',
+  ]);
+  act(() => {
+    select.value = select.options[1].value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  expect(container.querySelector('.strongman-record-metric strong').textContent).toBe('400 lb · 10 reps · 60 sec');
+  expect(container.querySelectorAll('.strongman-result-history > li')).toHaveLength(2);
 });
 
 it('requires deliberate removal and persists the remaining entries in their original plan', async () => {

@@ -16,15 +16,23 @@ import './Strongman.css';
 
 const PAGE_SIZE = 20;
 const movementKey = entry => `${entry.scope === 'medley' ? 'medley' : 'movement'}:${normalizeMovementName(entry.movement)}`;
-const resultSetup = result => result.scope === 'medley' ? result.eventSnapshot : {
+const present = value => value !== '' && value !== undefined && value !== null;
+const resultSetup = (result, timeGoal = result.eventSnapshot?.timeGoal || 'fastest') => result.scope === 'medley' ? result.eventSnapshot : {
   weight: result.weight,
   distance: result.distance,
-  reps: result.reps,
-  timeGoal: result.eventSnapshot?.timeGoal || 'fastest',
+  reps: timeGoal === 'reps' ? '' : result.reps,
+  ...(timeGoal === 'reps' ? { seconds: result.seconds } : {}),
+  timeGoal,
 };
-const setupLabel = setup => setup?.type === 'medley'
-  ? (setup.components || []).map((component, index) => `${component.name || `Implement ${index + 1}`}: ${formatStrongmanTarget(component)}`).join(' / ')
-  : `${formatStrongmanTarget(setup)} · ${setup?.timeGoal === 'longest' ? 'Longest hold' : 'Fastest'}`;
+const setupLabel = setup => {
+  if (setup?.type === 'medley') return (setup.components || []).map((component, index) => `${component.name || `Implement ${index + 1}`}: ${formatStrongmanTarget(component)}`).join(' / ');
+  if (setup?.timeGoal === 'reps') {
+    const load = formatStrongmanTarget({ weight: setup.weight, distance: setup.distance });
+    const time = present(setup.seconds) ? `${formatStrongmanTarget({ seconds: setup.seconds })} time window` : 'Untimed';
+    return [load === 'To be announced' ? '' : load, time, 'Most reps'].filter(Boolean).join(' · ');
+  }
+  return `${formatStrongmanTarget(setup)} · ${setup?.timeGoal === 'longest' ? 'Longest hold' : 'Fastest'}`;
+};
 
 const RecordMetric = ({ label, result, empty = 'No results yet' }) => (
   <div className="strongman-record-metric"><small>{label}</small><strong>{result ? formatStrongmanResult(result) : empty}</strong>{result && <span>{formatStrongmanDate(result.date)} · {result.routineName}{result.successful === false ? ' · Unsuccessful attempt' : ''}</span>}</div>
@@ -54,13 +62,21 @@ export const StrongmanProgress = ({ routines = [], onSaveLog, defaultRoutineId }
   const movementResults = useMemo(() => results.filter(result => movement && movementKey(result) === movement.key), [results, movement]);
   const setups = useMemo(() => {
     const found = new Map();
-    movementResults.forEach(result => {
-      if (result.seconds === '' || result.seconds === undefined || result.seconds === null) return;
-      const snapshot = resultSetup(result);
+    const addSetup = (result, timeGoal) => {
+      const snapshot = resultSetup(result, timeGoal);
       if (!snapshot) return;
       const courseKey = strongmanSetupKey(snapshot);
-      const key = result.scope === 'medley' ? courseKey : `${courseKey}:${snapshot.timeGoal}`;
+      const timeWindow = present(snapshot.seconds) ? Number(snapshot.seconds) : '';
+      const key = result.scope === 'medley' ? courseKey : `${courseKey}:${snapshot.timeGoal}${snapshot.timeGoal === 'reps' ? `:${timeWindow}` : ''}`;
       if (!found.has(key)) found.set(key, { key, snapshot, label: setupLabel(snapshot) || 'Full event setup' });
+    };
+    movementResults.forEach(result => {
+      if (result.scope === 'medley') {
+        if (present(result.seconds)) addSetup(result);
+        return;
+      }
+      if (result.eventSnapshot?.timeGoal !== 'reps' && present(result.seconds)) addSetup(result);
+      if (result.eventSnapshot?.timeGoal === 'reps' || Number(result.reps) > 0) addSetup(result, 'reps');
     });
     return [...found.values()];
   }, [movementResults]);
@@ -69,6 +85,7 @@ export const StrongmanProgress = ({ routines = [], onSaveLog, defaultRoutineId }
   const scoped = summarizeStrongmanResults(movement ? results : [], { ...options, routineId: routineId === 'all' ? undefined : routineId });
   const lifetime = summarizeStrongmanResults(movement ? results : [], options);
   const timeGoal = setup?.snapshot?.timeGoal === 'longest' ? 'longest' : 'fastest';
+  const forReps = setup?.snapshot?.timeGoal === 'reps';
   const records = scoped.records || [];
   const entries = [];
   const seen = new Set();
@@ -128,14 +145,18 @@ export const StrongmanProgress = ({ routines = [], onSaveLog, defaultRoutineId }
           </select></label>
           <label className="form-field"><span className="field-label">Training plan</span><select className="number-input" aria-label="Strongman plan" value={routineId} onChange={event => { setRoutineId(event.target.value); setVisibleCount(PAGE_SIZE); }}><option value="all">All plans</option>{routines.map(routine => <option value={routine.id} key={routine.id}>{routine.name}</option>)}</select></label>
         </div>
-        {setups.length > 0 && <label className="form-field strongman-record-select"><span className="field-label">Setup for timed records</span><select className="number-input" aria-label="Strongman timed setup" value={setup?.key || ''} onChange={event => setSelectedSetup(event.target.value)}>{setups.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>}
+        {setups.length > 0 && <label className="form-field strongman-record-select"><span className="field-label">Setup for records</span><select className="number-input" aria-label="Strongman record setup" value={setup?.key || ''} onChange={event => setSelectedSetup(event.target.value)}>{setups.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>}
         <div className="strongman-record-summary">
-          <RecordMetric label={`${movement.scope === 'medley' ? 'Fastest full run' : 'Heaviest result'} · ${routineId === 'all' ? 'all plans' : 'selected plan'}`} result={movement.scope === 'medley' ? scoped.fastest : scoped.best} />
-          <RecordMetric label={movement.scope === 'medley' ? 'Lifetime fastest · same setup' : 'Lifetime heaviest result'} result={movement.scope === 'medley' ? lifetime.fastest : lifetime.best} />
-          {movement.scope !== 'medley' && setup && <RecordMetric label={`${timeGoal === 'longest' ? 'Longest hold' : 'Fastest'} · same setup`} result={scoped[timeGoal]} />}
+          <RecordMetric label={`${movement.scope === 'medley' ? 'Fastest full run' : forReps ? 'Most reps at this setup' : 'Heaviest result'} · ${routineId === 'all' ? 'all plans' : 'selected plan'}`} result={movement.scope === 'medley' ? scoped.fastest : forReps ? scoped.mostReps : scoped.best} />
+          <RecordMetric label={movement.scope === 'medley' ? 'Lifetime fastest · same setup' : forReps ? 'Lifetime most reps · same setup' : 'Lifetime heaviest result'} result={movement.scope === 'medley' ? lifetime.fastest : forReps ? lifetime.mostReps : lifetime.best} />
+          {forReps && <>
+            <RecordMetric label={`Heaviest result · ${routineId === 'all' ? 'all plans' : 'selected plan'}`} result={scoped.best} />
+            <RecordMetric label="Lifetime heaviest result" result={lifetime.best} />
+          </>}
+          {movement.scope !== 'medley' && setup && !forReps && <RecordMetric label={`${timeGoal === 'longest' ? 'Longest hold' : 'Fastest'} · same setup`} result={scoped[timeGoal]} />}
           <RecordMetric label={`Last trained · ${routineId === 'all' ? 'all plans' : 'selected plan'}`} result={scoped.latest} />
         </div>
-        <p className="strongman-help">Heaviest results retain their actual distance and reps. Timed records compare the same load and task; medleys also match every implement. Unsuccessful attempts remain in history.</p>
+        <p className="strongman-help">Heaviest results retain their actual distance and reps. Rep records compare the same load, distance, and time window. Timed records compare the same load and task; medleys also match every implement. Unsuccessful attempts remain in history.</p>
         <h3>Training history</h3>
         {entries.length ? <ul className="strongman-result-history">
           {entries.slice(0, visibleCount).map(({ routine, entry }) => <li key={`${routine.id}:${entry.id}`}>

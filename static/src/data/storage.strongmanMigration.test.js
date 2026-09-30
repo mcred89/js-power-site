@@ -9,6 +9,12 @@ const routine = { id: 'r1', profileId: 'p1', inputs: { includeStrongmanDay: true
   workouts: [{ id: 'completed', completedAt: '2026-01-01', exercises: [{ generated: { movement: 'Strongman day' } }],
     session: { status: 'completed', exercises: [], unknown: true } }], unknown: { preserved: true } };
 const archive = { id: 'routines:old', store: 'routines', record: { kind: 'strongman', inputs: { events: ['legacy'] } } };
+const legacyEvent = { id: 'event', name: 'Log press', type: 'single', weight: 200, seconds: 60,
+  extension: { preserved: true } };
+const legacyTracking = { ...routine, inputs: { ...routine.inputs, strongmanCompetition: {
+  name: 'Next meet', events: [legacyEvent, { id: 'hold', name: 'Hercules hold', timeGoal: 'longest' }],
+} }, strongmanLog: [{ id: 'entry', date: '2026-01-01', movement: 'Log press', eventSnapshot: legacyEvent,
+  sets: [{ id: 'set', weight: 200, reps: 6, seconds: 60 }], extension: { preserved: true } }] };
 
 describe('strongman tracking migration', () => {
   it.each(Array.from({ length: 16 }, (_, index) => index + 1))('purely upgrades v%i backups and retains historical snapshots', version => {
@@ -32,6 +38,31 @@ describe('strongman tracking migration', () => {
     const restored = parseBackup(exportBackup([{ id: 'p1' }], [saved], [], [archive]));
     expect(restored.routines).toEqual([saved]);
     expect(restored.archives).toEqual([archive]);
+  });
+
+  it('upgrades v17 backups without adding goals or rewriting records and historical snapshots', () => {
+    const original = { format: 'mcilroy-method-backup', version: 17, dataSchemaVersion: 17,
+      profiles: [{ id: 'p1' }], routines: [legacyTracking, { id: 'unknown', custom: true }],
+      templates: [{ id: 'template', inputs: legacyTracking.inputs }], archives: [archive], extension: { future: true } };
+    const before = JSON.stringify(original);
+    const migrated = migrateBackup(original);
+    expect(migrated).toEqual({ ...original, version: 18, dataSchemaVersion: 18 });
+    expect(migrated.routines).toBe(original.routines);
+    expect(migrated.routines[0].inputs.strongmanCompetition.events[0]).not.toHaveProperty('timeGoal');
+    expect(migrated.routines[0].strongmanLog[0].eventSnapshot).not.toHaveProperty('timeGoal');
+    expect(parseBackup(JSON.stringify(original)).routines).toEqual(original.routines);
+    expect(JSON.stringify(original)).toBe(before);
+  });
+
+  it('round-trips rep goals in competition events, implements and recorded snapshots', () => {
+    const repsEvent = { ...legacyEvent, timeGoal: 'reps' };
+    const saved = { ...legacyTracking, inputs: { ...legacyTracking.inputs, strongmanCompetition: {
+      events: [repsEvent, { id: 'medley', name: 'Loading medley', type: 'medley', timeGoal: 'fastest',
+        components: [{ id: 'bag', name: 'Sandbag load', weight: 200, reps: 3, timeGoal: 'reps' }] }],
+    } }, strongmanLog: [{ ...legacyTracking.strongmanLog[0], eventSnapshot: repsEvent }] };
+    const contents = exportBackup([{ id: 'p1' }], [saved]);
+    expect(JSON.parse(contents)).toMatchObject({ version: 18, dataSchemaVersion: 18 });
+    expect(parseBackup(contents).routines).toEqual([saved]);
   });
 
   it('rejects malformed known strongman data before importing without altering the source', () => {
@@ -99,7 +130,7 @@ describe('strongman tracking migration', () => {
     expect(restored.routines[0]).toEqual(saved);
   });
 
-  it.each([0, 16])('creates or upgrades a v%i database with v17 containers and untouched snapshots', async oldVersion => {
+  it.each([0, 16, 17])('creates or upgrades a v%i database to v18 with untouched snapshots', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `strongman-migration-${oldVersion}`;
     if (oldVersion) await new Promise((resolve, reject) => {
@@ -109,8 +140,9 @@ describe('strongman tracking migration', () => {
         request.result.createObjectStore('metadata', { keyPath: 'key' });
         request.transaction.objectStore('routines').createIndex('profileId', 'profileId');
         request.transaction.objectStore('archives').createIndex('profileId', 'record.profileId');
-        request.transaction.objectStore('routines').put(routine);
-        request.transaction.objectStore('templates').put({ id: 't1', inputs: {} });
+        request.transaction.objectStore('routines').put(oldVersion === 17 ? legacyTracking : routine);
+        request.transaction.objectStore('routines').put({ id: 'unknown', custom: { preserved: true } });
+        request.transaction.objectStore('templates').put({ id: 't1', inputs: oldVersion === 17 ? legacyTracking.inputs : {} });
         request.transaction.objectStore('archives').put(archive);
       };
       request.onerror = () => reject(request.error);
@@ -130,8 +162,10 @@ describe('strongman tracking migration', () => {
     expect(database.objectStoreNames.contains('archives')).toBe(true);
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     if (oldVersion) {
-      expect(await read('routines', 'r1')).toEqual(addStrongmanTracking(routine));
-      expect(await read('templates', 't1')).toEqual({ id: 't1', inputs: { strongmanCompetition: null } });
+      expect(await read('routines', 'r1')).toEqual(oldVersion === 17 ? legacyTracking : addStrongmanTracking(routine));
+      expect(await read('routines', 'unknown')).toEqual({ id: 'unknown', custom: { preserved: true } });
+      expect(await read('templates', 't1')).toEqual({ id: 't1', inputs: oldVersion === 17
+        ? legacyTracking.inputs : { strongmanCompetition: null } });
       expect(await read('archives', archive.id)).toEqual(archive);
     }
     database.close();

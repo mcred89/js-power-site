@@ -6,6 +6,51 @@ const competition = page => page.getByRole('region', { name: 'Next competition',
 const exerciseEditor = page => page.locator('.strongman-result-editor');
 test.use({ actionTimeout: 10000 });
 
+test('rep events retain their goal and rank matching loads and time windows', async ({ page }) => {
+  test.setTimeout(90000);
+  await createProfile(page, 'Rep Athlete');
+  await page.getByRole('button', { name: 'Build a routine' }).click();
+  await page.getByLabel('Routine name').fill('Rep event prep');
+  await fillMaxes(page);
+  await selectVolume(page);
+  await selectWeakPoints(page);
+  await page.getByLabel('Include a dedicated Strongman day').check();
+  await page.getByRole('button', { name: 'Add event', exact: true }).click();
+  await page.getByLabel('Event 1 name', { exact: true }).fill('Log press');
+  await page.getByLabel('Event 1 record goal', { exact: true }).selectOption({ label: 'More reps is better' });
+  await page.getByLabel('Event 1 Weight (lb)', { exact: true }).fill('200');
+  await page.getByLabel('Event 1 Time window (sec)', { exact: true }).fill('60');
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await openStrongmanDay(page);
+  await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
+  const editor = exerciseEditor(page);
+  await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Log press' });
+  await expect(editor.getByLabel('Record goal', { exact: true })).toHaveValue('reps');
+  await expect(editor.getByLabel('Time window (s)', { exact: true })).toHaveValue('');
+  for (const [index, weight, reps, seconds] of [[0, 200, 8, 60], [1, 200, 10, 60], [2, 150, 20, 60], [3, 200, 15, 120]]) {
+    if (index) await editor.getByRole('button', { name: 'Add set', exact: true }).click();
+    const set = editor.locator('.strongman-training-set').nth(index);
+    await set.getByLabel('Weight (lb)', { exact: true }).fill(String(weight));
+    await set.getByLabel('Reps', { exact: true }).fill(String(reps));
+    await set.getByLabel('Time window (s)', { exact: true }).fill(String(seconds));
+  }
+  await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
+  const record = competition(page).locator('.strongman-event-results > div').filter({ has: page.locator('dt', { hasText: 'This plan · most reps' }) });
+  await expect(record).toContainText('200 lb · 10 reps · 60 sec');
+  await page.reload();
+  await openStrongmanDay(page);
+  await expect(record).toContainText('200 lb · 10 reps · 60 sec');
+  await competition(page).getByRole('button', { name: 'Edit competition', exact: true }).click();
+  await expect(page.getByLabel('Event 1 record goal', { exact: true })).toHaveValue('reps');
+  await competition(page).getByRole('button', { name: 'Cancel', exact: true }).click();
+  await page.getByRole('button', { name: '← Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Progress', exact: true }).click();
+  await page.getByRole('tab', { name: 'Strongman records', exact: true }).click();
+  await expect(page.getByLabel('Strongman record setup')).toBeVisible();
+  await expect(page.locator('.strongman-record-metric').filter({ has: page.locator('small', { hasText: 'Most reps' }) }).first()).toContainText('200 lb · 10 reps · 60 sec');
+  await page.screenshot({ path: 'test-results/strongman-reps-mobile.png', fullPage: true });
+});
+
 test('strongman training supports unknown medleys, backfill, actual sets and records across plans', async ({ page }) => {
   test.setTimeout(90000);
   await createProfile(page, 'Strongman Athlete');

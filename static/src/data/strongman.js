@@ -25,7 +25,7 @@ const normalizeSetMetrics = (set, scope) => {
 };
 const timeGoalFor = value => {
   const timeGoal = value.timeGoal || 'fastest';
-  if (!['fastest', 'longest'].includes(timeGoal)) throw new Error('Choose fastest or longest time.');
+  if (!['fastest', 'longest', 'reps'].includes(timeGoal)) throw new Error('Choose fastest, longest time, or most reps.');
   return timeGoal;
 };
 
@@ -276,17 +276,24 @@ export const summarizeStrongmanResults = (results, { routineId, profileId, movem
   const timed = completed.filter(result => positive(result.seconds) && Boolean(eventSnapshot) &&
     ((result.scope || 'movement') === 'medley'
       ? strongmanSetupKey(result.eventSnapshot) === strongmanSetupKey(eventSnapshot)
-      : ['weight', 'distance', 'reps'].every(key => blank(eventSnapshot[key])
+      : result.eventSnapshot?.timeGoal !== 'reps' && ['weight', 'distance', 'reps'].every(key => blank(eventSnapshot[key])
         ? blank(result[key]) : !blank(result[key]) && Number(result[key]) === Number(eventSnapshot[key]))));
   // Without a selected course, medley times must not be compared against each
   // other. Progress can still list each historical run with its saved setup.
   const comparableTimed = timed.filter(result => result.scope !== 'medley' ||
     (Boolean(eventSnapshot) && isCompleteStrongmanSetup(eventSnapshot)));
+  // Repetition records compare the same load, distance and time window. The
+  // target rep count is a goal, not a constraint on which actual result wins.
+  const repeated = completed.filter(result => result.scope !== 'medley' && positive(result.reps) &&
+    Boolean(eventSnapshot) && eventSnapshot.type !== 'medley' &&
+    ['weight', 'distance', 'seconds'].every(key => blank(eventSnapshot[key])
+      ? blank(result[key]) : !blank(result[key]) && Number(result[key]) === Number(eventSnapshot[key])));
   return {
     best: ranked[0] || null,
     latest: records[0] || null,
     fastest: [...comparableTimed].sort((left, right) => Number(left.seconds) - Number(right.seconds))[0] || null,
     longest: [...comparableTimed].sort((left, right) => Number(right.seconds) - Number(left.seconds))[0] || null,
+    mostReps: [...repeated].sort((left, right) => Number(right.reps) - Number(left.reps))[0] || null,
     records,
   };
 };

@@ -28,6 +28,20 @@ describe('strongman tracking data', () => {
     expect(new Set(competition.events[0].components.map(item => item.id)).size).toBe(3);
   });
 
+  it('accepts rep goals for events and implements while preserving existing time goals', () => {
+    const competition = normalizeStrongmanCompetition({ events: [
+      { name: 'Log press', timeGoal: 'reps', weight: 200, seconds: 60 },
+      { name: 'Carry medley', type: 'medley', timeGoal: 'fastest',
+        components: [{ name: 'Sandbag load', timeGoal: 'reps', weight: 200 }] },
+      { name: 'Hercules hold', timeGoal: 'longest' },
+      { name: 'Yoke' },
+    ] });
+    expect(competition.events.map(item => item.timeGoal)).toEqual(['reps', 'fastest', 'longest', 'fastest']);
+    expect(competition.events[1].components[0].timeGoal).toBe('reps');
+    expect(() => normalizeStrongmanCompetition({ events: [{ name: 'Log press', timeGoal: 'unknown' }] }))
+      .toThrow('Choose fastest, longest time, or most reps.');
+  });
+
   it.each([-1, 'Infinity', 'nope', true])('rejects invalid actual weight %p', weight => {
     expect(() => log({ sets: [{ weight }] })).toThrow();
   });
@@ -136,6 +150,77 @@ describe('strongman tracking data', () => {
     expect(summary.longest.seconds).toBe(35);
     expect(summarizeStrongmanResults(results, { eventSnapshot: { weight: 600 } }).fastest).toBeNull();
     expect(summarizeStrongmanResults(results).fastest).toBeNull();
+  });
+
+  it('finds the most successful reps at the selected load, distance and time window across plans', () => {
+    const results = strongmanResults([
+      { id: 'old', profileId: 'p1', strongmanLog: [log({ movement: 'Log press', sets: [
+        { weight: 200, reps: 8, seconds: 60 },
+      ] })] },
+      { id: 'current', profileId: 'p1', strongmanLog: [log({ movement: 'Log press', date: '2026-02-01', sets: [
+        { weight: 200, reps: 6, seconds: 60 },
+        { weight: 180, reps: 12, seconds: 60 },
+        { weight: 200, reps: 15, seconds: 90 },
+        { weight: 200, reps: 13, seconds: 60, distance: 50 },
+        { weight: 200, reps: 20, seconds: 60, successful: false },
+        { weight: 220, reps: 3, seconds: 60 },
+        { weight: 200, reps: 0, seconds: 60 },
+      ] })] },
+      { id: 'other-profile', profileId: 'p2', strongmanLog: [log({ movement: 'Log press', sets: [
+        { weight: 200, reps: 30, seconds: 60 },
+      ] })] },
+    ]);
+    const options = { profileId: 'p1', movement: 'Log press',
+      eventSnapshot: { weight: '200', seconds: '60', reps: 10, timeGoal: 'reps' } };
+    const summary = summarizeStrongmanResults(results, options);
+    expect(summary.mostReps).toMatchObject({ routineId: 'old', weight: 200, reps: 8, seconds: 60 });
+    expect(summary.best).toMatchObject({ weight: 220, reps: 3 });
+    expect(summarizeStrongmanResults(results, { ...options, routineId: 'current' }).mostReps.reps).toBe(6);
+    expect(summarizeStrongmanResults(results, { ...options, eventSnapshot: null }).mostReps).toBeNull();
+    expect(summarizeStrongmanResults(results, { ...options, eventSnapshot: { weight: '', seconds: 60 } }).mostReps).toBeNull();
+  });
+
+  it('keeps untimed reps separate from timed windows, excludes failed attempts and chooses the most recent tie', () => {
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [
+      log({ id: 'older', date: '2026-01-01', sets: [{ weight: 200, reps: 8 }] }),
+      log({ id: 'newer', date: '2026-02-01', sets: [{ weight: 200, reps: 8 }, { weight: 200, reps: 8 }] }),
+      log({ date: '2026-03-01', sets: [{ weight: 200, reps: 20, seconds: 60 }] }),
+      log({ date: '2026-04-01', sets: [{ weight: 200, reps: 25, successful: false }] }),
+      log({ date: '2026-04-01', sets: [{ weight: 200, reps: 0 }] }),
+    ] }]);
+    const summary = summarizeStrongmanResults(results, { eventSnapshot: { weight: 200, reps: 4 } });
+    expect(summary.mostReps).toMatchObject({ entryId: 'newer', reps: 8, setIndex: 1, seconds: '' });
+    expect(summary.latest).toMatchObject({ date: '2026-04-01' });
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { weight: 200, seconds: 90 } }).mostReps).toBeNull();
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { weight: 200, distance: 0 } }).mostReps).toBeNull();
+  });
+
+  it('matches blank loads only to blank actual loads and never ranks full medleys by reps', () => {
+    const results = [
+      { movement: 'Bodyweight lift', reps: 10, weight: '', seconds: '', distance: '' },
+      { movement: 'Bodyweight lift', reps: 30, weight: 100, seconds: '', distance: '' },
+      { movement: 'Bodyweight lift', reps: 50, weight: '', seconds: '', distance: '', scope: 'medley' },
+    ];
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { timeGoal: 'reps' } }).mostReps.reps).toBe(10);
+    expect(summarizeStrongmanResults(results, { eventSnapshot: { type: 'medley', timeGoal: 'reps' } }).mostReps).toBeNull();
+  });
+
+  it('does not treat rep windows as elapsed times while retaining legacy times and full medley runs', () => {
+    const results = strongmanResults([{ id: 'r1', strongmanLog: [
+      log({ id: 'elapsed', sets: [{ weight: 200, reps: 6, seconds: 40 }] }),
+      log({ id: 'rep-short', eventSnapshot: { name: 'Log press', timeGoal: 'reps' },
+        sets: [{ weight: 200, reps: 6, seconds: 30 }] }),
+      log({ id: 'rep-long', eventSnapshot: { name: 'Log press', timeGoal: 'reps' },
+        sets: [{ weight: 200, reps: 6, seconds: 60 }] }),
+      log({ id: 'medley', scope: 'medley', eventSnapshot: { ...event, timeGoal: 'reps' },
+        sets: [{ seconds: 50 }] }),
+    ] }]);
+    const summary = summarizeStrongmanResults(results, { scope: 'movement', eventSnapshot: { weight: 200, reps: 6 } });
+    expect(summary.fastest).toMatchObject({ entryId: 'elapsed', seconds: 40 });
+    expect(summary.longest).toMatchObject({ entryId: 'elapsed', seconds: 40 });
+    const medley = summarizeStrongmanResults(results, { scope: 'medley', eventSnapshot: event });
+    expect(medley.fastest).toMatchObject({ entryId: 'medley', seconds: 50 });
+    expect(medley.longest).toMatchObject({ entryId: 'medley', seconds: 50 });
   });
 
   it('copies targets deeply while resetting training logs and preserves logs on plan updates', () => {

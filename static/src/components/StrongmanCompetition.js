@@ -63,14 +63,15 @@ const relativeDate = (value, now = new Date()) => {
 
 const TargetFields = ({ value, onChange, prefix }) => (
   <><div className="strongman-target-fields">
-    {[['weight', 'Weight (lb)'], ['distance', 'Distance (ft)'], ['reps', 'Reps'], ['seconds', 'Time (sec)']].map(([key, label]) => (
+    {[['weight', 'Weight (lb)'], ['distance', 'Distance (ft)'], ['reps', 'Reps'], ['seconds', value.timeGoal === 'reps' ? 'Time window (sec)' : 'Time (sec)']].map(([key, label]) => (
       <label className="form-field" key={key}>
         <span className="field-label">{label}</span>
         <input className="number-input" type="number" inputMode={key === 'reps' ? 'numeric' : 'decimal'} min="0" step={key === 'reps' ? '1' : 'any'} aria-label={`${prefix} ${label}`} value={value[key] ?? ''} placeholder="TBA" onChange={event => onChange({ ...value, [key]: event.target.value })} />
       </label>
     ))}
   </div>
-  <label className="form-field strongman-time-goal"><span className="field-label">When timing this movement</span><select className="number-input" aria-label={`${prefix} time goal`} value={value.timeGoal || 'fastest'} onChange={event => onChange({ ...value, timeGoal: event.target.value })}><option value="fastest">Faster is better</option><option value="longest">Longer is better (hold)</option></select></label></>
+  <label className="form-field strongman-time-goal"><span className="field-label">Record goal</span><select className="number-input" aria-label={`${prefix} record goal`} value={value.timeGoal || 'fastest'} onChange={event => onChange({ ...value, timeGoal: event.target.value })}><option value="fastest">Faster is better</option><option value="longest">Longer is better (hold)</option><option value="reps">More reps is better</option></select></label>
+  {value.timeGoal === 'reps' && <p className="strongman-help">Reps are the score, so you can leave the target reps blank. Leave the time window blank for an untimed event.</p>}</>
 );
 
 export const StrongmanCompetitionEditor = ({ value, onChange, knownMovements = [] }) => {
@@ -124,30 +125,33 @@ const ResultSummary = ({ results, routineId, movement, scope = 'movement', targe
   const current = summarizeStrongmanResults(results, { ...options, routineId });
   const lifetime = summarizeStrongmanResults(results, options);
   const timeGoal = target?.timeGoal === 'longest' ? 'longest' : 'fastest';
-  const currentRecord = scope === 'medley' ? current.fastest : current.best;
-  const lifetimeRecord = scope === 'medley' ? lifetime.fastest : lifetime.best;
+  const forReps = scope !== 'medley' && target?.timeGoal === 'reps';
+  const currentRecord = scope === 'medley' ? current.fastest : forReps ? current.mostReps : current.best;
+  const lifetimeRecord = scope === 'medley' ? lifetime.fastest : forReps ? lifetime.mostReps : lifetime.best;
   return (
     <>
       <dl className="strongman-event-results">
-        <div><dt>This plan · {scope === 'medley' ? 'fastest full run' : 'heaviest result'}</dt><dd>{formatStrongmanResult(currentRecord)}</dd></div>
+        <div><dt>This plan · {scope === 'medley' ? 'fastest full run' : forReps ? 'most reps at this setup' : 'heaviest result'}</dt><dd>{formatStrongmanResult(currentRecord)}</dd></div>
+        {forReps && <div><dt>This plan · heaviest result</dt><dd>{formatStrongmanResult(current.best)}</dd></div>}
         <div><dt>Last trained</dt><dd>{lifetime.latest ? <>{relativeDate(lifetime.latest.date)}<small>{formatStrongmanDate(lifetime.latest.date)}{lifetime.latest.successful === false ? ' · Attempt' : ''}</small></> : 'Not logged yet'}</dd></div>
       </dl>
-      <details className="strongman-record-details"><summary>Lifetime and timed records</summary><dl className="strongman-event-results">
-        <div><dt>Lifetime · {scope === 'medley' ? 'same setup' : 'heaviest result'}</dt><dd>{formatStrongmanResult(lifetimeRecord)}{lifetimeRecord && <small>{formatStrongmanDate(lifetimeRecord.date)}</small>}</dd></div>
-        {scope !== 'medley' && current[timeGoal] && <div><dt>{timeGoal === 'longest' ? 'Longest hold' : 'Fastest'} at this setup</dt><dd>{formatStrongmanResult(current[timeGoal])}</dd></div>}
-        {scope !== 'medley' && lifetime[timeGoal] && <div><dt>Lifetime {timeGoal === 'longest' ? 'longest hold' : 'fastest'} · same setup</dt><dd>{formatStrongmanResult(lifetime[timeGoal])}<small>{formatStrongmanDate(lifetime[timeGoal].date)}</small></dd></div>}
+      <details className="strongman-record-details"><summary>Lifetime and event records</summary><dl className="strongman-event-results">
+        <div><dt>Lifetime · {scope === 'medley' ? 'same setup' : forReps ? 'most reps at this setup' : 'heaviest result'}</dt><dd>{formatStrongmanResult(lifetimeRecord)}{lifetimeRecord && <small>{formatStrongmanDate(lifetimeRecord.date)}</small>}</dd></div>
+        {forReps && <div><dt>Lifetime · heaviest result</dt><dd>{formatStrongmanResult(lifetime.best)}</dd></div>}
+        {scope !== 'medley' && !forReps && current[timeGoal] && <div><dt>{timeGoal === 'longest' ? 'Longest hold' : 'Fastest'} at this setup</dt><dd>{formatStrongmanResult(current[timeGoal])}</dd></div>}
+        {scope !== 'medley' && !forReps && lifetime[timeGoal] && <div><dt>Lifetime {timeGoal === 'longest' ? 'longest hold' : 'fastest'} · same setup</dt><dd>{formatStrongmanResult(lifetime[timeGoal])}<small>{formatStrongmanDate(lifetime[timeGoal].date)}</small></dd></div>}
       </dl></details>
     </>
   );
 };
 
 const ComponentSummary = ({ component, index, results, routineId }) => {
-  const options = { movement: component.name, scope: 'movement' };
+  const options = { movement: component.name, scope: 'movement', eventSnapshot: component };
   const current = component.name ? summarizeStrongmanResults(results, { ...options, routineId }) : null;
   const lifetime = component.name ? summarizeStrongmanResults(results, options) : null;
   return <summary>
     <span className="strongman-component-title"><strong>{component.name || `Implement ${index + 1} · To be announced`}</strong><span>{formatStrongmanTarget(component)}</span></span>
-    {component.name && <small>This plan: {formatStrongmanResult(current.best)}{lifetime.latest ? ` · Last ${relativeDate(lifetime.latest.date)}` : ''}</small>}
+    {component.name && <small>This plan{component.timeGoal === 'reps' ? ' · most reps' : ''}: {formatStrongmanResult(component.timeGoal === 'reps' ? current.mostReps : current.best)}{lifetime.latest ? ` · Last ${relativeDate(lifetime.latest.date)}` : ''}</small>}
   </summary>;
 };
 
@@ -208,12 +212,12 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], onSaveCompeti
                   </details>
                 ))}</div> : <p className="strongman-help">Implements to be announced. Add them whenever you know more.</p>}
               </> : <>
-                <p className="strongman-target">Competition: {formatStrongmanTarget(event)}</p>
+                <p className="strongman-target">Competition: {formatStrongmanTarget(event)}{event.timeGoal === 'reps' ? ' · More reps is better' : ''}</p>
                 <ResultSummary results={results} routineId={routine.id} movement={event.name} target={event} />
               </>}
             </article>
           ))}
-          <p className="strongman-help">Heaviest results keep the reps and distance from that attempt. Full-run times compare the same implements, weights, and distances.</p>
+          <p className="strongman-help">Heaviest results keep the reps and distance from that attempt. Rep records compare the same weight, distance, and recorded time window. Full-run times compare the same implements, weights, and distances.</p>
         </div>
       ) : <p className="strongman-help">Add upcoming events to keep their weights and your training records in view. You can start with just an event name.</p>}
     </section>
