@@ -36,5 +36,5 @@ The contrast between New Hampshire's total of three throws and Kansas City's bes
 
 This idea is deferred at the user's request. The planning, possible user flows,
 implementation considerations, and open decisions now live in
-[Main-lift variations and competition tracking](<../potential features/main-lift-variations.md>).
+[Main-lift variations and competition tracking](../potential_features/main-lift-variations.md).
 No main-program variant implementation is included in the Strongman scoring release.

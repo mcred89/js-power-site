@@ -4,7 +4,7 @@ The code in this repo deploys a serverless React website into AWS S3.
 
 ## Potential features
 
-Deferred ideas and design notes live in [potential features](<potential features/README.md>).
+Deferred ideas and design notes live in [potential features](potential_features/README.md).
 Start there when revisiting a proposal or recording a new idea.
 
 ## Progression by lift
