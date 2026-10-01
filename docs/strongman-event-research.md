@@ -34,6 +34,7 @@ The contrast between New Hampshire's total of three throws and Kansas City's bes
 
 ## Main-lift variants: discussion only
 
-Separate the program slot (deadlift, press, squat) from the movement performed (for example, a 2-inch deficit deadlift). Each variant should own its training max and records. Plan-level changes would affect future workouts; a session override would affect only subsequent sets, preserving earlier set identities.
-
-An optional link to a competition event could surface completed normal-workout sets in Strongman history without duplicate entry. Four sets of five would remain four sets, not a 20-rep event result. Untimed sets would not become timed competition records. Old generic deadlifts would remain unspecified until explicitly relabeled by the user. No main-program variant implementation is included in this release.
+This idea is deferred at the user's request. The planning, possible user flows,
+implementation considerations, and open decisions now live in
+[Main-lift variations and competition tracking](<../potential features/main-lift-variations.md>).
+No main-program variant implementation is included in the Strongman scoring release.
