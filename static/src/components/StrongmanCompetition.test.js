@@ -54,10 +54,24 @@ it('confirms completion and retains failed lifecycle changes for retry', async (
   expect(onEnd).not.toHaveBeenCalled();
   expect(container.textContent).toContain('Your recorded training and records will stay saved.');
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Confirm completion').click());
-  expect(onEnd).toHaveBeenCalledWith('completed');
+  expect(onEnd).toHaveBeenCalledWith('completed', { ...competition, id: 'meet' });
   expect(container.querySelector('[role="alert"]').textContent).toBe('Storage unavailable.');
   await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Confirm completion').click());
   expect(container.querySelector('[aria-label="Confirm competition change"]')).toBeNull();
+});
+
+it.each(['Mark competition complete', 'Remove competition'])('dismisses %s confirmation if the meet automatically completes', label => {
+  const shared = { ...competition, id: 'meet' };
+  const onEditingChange = jest.fn();
+  const render = value => root.render(<StrongmanCompetitionCard competition={value} onSaveCompetition={() => {}}
+    onEndCompetition={() => {}} onEditingChange={onEditingChange} />);
+  act(() => render(shared));
+  click(label);
+  expect(container.querySelector('[aria-label="Confirm competition change"]')).not.toBeNull();
+  act(() => render(null));
+  expect(container.querySelector('[aria-label="Confirm competition change"]')).toBeNull();
+  expect(container.textContent).toContain('Add competition');
+  expect(onEditingChange).toHaveBeenLastCalledWith(false);
 });
 
 it('keeps current-plan evidence separate from lifetime records and includes the most recent attempt', () => {

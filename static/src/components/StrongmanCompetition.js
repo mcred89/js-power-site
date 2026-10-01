@@ -189,10 +189,14 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], competition: 
   const savedCompetition = suppliedCompetition === undefined ? routine?.inputs?.strongmanCompetition : suppliedCompetition;
   const competition = savedCompetition || { name: '', date: '', events: [] };
   const [draft, setDraft] = useState(null);
+  const [observedCompetition, setObservedCompetition] = useState(null);
   const [ending, setEnding] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const editing = draft !== null || ending !== null;
+  useEffect(() => {
+    if (ending && savedCompetition !== observedCompetition) setEnding(null);
+  }, [ending, observedCompetition, savedCompetition]);
   useUnsavedChanges(editing, saving);
   useEffect(() => {
     onEditingChange?.(editing);
@@ -211,7 +215,7 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], competition: 
     setError('');
     setSaving(true);
     try {
-      await onSaveCompetition(normalizeStrongmanCompetition(draft));
+      await onSaveCompetition(normalizeStrongmanCompetition(draft), observedCompetition);
       setDraft(null);
     } catch (failure) {
       setError(failure.message || 'Could not save the competition. Please try again.');
@@ -222,7 +226,7 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], competition: 
     setSaving(true);
     setError('');
     try {
-      await onEndCompetition(ending);
+      await onEndCompetition(ending, observedCompetition);
       setEnding(null);
     } catch (failure) {
       setError(failure.message || 'Could not update the competition. Please try again.');
@@ -231,8 +235,8 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], competition: 
 
   return (
     <section className="strongman-competition-card" aria-label="Next competition">
-      <div className="strongman-card-heading"><div><p className="eyebrow">Next competition</p><h2>{competition.name || 'Your events'}</h2>{competition.date && <p className="strongman-help">{formatStrongmanDate(competition.date)}</p>}</div>{onSaveCompetition && !editing && <button className="text-button" type="button" onClick={() => { setDraft({ ...competition, events: [...(competition.events || [])] }); setError(''); }}>{savedCompetition ? 'Edit competition' : 'Add competition'}</button>}</div>
-      {savedCompetition && suppliedCompetition !== undefined && <p className="strongman-help">This competition carries across your plans until you complete or remove it.</p>}
+      <div className="strongman-card-heading"><div><p className="eyebrow">Next competition</p><h2>{competition.name || 'Your events'}</h2>{competition.date && <p className="strongman-help">{formatStrongmanDate(competition.date)}</p>}</div>{onSaveCompetition && !editing && <button className="text-button" type="button" onClick={() => { setObservedCompetition(savedCompetition || null); setDraft({ ...competition, events: [...(competition.events || [])] }); setError(''); }}>{savedCompetition ? 'Edit competition' : 'Add competition'}</button>}</div>
+      {savedCompetition && suppliedCompetition !== undefined && <p className="strongman-help">This competition carries across your plans and completes automatically after its date. You can also complete or remove it yourself. Without a date, it stays active.</p>}
       {draft ? (
         <form onSubmit={save}>
           <fieldset className="strongman-saving-fieldset" disabled={saving}>
@@ -270,7 +274,7 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], competition: 
       {savedCompetition && onEndCompetition && !draft && (ending ? <div className="strongman-delete-confirm" role="group" aria-label="Confirm competition change">
         <p>{ending === 'completed' ? 'Mark this competition complete?' : 'Remove this competition from your plans?'} It will stop carrying into your plans. Your recorded training and records will stay saved.</p>
         <div className="strongman-actions"><button className="secondary-button" type="button" disabled={saving} onClick={endCompetition}>{saving ? 'Saving…' : ending === 'completed' ? 'Confirm completion' : 'Confirm removal'}</button><button className="text-button" type="button" disabled={saving} onClick={() => { setEnding(null); setError(''); }}>Cancel</button></div>
-      </div> : <div className="strongman-actions"><button className="text-button" type="button" onClick={() => { setEnding('completed'); setError(''); }}>Mark competition complete</button><button className="text-button danger-text" type="button" onClick={() => { setEnding('removed'); setError(''); }}>Remove competition</button></div>)}
+      </div> : <div className="strongman-actions"><button className="text-button" type="button" onClick={() => { setObservedCompetition(savedCompetition); setEnding('completed'); setError(''); }}>Mark competition complete</button><button className="text-button danger-text" type="button" onClick={() => { setObservedCompetition(savedCompetition); setEnding('removed'); setError(''); }}>Remove competition</button></div>)}
       {!draft && error && <p className="form-error" role="alert">{error}</p>}
     </section>
   );

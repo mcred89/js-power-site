@@ -8,7 +8,6 @@ import {
   adjustSessionSet,
   adaptiveStatusForWorkout,
   completeSessionSet,
-  createRoutine,
   finishWorkoutSession,
   reopenWorkoutSession,
   setSessionRpe,
@@ -522,6 +521,21 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const routine = profileRoutines.find(item => item.id === selectedRoutineId) ||
     profileRoutines.find(item => item.id === profile?.activeRoutineId) || profileRoutines[0];
   const calendarDay = useCalendarDay();
+  useEffect(() => {
+    if (!profiles.some(item => item.strongmanCompetition?.date)) return undefined;
+    let disposed = false;
+    let stop = () => {};
+    import('./data/profilePersistence').then(({ observeCompetitionCompletion }) => {
+      if (!disposed) stop = observeCompetitionCompletion(profiles, (observed, updated) => {
+        setProfiles(current => current.some(item => item === observed)
+          ? current.map(item => item === observed ? updated : item) : current);
+      }, setMessage);
+    }).catch(error => { if (!disposed) setMessage(error.message); });
+    return () => {
+      disposed = true;
+      stop();
+    };
+  }, [calendarDay, profiles]);
   const calendar = useMemo(() => buildPlanCalendar(routine, calendarDay), [routine, calendarDay]);
   const { workout, pending, completed } = useMemo(() => {
     const nextPending = [];
@@ -605,16 +619,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const addRoutine = async (name, inputs) => {
-    const { changeProfileCompetition } = await import('./data/strongmanCompetitions');
-    const draft = inputs.strongmanCompetition;
-    const creatingCompetition = !profile.strongmanCompetition && inputs.includeStrongmanDay &&
-      Boolean(draft?.name?.trim() || draft?.date || draft?.events?.length);
-    const prepared = creatingCompetition ? changeProfileCompetition(profile, draft) : profile;
-    const item = createRoutine(profile.id, name, { ...inputs, strongmanCompetition: prepared.strongmanCompetition || null });
-    await patchProfile(profile.id, {
-      activeRoutineId: item.id, updatedAt: new Date().toISOString(),
-      ...(creatingCompetition ? { strongmanCompetition: prepared.strongmanCompetition } : {}),
-    }, { puts: { routines: [item] } }, { expectedCompetition: profile.strongmanCompetition || null });
+    const { createRoutineForProfile } = await import('./data/profilePersistence');
+    const { routine: item, profile: updated } = await createRoutineForProfile(profile, name, inputs);
+    setProfiles(current => current.map(entry => entry.id === updated.id ? updated : entry));
     setRoutines(current => [...current, item]);
     setSelectedRoutineId(item.id);
     setBuilderTemplate(null);
@@ -636,8 +643,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const addCopiedRoutine = async item => {
-    const destinationProfile = profiles.find(entry => entry.id === item.profileId);
-    if (!destinationProfile) return;
+    if (!profiles.some(entry => entry.id === item.profileId)) return;
+    const { completeExpiredProfileCompetition } = await import('./data/profilePersistence');
+    const destinationProfile = await completeExpiredProfileCompetition(item.profileId);
     item = { ...item, inputs: { ...item.inputs, strongmanCompetition: destinationProfile.strongmanCompetition || null } };
     await patchProfile(destinationProfile.id, { activeRoutineId: item.id, updatedAt: new Date().toISOString() },
       { puts: { routines: [item] } }, { expectedCompetition: destinationProfile.strongmanCompetition || null });
@@ -725,13 +733,13 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     return commitStrongmanChange(routinesRef.current.find(item => item.id === routineId), profile.id, action, value, saveRoutine);
   };
 
-  const saveStrongmanCompetition = async value => {
-    const { changeProfileCompetition } = await import('./data/strongmanCompetitions');
+  const saveStrongmanCompetition = async (value, expectedCompetition = profile.strongmanCompetition || null) => {
+    const { changeProfileCompetition, completePastCompetition } = await import('./data/strongmanCompetitions');
     await patchProfile(profile.id, latest => {
-      const updated = changeProfileCompetition(latest, value);
+      const updated = completePastCompetition(changeProfileCompetition(latest, value));
       return { strongmanCompetition: updated.strongmanCompetition,
         strongmanCompetitionHistory: updated.strongmanCompetitionHistory, updatedAt: updated.updatedAt };
-    }, {}, { expectedCompetition: profile.strongmanCompetition || null });
+    }, {}, { expectedCompetition });
   };
 
   const saveStrongmanLog = (routineId, entries) => saveStrongmanChanges(routineId, 'log', entries);

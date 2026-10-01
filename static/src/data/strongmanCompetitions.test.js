@@ -1,6 +1,7 @@
 import {
   activeStrongmanCompetition, changeProfileCompetition, migrateStrongmanCompetitions,
   validateProfileCompetitions, withStrongmanCompetitionDefaults,
+  completePastCompetition, competitionDateHasPassed,
 } from './strongmanCompetitions';
 
 const timestamp = '2026-10-01T12:00:00.000Z';
@@ -45,7 +46,7 @@ describe('profile competition lifecycle', () => {
     expect(() => validateProfileCompetitions(ended)).not.toThrow();
   });
 
-  it('starts a later meet with a separate identity and does not end past-dated meets automatically', () => {
+  it('starts a later meet with a separate identity', () => {
     const first = changeProfileCompetition({ id: 'p1' }, { ...target, date: '2020-01-01' }, timestamp);
     expect(activeStrongmanCompetition(first)).not.toBeNull();
     const next = changeProfileCompetition(changeProfileCompetition(first, 'completed', timestamp), target, timestamp);
@@ -77,6 +78,33 @@ describe('profile competition lifecycle', () => {
       { ...profile, strongmanCompetition: { ...active, events: [{ id: 'yoke', name: 'Yoke', weight: -1 }] } },
     ];
     invalid.forEach(value => expect(() => validateProfileCompetitions(value)).toThrow());
+  });
+});
+
+describe('automatic competition completion', () => {
+  const now = new Date(2026, 9, 2, 0, 1);
+  it.each(['2026-10-02', '2026-10-03', '', undefined, 'invalid', '2026-02-30', '2026-10-01T00:00:00Z'])(
+    'keeps competition date %p active', date => {
+      const profile = { strongmanCompetition: { status: 'active', date } };
+      expect(completePastCompetition(profile, now)).toBe(profile);
+    },
+  );
+  it('completes after the local day, preserving the entire snapshot and existing history only once', () => {
+    const first = changeProfileCompetition({ id: 'p1', custom: { retained: true } },
+      { ...target, date: '2026-10-01', unknown: true }, timestamp);
+    const before = JSON.stringify(first);
+    expect(completePastCompetition(first, new Date(2026, 9, 1, 23, 59))).toBe(first);
+    const ended = completePastCompetition(first, now);
+    expect(ended.strongmanCompetition).toBeNull();
+    expect(ended.strongmanCompetitionHistory).toEqual([{ ...first.strongmanCompetition,
+      status: 'completed', endedAt: now.toISOString() }]);
+    expect(ended.custom).toBe(first.custom);
+    expect(completePastCompetition(ended, now)).toBe(ended);
+    expect(JSON.stringify(first)).toBe(before);
+  });
+  it('does not act on inactive competitions or invalid clocks', () => {
+    expect(competitionDateHasPassed({ status: 'removed', date: '2020-01-01' }, now)).toBe(false);
+    expect(competitionDateHasPassed({ status: 'active', date: '2020-01-01' }, new Date('invalid'))).toBe(false);
   });
 });
 

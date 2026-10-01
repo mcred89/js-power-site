@@ -150,6 +150,50 @@ describe('competition submission', () => {
 
   afterEach(() => act(() => root.unmount()));
 
+  it.each([false, true])('drops an inherited competition when it ends while preserving the plan draft (replacement: %s)', replaced => {
+    const shared = { id: 'finished-meet', name: 'Competition day', date: '2026-10-01', events: [
+      { id: 'carry', name: 'Yoke carry', type: 'single', weight: 600, distance: 100 },
+    ] };
+    const initialInputs = { maxSquat: '315', includeStrongmanDay: true, includeBackoffSets: true, strongmanCompetition: shared };
+    const render = competition => act(() => root.render(<RoutineForm initialInputs={initialInputs} sharedCompetition={competition} onCreate={onCreate} />));
+    render(shared);
+    act(() => {
+      const squat = div.querySelector('[name="maxSquat"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(squat, '335');
+      squat.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    if (replaced) render({ ...shared, id: 'replacement-meet', name: 'Replacement meet' });
+    render(null);
+
+    expect(div.querySelector('[name="maxSquat"]').value).toBe('335');
+    expect(div.querySelector('[name="includeStrongmanDay"]').checked).toBe(true);
+    expect(div.querySelector('[aria-label="Competition name"]').value).toBe('');
+    expect(div.querySelector('[aria-label="Event 1 name"]')).toBeNull();
+    submit();
+    expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({
+      maxSquat: '335', includeStrongmanDay: true, includeBackoffSets: true, strongmanCompetition: null,
+    }));
+    expect(initialInputs.strongmanCompetition).toBe(shared);
+  });
+
+  it('preserves an independent user-entered competition draft when a temporary shared meet ends', () => {
+    const initialInputs = { includeStrongmanDay: true };
+    const render = sharedCompetition => act(() => root.render(<RoutineForm initialInputs={initialInputs} sharedCompetition={sharedCompetition} onCreate={onCreate} />));
+    render(null);
+    act(() => {
+      const name = div.querySelector('[aria-label="Competition name"]');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(name, 'My draft meet');
+      name.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    render({ id: 'temporary-shared', name: 'Shared meet', events: [] });
+    expect(div.querySelector('[aria-label="Competition name"]')).toBeNull();
+    render(null);
+    expect(div.querySelector('[aria-label="Competition name"]').value).toBe('My draft meet');
+    submit();
+    expect(onCreate.mock.calls[0][0].strongmanCompetition).toMatchObject({ name: 'My draft meet', events: [] });
+    expect(onCreate.mock.calls[0][0].strongmanCompetition.id).toBeUndefined();
+  });
+
   it('retains inputs and reports a stale competition when asynchronous creation fails', async () => {
     let rejectCreation;
     onCreate.mockImplementationOnce(() => new Promise((resolve, reject) => { rejectCreation = reject; }));

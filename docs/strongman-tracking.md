@@ -7,9 +7,11 @@ reference information and never generate prescribed weights, sets, or reps.
   from any Strongman day. Leave unannounced details blank. A medley contains
   independently editable implements plus its own full-event results.
 - Each profile has one active competition. It carries across new plans, copies,
-  and templates until you explicitly mark it complete or remove it. Finishing
-  or deleting a plan, disabling Strongman days, or passing the competition date
-  does not end it. Editing targets updates the shared reference across plans.
+  and templates until you mark it complete, remove it, or its date has passed.
+  Dated competitions complete automatically on the following local calendar day,
+  when the app is open or next reopened. Undated competitions stay active.
+  Finishing or deleting a plan or disabling Strongman days does not end it.
+  Editing targets updates the shared reference across plans.
   Copies into another profile use that person's active competition.
 - Each saved medley's Add run action starts a separate result with its own
   actual setup. Its implements can be corrected later without changing other

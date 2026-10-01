@@ -83,6 +83,7 @@ afterEach(() => {
   act(() => root.unmount());
   container.remove();
   jest.restoreAllMocks();
+  jest.useRealTimers();
   global.IS_REACT_ACT_ENVIRONMENT = false;
 });
 
@@ -216,4 +217,43 @@ it.each([undefined, { profileId: 'other-profile' }])('does not rename a removed 
   expect(container.querySelector('[role="alert"]').textContent).toContain('no longer available');
   expect(container.querySelector('[aria-label="Routine name"]').value).toBe('Unsaved name');
   expect(container.querySelector('.plan-select strong').textContent).toBe(original.name);
+});
+
+it('automatically completes after local midnight without losing a draft or reactivating its meet', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(2026, 9, 1, 23, 59));
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  await click('Edit competition');
+  fill('Competition date', '2026-10-01');
+  await click('Save competition');
+  expect(storedProfile.strongmanCompetition.date).toBe('2026-10-01');
+  await click('Edit competition');
+  fill('Competition name', 'Unfinished draft');
+  await act(async () => { jest.advanceTimersByTime(120000); });
+  expect(storedProfile.strongmanCompetition).toBeNull();
+  expect(storedProfile.strongmanCompetitionHistory).toEqual([
+    expect.objectContaining({ id: 'meet', status: 'completed', date: '2026-10-01' }),
+  ]);
+  expect(stored).toEqual(original);
+  expect(container.querySelector('[aria-label="Competition name"]').value).toBe('Unfinished draft');
+  await click('Save competition');
+  expect(container.querySelector('[role="alert"]').textContent).toContain('changed in another window');
+  expect(storedProfile.strongmanCompetition).toBeNull();
+  expect(storedProfile.strongmanCompetitionHistory).toHaveLength(1);
+});
+
+it('retries failed automatic completion on focus without a date change', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(2026, 9, 1, 12));
+  await click('Edit competition');
+  fill('Competition date', '2026-10-01');
+  await click('Save competition');
+  applyBatch.mockRejectedValueOnce(new Error('Storage unavailable'));
+  jest.setSystemTime(new Date(2026, 9, 2, 12));
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  // The day-change effect may start a new check after the old observer is
+  // disposed. A fresh focus must still settle the lifecycle idempotently.
+  await act(async () => { window.dispatchEvent(new Event('focus')); });
+  expect(storedProfile.strongmanCompetition).toBeNull();
+  expect(storedProfile.strongmanCompetitionHistory).toHaveLength(1);
 });

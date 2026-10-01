@@ -92,6 +92,18 @@ export class RoutineForm extends Component {
 
   componentDidMount() { this.mounted = true; }
 
+  componentDidUpdate(previousProps) {
+    if (!previousProps.sharedCompetition || previousProps.sharedCompetition === this.props.sharedCompetition) return;
+    // Shared meets are references, not editable drafts. Once that reference
+    // changes or ends, its initial snapshot must not reappear as a new meet.
+    this.setState(state => {
+      const draft = state.strongmanCompetition;
+      return draft && (draft === previousProps.sharedCompetition ||
+        (draft.id && draft.id === previousProps.sharedCompetition.id))
+        ? { strongmanCompetition: null, competitionError: '' } : null;
+    });
+  }
+
   componentWillUnmount() { this.mounted = false; }
 
   handleChange(event) {

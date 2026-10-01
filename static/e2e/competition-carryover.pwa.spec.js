@@ -145,3 +145,95 @@ test('copying between profiles uses the destination competition without changing
   await openPlans(page);
   await expect(competitionCard(page).getByRole('button', { name: 'Add competition', exact: true })).toBeVisible();
 });
+
+test.describe('dated competition completion', () => {
+  test.use({ timezoneId: 'America/Chicago' });
+
+  test('completes after the local competition day on resume and startup while preserving records', async ({ page }) => {
+    test.setTimeout(120000);
+    const storedTracking = () => page.evaluate(async () => {
+      const database = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('mcilroy-method');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        const transaction = database.transaction(['profiles', 'routines'], 'readonly');
+        const read = name => new Promise((resolve, reject) => {
+          const request = transaction.objectStore(name).getAll();
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
+        });
+        const [profiles, routines] = await Promise.all([read('profiles'), read('routines')]);
+        return { profile: profiles[0], routines };
+      } finally { database.close(); }
+    });
+
+    // It is already October 2 in UTC, but still competition day in Chicago.
+    await page.clock.setFixedTime(new Date('2026-10-02T04:59:00.000Z'));
+    await createProfile(page, 'Dated Competition Athlete');
+    await preparePlan(page, 'Dated prep plan', 'Build a routine');
+    await enterCompetition(page, 'October first meet');
+    await page.getByLabel('Competition date', { exact: true }).fill('2026-10-01');
+    await generatePlan(page);
+    await openStrongmanDay(page);
+    await expect(competitionCard(page)).toContainText('October first meet');
+    await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
+    const editor = page.locator('.strongman-result-editor');
+    await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Zercher yoke carry' });
+    await editor.getByLabel('Weight (lb)', { exact: true }).fill('580');
+    await editor.getByLabel('Distance (ft)', { exact: true }).fill('50');
+    await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
+    await expect(preparationBest(page)).toContainText('580 lb · 50 ft');
+    await openPlans(page);
+    const before = await storedTracking();
+    const firstCompetition = before.profile.strongmanCompetition;
+    const originalPlan = before.routines.find(routine => routine.name === 'Dated prep plan');
+    expect(firstCompetition.date).toBe('2026-10-01');
+    expect(firstCompetition.status).toBe('active');
+
+    // Resume just after local midnight; no manual completion is requested.
+    await page.clock.setFixedTime(new Date('2026-10-02T05:01:00.000Z'));
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+    await expect(competitionCard(page).getByRole('button', { name: 'Add competition', exact: true })).toBeVisible();
+    await expect.poll(async () => (await storedTracking()).profile.strongmanCompetition).toBeNull();
+    const resumed = await storedTracking();
+    expect(resumed.profile.strongmanCompetitionHistory.filter(item => item.id === firstCompetition.id)).toEqual([
+      expect.objectContaining({ id: firstCompetition.id, status: 'completed', date: '2026-10-01', events: firstCompetition.events }),
+    ]);
+    expect(resumed.routines.find(routine => routine.id === originalPlan.id).strongmanLog).toEqual(originalPlan.strongmanLog);
+    await copyPlan(page, 'Dated prep plan', 'Copy after dated meet');
+    await expect(competitionCard(page).getByRole('button', { name: 'Add competition', exact: true })).toBeVisible();
+    await preparePlan(page, 'New plan after dated meet');
+    await expect(page.getByLabel('Competition name', { exact: true })).toHaveValue('');
+    await expect(page.getByLabel('Event 1 name', { exact: true })).toHaveCount(0);
+    await generatePlan(page);
+    await openPlans(page);
+    const afterPlans = await storedTracking();
+    for (const name of ['Copy after dated meet', 'New plan after dated meet']) {
+      expect(afterPlans.routines.find(routine => routine.name === name).inputs.strongmanCompetition).toBeNull();
+    }
+
+    // A second meet remains active on its date, then expires when reopening later.
+    await competitionCard(page).getByRole('button', { name: 'Add competition', exact: true }).click();
+    await enterCompetition(page, 'October second meet');
+    await page.getByLabel('Competition date', { exact: true }).fill('2026-10-02');
+    await competitionCard(page).getByRole('button', { name: 'Save competition', exact: true }).click();
+    await expect(competitionCard(page)).toContainText('October second meet');
+    const secondCompetition = (await storedTracking()).profile.strongmanCompetition;
+    await page.clock.setFixedTime(new Date('2026-10-03T17:00:00.000Z'));
+    await page.reload();
+    await openPlans(page);
+    await expect(competitionCard(page).getByRole('button', { name: 'Add competition', exact: true })).toBeVisible();
+    await expect.poll(async () => (await storedTracking()).profile.strongmanCompetition).toBeNull();
+    const reopened = await storedTracking();
+    expect(reopened.profile.strongmanCompetitionHistory.filter(item => item.id === firstCompetition.id)).toHaveLength(1);
+    expect(reopened.profile.strongmanCompetitionHistory.filter(item => item.id === secondCompetition.id)).toEqual([
+      expect.objectContaining({ id: secondCompetition.id, status: 'completed', date: '2026-10-02' }),
+    ]);
+    expect(reopened.routines.find(routine => routine.id === originalPlan.id).strongmanLog).toEqual(originalPlan.strongmanLog);
+    await page.getByRole('button', { name: 'Progress', exact: true }).click();
+    await page.getByRole('tab', { name: 'Strongman records', exact: true }).click();
+    await expect(page.getByRole('article', { name: 'Strongman records', exact: true })).toContainText('580 lb · 50 ft');
+  });
+});

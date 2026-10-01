@@ -1,5 +1,6 @@
 import { normalizeStrongmanCompetition, validateStrongmanRecord } from './strongman';
 import { serializedRecordsEqual } from './recordComparison';
+import { localDateKey } from './planCalendar';
 
 const has = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -15,6 +16,18 @@ const sameConfiguration = (left, right) => serializedRecordsEqual(configuration(
 // from a plan after migration has populated this profile field.
 export const activeStrongmanCompetition = profile => isObject(profile?.strongmanCompetition)
   && profile.strongmanCompetition.status === 'active' ? profile.strongmanCompetition : null;
+
+export const competitionDateHasPassed = (competition, today = new Date()) => {
+  const date = competition?.date;
+  const day = localDateKey(today);
+  return competition?.status === 'active' && typeof date === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(date) && localDateKey(date) === date && Boolean(day) && date < day;
+};
+
+export const completePastCompetition = (profile, now = new Date()) => (
+  competitionDateHasPassed(activeStrongmanCompetition(profile), now)
+    ? changeProfileCompetition(profile, 'completed', now.toISOString()) : profile
+);
 
 export const withStrongmanCompetitionDefaults = profile => ({
   ...profile,

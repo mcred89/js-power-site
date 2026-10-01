@@ -72,7 +72,8 @@ it('shows one shared competition above all plans and sends edits through the pro
   expect(div.textContent).not.toContain('Old snapshot');
   act(() => [...div.querySelectorAll('button')].find(button => button.textContent === 'Edit competition').click());
   await act(async () => div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-  expect(localActions.saveCompetition).toHaveBeenCalledWith(expect.objectContaining({ id: 'shared', name: 'Shared meet' }));
+  expect(localActions.saveCompetition).toHaveBeenCalledWith(expect.objectContaining({ id: 'shared', name: 'Shared meet' }),
+    { id: 'shared', name: 'Shared meet', events: [] });
   act(() => root.unmount());
 });
 
