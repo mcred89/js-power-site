@@ -617,7 +617,7 @@ it('requires the confirmation text before deleting a plan', () => {
   act(() => root.unmount());
 });
 
-it('trims a copied routine name and selects its destination profile', () => {
+it('trims a copied routine name and selects its destination profile', async () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const div = document.createElement('div');
   const root = createRoot(div);
@@ -645,7 +645,7 @@ it('trims a copied routine name and selects its destination profile', () => {
     selectSetter.call(profileSelect, 'p2');
     profileSelect.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  act(() => div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  await act(async () => { div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
 
   expect(onConfirm).toHaveBeenCalledWith('p2', 'Shared plan');
   act(() => root.unmount());

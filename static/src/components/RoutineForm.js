@@ -4,6 +4,12 @@ import NumberInput from './NumberInput';
 import LiftProgressionControls from './LiftProgressionControls';
 import { StrongmanCompetitionEditor } from './StrongmanCompetition';
 import { normalizeStrongmanCompetition } from '../data/strongman';
+import { useUnsavedChanges } from './useUnsavedChanges';
+
+const RoutineCreationGuard = ({ saving }) => {
+  useUnsavedChanges(saving, saving);
+  return null;
+};
 
 const eventLifts = [
   { key: 'squat', label: 'Squat' },
@@ -73,7 +79,9 @@ const initialFormState = initialInputs => {
 export class RoutineForm extends Component {
   constructor(props) {
     super(props);
-    this.state = { ...initialFormState(props.initialInputs), competitionError: '' };
+    this.state = { ...initialFormState(props.initialInputs), competitionError: '', createError: '', creating: false };
+    this.creating = false;
+    this.mounted = false;
     this.handleChange = this.handleChange.bind(this);
     this.handleCheckbox = this.handleCheckbox.bind(this);
     this.handleSubmit = this.handleSubmit.bind(this);
@@ -81,6 +89,10 @@ export class RoutineForm extends Component {
     this.handleCycleChange = this.handleCycleChange.bind(this);
     this.addCycle = this.addCycle.bind(this);
   }
+
+  componentDidMount() { this.mounted = true; }
+
+  componentWillUnmount() { this.mounted = false; }
 
   handleChange(event) {
     this.setState({ [event.target.name]: event.target.value });
@@ -114,21 +126,33 @@ export class RoutineForm extends Component {
     }));
   }
 
-  handleSubmit(event) {
+  async handleSubmit(event) {
     event.preventDefault();
+    if (this.creating) return;
     let strongmanCompetition;
     try {
-      strongmanCompetition = this.state.includeStrongmanDay
-        ? normalizeStrongmanCompetition(this.state.strongmanCompetition) : null;
+      strongmanCompetition = this.props.sharedCompetition || (this.state.includeStrongmanDay
+        ? normalizeStrongmanCompetition(this.state.strongmanCompetition) : null);
     } catch (error) {
       this.setState({ competitionError: error.message });
       return;
     }
     const submitted = { ...this.state, strongmanCompetition };
     delete submitted.competitionError;
+    delete submitted.createError;
+    delete submitted.creating;
     if (this.props.onCreate) {
-      this.setState({ competitionError: '' });
-      this.props.onCreate(submitted);
+      this.creating = true;
+      this.setState({ competitionError: '', createError: '', creating: true });
+      try {
+        const pending = this.props.onCreate(submitted);
+        if (pending?.then) await pending;
+      } catch (error) {
+        if (this.mounted) this.setState({ createError: error.message || 'Could not create your plan. Your entries are still here; please try again.' });
+      } finally {
+        this.creating = false;
+        if (this.mounted) this.setState({ creating: false });
+      }
       return;
     }
     this.setState({ ...submitted, competitionError: '', needsToFillOutForm: false });
@@ -196,11 +220,13 @@ export class RoutineForm extends Component {
 
     return (
       <div className="page routine-form-page">
+        <RoutineCreationGuard saving={this.state.creating} />
         <form className="panel" onSubmit={this.handleSubmit}>
           <div className="panel-header">
             <h2 className="panel-title">Build your routine</h2>
             <p className="panel-subtitle">Use pounds. Your maxes should reflect a recent, clean rep.</p>
           </div>
+          <fieldset className="strongman-saving-fieldset" disabled={this.state.creating}>
           {this.props.onCancel && <button className="text-button form-cancel" type="button" onClick={this.props.onCancel}>← Cancel</button>}
           <div className="field-grid three-fields">
             <NumberInput name="maxSquat" label="Squat max" controlFunc={this.handleChange} content={this.state.maxSquat} placeholder="e.g. 315" min={1} max={1001} />
@@ -260,7 +286,8 @@ export class RoutineForm extends Component {
               <span>Include a dedicated Strongman day</span>
             </label>
           </div>
-          {this.state.includeStrongmanDay && <StrongmanCompetitionEditor
+          {this.props.sharedCompetition && <p className="field-help">Training toward {this.props.sharedCompetition.name || 'your upcoming competition'}. This competition carries across plans. Edit its events from Plans.</p>}
+          {this.state.includeStrongmanDay && !this.props.sharedCompetition && <StrongmanCompetitionEditor
             value={this.state.strongmanCompetition}
             knownMovements={this.props.knownMovements}
             onChange={strongmanCompetition => this.setState({ strongmanCompetition, competitionError: '' })}
@@ -288,7 +315,9 @@ export class RoutineForm extends Component {
               </div>
             ))}
           </fieldset>
-          <button type="submit" className="primary-button">Generate plan <span aria-hidden="true">→</span></button>
+          {this.state.createError && <p className="form-error" role="alert">{this.state.createError}</p>}
+          <button type="submit" className="primary-button">{this.state.creating ? 'Creating plan…' : <>Generate plan <span aria-hidden="true">→</span></>}</button>
+          </fieldset>
         </form>
       </div>
     );

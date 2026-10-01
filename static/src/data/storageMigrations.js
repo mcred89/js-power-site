@@ -2,8 +2,9 @@ import { retireStrongmanData } from './retiredStrongman';
 import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { addStrongmanTracking } from './strongman';
+import { migrateStrongmanCompetitions } from './strongmanCompetitions';
 
-export const DATABASE_VERSION = 19;
+export const DATABASE_VERSION = 20;
 
 // These shipped steps remain available for installations that skipped releases.
 export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
@@ -299,6 +300,30 @@ export const databaseMigrations = {
   19: ({ transaction, done }) => {
     transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 19 });
     done();
+  },
+  // A competition belongs to the athlete, spanning successive training plans.
+  // Keep the old plan targets and actual attempts as historical snapshots.
+  20: ({ transaction, done }) => {
+    const records = { profiles: [], routines: [] };
+    const stores = Object.keys(records);
+    const readStore = index => {
+      if (index === stores.length) {
+        const migrated = migrateStrongmanCompetitions(records);
+        stores.forEach(store => migrated[store].forEach(record => transaction.objectStore(store).put(record)));
+        transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 20 });
+        done();
+        return;
+      }
+      const store = stores[index];
+      const request = transaction.objectStore(store).openCursor();
+      request.onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) { readStore(index + 1); return; }
+        records[store].push(cursor.value);
+        cursor.continue();
+      };
+    };
+    readStore(0);
   },
 };
 

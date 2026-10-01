@@ -31,6 +31,35 @@ const record = (id, date, weight, distance, successful = true) => ({
   id, date, movement: 'Zercher yoke carry', scope: 'movement', sets: [{ id: `set-${id}`, weight, distance, reps: '', seconds: '', successful }],
 });
 
+it('shows shared competition evidence across plans without another profile’s results', () => {
+  const shared = { ...competition, id: 'meet' };
+  const plan = { id: 'first', profileId: 'owner', strongmanLog: [{ ...record('first', '2026-09-01', 580, 50), competitionId: 'meet' }] };
+  const other = { id: 'other', profileId: 'someone-else', strongmanLog: [{ ...record('other', '2026-09-02', 999, 100), competitionId: 'meet' }] };
+  act(() => root.render(<StrongmanCompetitionCard competition={shared} profileId="owner" routines={[plan, other]} />));
+  const row = [...container.querySelectorAll('.strongman-event-results > div')].find(item => item.textContent.includes('This competition · heaviest result'));
+  expect(row.textContent).toContain('580 lb · 50 ft');
+  expect(container.textContent).not.toContain('999');
+});
+
+it('explicitly absent shared competition does not revive an old plan snapshot', () => {
+  act(() => root.render(<StrongmanCompetitionCard routine={{ inputs: { strongmanCompetition: competition } }} competition={null} onSaveCompetition={() => {}} />));
+  expect(container.textContent).not.toContain('Autumn show');
+  expect(container.textContent).toContain('Add competition');
+});
+
+it('confirms completion and retains failed lifecycle changes for retry', async () => {
+  const onEnd = jest.fn().mockRejectedValueOnce(new Error('Storage unavailable.')).mockResolvedValueOnce();
+  act(() => root.render(<StrongmanCompetitionCard competition={{ ...competition, id: 'meet' }} onEndCompetition={onEnd} />));
+  click('Mark competition complete');
+  expect(onEnd).not.toHaveBeenCalled();
+  expect(container.textContent).toContain('Your recorded training and records will stay saved.');
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Confirm completion').click());
+  expect(onEnd).toHaveBeenCalledWith('completed');
+  expect(container.querySelector('[role="alert"]').textContent).toBe('Storage unavailable.');
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Confirm completion').click());
+  expect(container.querySelector('[aria-label="Confirm competition change"]')).toBeNull();
+});
+
 it('keeps current-plan evidence separate from lifetime records and includes the most recent attempt', () => {
   const current = { id: 'current', name: 'Current plan', inputs: { strongmanCompetition: competition }, strongmanLog: [record('best', '2026-09-01', 580, 50), record('attempt', '2026-09-21', 600, 0, false)] };
   const past = { id: 'past', name: 'Past plan', strongmanLog: [record('past-best', '2025-09-01', 620, 100)] };

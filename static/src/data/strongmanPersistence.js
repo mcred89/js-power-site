@@ -1,4 +1,4 @@
-import { normalizeStrongmanCompetition, validateStrongmanRecord } from './strongman';
+import { validateStrongmanRecord } from './strongman';
 import { setWorkoutComplete } from './routines';
 import { applyBatch } from './storage';
 
@@ -10,12 +10,7 @@ export const commitStrongmanChange = async (current, profileId, action, value, s
   }
   let updated;
   let message;
-  if (action === 'competition') {
-    updated = { ...current, inputs: {
-      ...current.inputs,
-      strongmanCompetition: normalizeStrongmanCompetition(value),
-    } };
-  } else if (action === 'log') {
+  if (action === 'log') {
     updated = { ...current, strongmanLog: value };
     validateStrongmanRecord(updated);
   } else if (action === 'completion') {

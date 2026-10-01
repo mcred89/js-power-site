@@ -9,7 +9,8 @@ export const RoutineBuilderScreen = ({ profile, count, template, routines = [], 
     microCycles: template.inputs?.microCycles?.map(cycle => ({ ...cycle })),
     maxSquat: '', maxPress: '', maxDead: '',
     squatIncrement: '', pressIncrement: '', deadliftIncrement: '',
-  } : undefined;
-  return <div><div className="routine-name-wrap"><label className="form-field"><span className="field-label">Routine name</span><input className="number-input" value={name} onChange={event => setName(event.target.value)} required /></label></div><RoutineForm initialInputs={initialInputs} knownMovements={strongmanKnownMovements(routines)} onCancel={onCancel} onCreate={inputs => onCreate(name.trim() || 'Strength plan', inputs)} /></div>;
+    strongmanCompetition: profile.strongmanCompetition || null,
+  } : { strongmanCompetition: profile.strongmanCompetition || null };
+  return <div><div className="routine-name-wrap"><label className="form-field"><span className="field-label">Routine name</span><input className="number-input" value={name} onChange={event => setName(event.target.value)} required /></label></div><RoutineForm initialInputs={initialInputs} sharedCompetition={profile.strongmanCompetition} knownMovements={strongmanKnownMovements(routines)} onCancel={onCancel} onCreate={inputs => onCreate(name.trim() || 'Strength plan', inputs)} /></div>;
 };
 

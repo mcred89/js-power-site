@@ -225,6 +225,7 @@ export const createStrongmanLogEntry = (values, timestamp = new Date().toISOStri
     date,
     movement,
     workoutId: values.workoutId || null,
+    competitionId: values.competitionId || null,
     eventId: values.eventId || null,
     componentId: values.componentId || null,
     scope,
@@ -274,6 +275,9 @@ export const validateStrongmanRecord = record => {
         throw new Error('Check each dated exercise and its sets.');
       }
       ids.add(entry.id);
+      if (entry.competitionId != null && (typeof entry.competitionId !== 'string' || !entry.competitionId.trim())) {
+        throw new Error('A competition reference must be a nonempty text ID.');
+      }
       if (entry.notes !== undefined && typeof entry.notes !== 'string') throw new Error('Training notes must be text.');
       if (entry.scope === 'medley' && entry.eventSnapshot?.type !== 'medley') throw new Error('A full medley needs its recorded setup.');
       if (entry.eventSnapshot) validateStoredCompetition({ events: [entry.eventSnapshot] });
@@ -327,10 +331,11 @@ const matchingRules = (actual, target) => normalizeStrongmanScoringRules(actual?
   normalizeStrongmanScoringRules(target?.scoringRules);
 const highestResult = (results, metric) => [...results].sort((left, right) => Number(right[metric]) - Number(left[metric]))[0] || null;
 
-export const summarizeStrongmanResults = (results, { routineId, profileId, movement, scope, eventSnapshot } = {}) => {
+export const summarizeStrongmanResults = (results, { routineId, profileId, competitionId, movement, scope, eventSnapshot } = {}) => {
   const records = (results || []).filter(result => (
     (!routineId || routineId === 'all' || result.routineId === routineId) &&
     (!profileId || result.profileId === profileId) &&
+    (!competitionId || result.competitionId === competitionId) &&
     (!movement || normalizeMovementName(result.movement) === normalizeMovementName(movement)) &&
     (!scope || (result.scope || 'movement') === scope)
   )).sort((left, right) => String(right.date || '').localeCompare(String(left.date || '')) ||

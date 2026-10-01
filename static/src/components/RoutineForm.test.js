@@ -150,6 +150,31 @@ describe('competition submission', () => {
 
   afterEach(() => act(() => root.unmount()));
 
+  it('retains inputs and reports a stale competition when asynchronous creation fails', async () => {
+    let rejectCreation;
+    onCreate.mockImplementationOnce(() => new Promise((resolve, reject) => { rejectCreation = reject; }));
+    act(() => root.render(<RoutineForm initialInputs={{ maxSquat: '315', includeStrongmanDay: true }}
+      sharedCompetition={{ id: 'meet', name: 'Fall meet', events: [] }} onCreate={onCreate} />));
+    submit();
+    submit();
+    expect(onCreate).toHaveBeenCalledTimes(1);
+    expect(div.querySelector('[name="maxSquat"]').closest('fieldset').disabled).toBe(true);
+    expect(div.textContent).toContain('Creating plan');
+
+    await act(async () => { rejectCreation(new Error('This profile changed in another window. Reload it before saving your changes.')); });
+    expect(div.querySelector('[role="alert"]').textContent).toContain('changed in another window');
+    expect(div.querySelector('[name="maxSquat"]').value).toBe('315');
+    expect(div.querySelector('[name="maxSquat"]').closest('fieldset').disabled).toBe(false);
+    expect(div.textContent).toContain('Fall meet');
+
+    onCreate.mockResolvedValueOnce(undefined);
+    await act(async () => { div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); });
+    expect(onCreate).toHaveBeenCalledTimes(2);
+    expect(onCreate.mock.calls[1][0]).toMatchObject({ maxSquat: '315', strongmanCompetition: { id: 'meet' } });
+    expect(onCreate.mock.calls[1][0].creating).toBeUndefined();
+    expect(div.querySelector('[role="alert"]')).toBeNull();
+  });
+
   it('normalizes enabled targets and keeps unannounced medley details valid for backups', () => {
     const competition = { name: '  Fall meet  ', date: '', events: [
       { id: 'carry', name: '  Zercher yoke carry  ', type: 'single', weight: '600', distance: '100' },

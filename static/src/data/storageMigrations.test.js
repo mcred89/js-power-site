@@ -82,6 +82,7 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 17 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 18 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 19 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 20 } },
     ]);
   });
 
@@ -332,8 +333,8 @@ describe('Tabata sprint compatibility', () => {
   });
 
   it('advances the database and backup versions for independent sprint options', () => {
-    expect(DATABASE_VERSION).toBe(19);
-    expect(BACKUP_VERSION).toBe(19);
+    expect(DATABASE_VERSION).toBe(20);
+    expect(BACKUP_VERSION).toBe(20);
   });
 
   it('adds disabled defaults while preserving explicit options, unknown data, and workout snapshots', () => {
@@ -364,7 +365,8 @@ describe('Tabata sprint compatibility', () => {
 
     expect(migrated).toEqual({
       ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
-      profiles: original.profiles.map(profile => ({ ...profile, setTimerIntervalMs: 60000 })),
+      profiles: original.profiles.map(profile => ({ ...profile, setTimerIntervalMs: 60000,
+        strongmanCompetition: null, strongmanCompetitionHistory: [] })),
       routines: [addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(routine))), unknownRecord],
       templates: [addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(template)))],
     });
@@ -410,7 +412,8 @@ describe('Tabata sprint compatibility', () => {
     expect(await read('routines', 'r1')).toEqual(addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(routine))));
     expect(await read('templates', 't1')).toEqual(addStrongmanTracking(addLiftProgressionModes(addTabataSprintOptions(template))));
     expect(await read('archives', archive.id)).toEqual(archive);
-    expect(await read('profiles', 'p1')).toEqual({ id: 'p1', activeRoutineId: 'r1', unknown: true, setTimerIntervalMs: 60000 });
+    expect(await read('profiles', 'p1')).toEqual({ id: 'p1', activeRoutineId: 'r1', unknown: true, setTimerIntervalMs: 60000,
+      strongmanCompetition: null, strongmanCompetitionHistory: [] });
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     database.close();
   });

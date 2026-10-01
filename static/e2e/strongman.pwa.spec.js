@@ -91,7 +91,7 @@ test('rep events retain their goal and rank matching loads and time windows', as
     await set.getByLabel('Time window (s)', { exact: true }).fill(String(seconds));
   }
   await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
-  const record = competition(page).locator('.strongman-event-results > div').filter({ has: page.locator('dt', { hasText: 'This plan · most reps' }) });
+  const record = competition(page).locator('.strongman-event-results > div').filter({ has: page.locator('dt', { hasText: 'This competition · most reps' }) });
   await expect(record).toContainText('200 lb · 10 reps · 60 sec');
   await page.reload();
   await openStrongmanDay(page);
@@ -226,8 +226,9 @@ test('strongman training supports unknown medleys, backfill, actual sets and rec
   await page.getByRole('dialog').getByLabel('Routine name').fill('Next competition prep');
   await page.getByRole('button', { name: 'Copy routine', exact: true }).click();
   const nextPlan = page.locator('.plan-card').filter({ hasText: 'Next competition prep' });
-  await expect(nextPlan).toContainText('580 lb · 50 ft');
-  await expect(nextPlan).toContainText('No results yet');
+  await expect(nextPlan).toBeVisible();
+  await expect(competition(page)).toContainText('580 lb · 50 ft');
+  await expect(competition(page)).toHaveCount(1);
   await page.getByRole('button', { name: 'Today', exact: true }).click();
   await openStrongmanDay(page);
   await expect(page.locator('.strongman-training-entry')).toHaveCount(0);

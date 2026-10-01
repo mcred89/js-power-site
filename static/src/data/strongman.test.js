@@ -20,6 +20,19 @@ const log = (overrides = {}) => createStrongmanLogEntry({ movement: 'Zercher yok
   sets: [{ weight: 580, distance: 50 }], ...overrides });
 
 describe('strongman tracking data', () => {
+  it('keeps competition preparation records across plans separate from a later meet', () => {
+    const routines = [
+      { id: 'first-plan', profileId: 'athlete', strongmanLog: [log({ competitionId: 'meet-one', sets: [{ weight: 580, distance: 50 }] })] },
+      { id: 'second-plan', profileId: 'athlete', strongmanLog: [log({ competitionId: 'meet-one', sets: [{ weight: 590, distance: 50 }] })] },
+      { id: 'later-plan', profileId: 'athlete', strongmanLog: [log({ competitionId: 'meet-two', sets: [{ weight: 500, distance: 50 }] })] },
+    ];
+    const results = strongmanResults(routines);
+    expect(summarizeStrongmanResults(results, { competitionId: 'meet-one' }).best.weight).toBe(590);
+    expect(summarizeStrongmanResults(results, { competitionId: 'meet-two' }).best.weight).toBe(500);
+    expect(summarizeStrongmanResults(results).best.weight).toBe(590);
+    expect(routines[0].strongmanLog[0].competitionId).toBe('meet-one');
+  });
+
   it('keeps unknown competition details blank and accepts an unannounced medley', () => {
     const competition = normalizeStrongmanCompetition({ name: 'Next meet', date: '', events: [
       { name: 'Carry medley', type: 'medley', components: [{ name: '' }, { name: '' }, { name: '' }] },

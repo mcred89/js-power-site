@@ -131,7 +131,8 @@ it('upgrades v13 backups purely and round-trips persisted timer state and unknow
     ...original,
     version: BACKUP_VERSION,
     dataSchemaVersion: DATABASE_VERSION,
-    profiles: original.profiles.map(addSetTimerPreference),
+    profiles: original.profiles.map(profile => ({ ...addSetTimerPreference(profile),
+      strongmanCompetition: null, strongmanCompetitionHistory: [] })),
     routines: [addStrongmanTracking(addLiftProgressionModes(addSetTimers(addTabataTimers(routine)))), unknown],
   });
   expect(migrated.archives).toBe(original.archives);
@@ -183,7 +184,8 @@ it('upgrades a deployed v13 IndexedDB while retaining mixed history and unrelate
   });
   expect(await read('routines', 'r1')).toEqual(addStrongmanTracking(addLiftProgressionModes(addSetTimers(addTabataTimers(routine)))));
   expect(await read('routines', 'mixed')).toEqual(addStrongmanTracking(addLiftProgressionModes(addSetTimers(mixed))));
-  expect(await read('profiles', 'p1')).toEqual(addSetTimerPreference(profile));
+  expect(await read('profiles', 'p1')).toEqual({ ...addSetTimerPreference(profile),
+    strongmanCompetition: null, strongmanCompetitionHistory: [] });
   expect(await read('templates', 't1')).toEqual(addStrongmanTracking(addLiftProgressionModes(template)));
   expect(await read('archives', archive.id)).toEqual(archive);
   expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });

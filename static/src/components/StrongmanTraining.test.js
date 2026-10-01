@@ -43,6 +43,37 @@ afterEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = false;
 });
 
+it('tags free-form training to the shared competition and preserves the identity on later edits', async () => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  const active = { ...competition, id: 'current-meet' };
+  act(() => root.render(<StrongmanResultEditor competition={active} onSave={onSave} onCancel={() => {}} />));
+  change('Exercise', 'custom');
+  change('Movement', 'Axle press');
+  change('Weight (lb)', '200');
+  change('Reps', '3');
+  await submit();
+  const saved = onSave.mock.calls[0][0];
+  expect(saved.competitionId).toBe('current-meet');
+  act(() => root.render(<StrongmanResultEditor key="edit" entry={saved} competition={{ ...active, id: 'later-meet' }} onSave={onSave} onCancel={() => {}} />));
+  change('Reps', '4');
+  await submit();
+  expect(onSave.mock.calls[1][0].competitionId).toBe('current-meet');
+});
+
+it('lets past training choose a completed competition without attributing it to the active meet', async () => {
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  const previous = { ...competition, id: 'old-meet', name: 'Previous meet' };
+  const active = { ...competition, id: 'current-meet' };
+  act(() => root.render(<StrongmanResultEditor competition={active} competitionOptions={[active, previous]} onSave={onSave} onCancel={() => {}} />));
+  change('Competition for this result', 'old-meet');
+  change('Exercise', 'event:yoke');
+  change('Weight (lb)', '500');
+  change('Distance (ft)', '50');
+  await submit();
+  expect(onSave.mock.calls[0][0].competitionId).toBe('old-meet');
+  expect(onSave.mock.calls[0][0].eventId).toBe('yoke');
+});
+
 it('starts without prescriptions and saves an actual one-set carry linked to the day', async () => {
   const onSaveLog = jest.fn().mockResolvedValue(undefined);
   const onEditingChange = jest.fn();

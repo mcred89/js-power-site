@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { importPlanSummary } from '../data/importBackup';
 
 export const TrackerNotices = ({ message, updateRegistration }) => {
@@ -42,6 +42,35 @@ export const RoutineTransferCreator = ({ routines, busy, onCancel, onCreate }) =
 
 export const RoutineDestination = ({ transfer, profiles, onCancel, onConfirm }) => { const [destination, setDestination] = useState(profiles[0]?.id || 'new'); const [name, setName] = useState(transfer.profileName || 'Imported profile'); return <div className="modal-backdrop"><form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="routine-destination-title" onSubmit={event => { event.preventDefault(); onConfirm(destination, name.trim()); }}><p className="eyebrow">Routine received</p><h2 id="routine-destination-title">Where should {transfer.routine.name} go?</h2><label className="form-field"><span className="field-label">Profile</span><select className="number-input" value={destination} onChange={event => setDestination(event.target.value)}>{profiles.map(item => <option value={item.id} key={item.id}>Add to {item.name}</option>)}<option value="new">Create a new profile</option></select></label>{destination === 'new' && <label className="form-field"><span className="field-label">New profile name</span><input className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label>}<div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit">Preview import</button></div></form></div>; };
 
-export const RoutineCopyDialog = ({ title, eyebrow, defaultName, profiles, selectedProfileId, confirmLabel, onCancel, onConfirm }) => { const [destination, setDestination] = useState(selectedProfileId || profiles[0]?.id || ''); const [name, setName] = useState(defaultName); const trimmedName = name.trim(); return <div className="modal-backdrop"><form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="copy-routine-title" onSubmit={event => { event.preventDefault(); if (destination && trimmedName) onConfirm(destination, trimmedName); }}><p className="eyebrow">{eyebrow}</p><h2 id="copy-routine-title">{title}</h2><label className="form-field"><span className="field-label">Routine name</span><input aria-label="Routine name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label><label className="form-field"><span className="field-label">Profile</span><select aria-label="Destination profile" className="number-input" value={destination} onChange={event => setDestination(event.target.value)} required>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit" disabled={!destination || !trimmedName}>{confirmLabel}</button></div></form></div>; };
+export const RoutineCopyDialog = ({ title, eyebrow, defaultName, profiles, selectedProfileId, confirmLabel, onCancel, onConfirm }) => {
+  const [destination, setDestination] = useState(selectedProfileId || profiles[0]?.id || '');
+  const [name, setName] = useState(defaultName);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const savingRef = useRef(false);
+  const trimmedName = name.trim();
+  const submit = async event => {
+    event.preventDefault();
+    if (savingRef.current || !destination || !trimmedName) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      await onConfirm(destination, trimmedName);
+    } catch (failure) {
+      setError(failure.message || 'Could not copy this routine. Please try again.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+  return <div className="modal-backdrop"><form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="copy-routine-title" onSubmit={submit}>
+    <p className="eyebrow">{eyebrow}</p><h2 id="copy-routine-title">{title}</h2>
+    <label className="form-field"><span className="field-label">Routine name</span><input aria-label="Routine name" className="number-input" value={name} disabled={saving} onChange={event => setName(event.target.value)} required autoFocus /></label>
+    <label className="form-field"><span className="field-label">Profile</span><select aria-label="Destination profile" className="number-input" value={destination} disabled={saving} onChange={event => setDestination(event.target.value)} required>{profiles.map(item => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <div className="button-row modal-actions"><button className="secondary-button" type="button" disabled={saving} onClick={onCancel}>Cancel</button><button className="primary-button" type="submit" disabled={saving || !destination || !trimmedName}>{saving ? 'Copying…' : confirmLabel}</button></div>
+  </form></div>;
+};
 
 export const SaveTemplateDialog = ({ routine, onCancel, onConfirm }) => { const [name, setName] = useState(routine.name); const trimmedName = name.trim(); return <div className="modal-backdrop"><form className="confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="save-template-title" onSubmit={event => { event.preventDefault(); if (trimmedName) onConfirm(trimmedName); }}><p className="eyebrow">Reusable template</p><h2 id="save-template-title">Save routine setup</h2><p>Templates keep the generator setup, not workout progress or exercise-level edits.</p><label className="form-field"><span className="field-label">Template name</span><input aria-label="Template name" className="number-input" value={name} onChange={event => setName(event.target.value)} required autoFocus /></label><div className="button-row modal-actions"><button className="secondary-button" type="button" onClick={onCancel}>Cancel</button><button className="primary-button" type="submit" disabled={!trimmedName}>Save template</button></div></form></div>; };

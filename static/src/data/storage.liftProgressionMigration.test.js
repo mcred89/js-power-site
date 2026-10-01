@@ -89,6 +89,7 @@ describe('per-lift progression compatibility', () => {
 
     expect(migrated).toEqual({
       ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
+      profiles: original.profiles.map(profile => ({ ...profile, strongmanCompetition: null, strongmanCompetitionHistory: [] })),
       routines: [addStrongmanTracking(addLiftProgressionModes(routine)), addStrongmanTracking(configured), unknown],
       templates: [addStrongmanTracking(addLiftProgressionModes(template))],
     });
@@ -97,7 +98,7 @@ describe('per-lift progression compatibility', () => {
     expect(migrated.routines[2]).toBe(unknown);
     expect(migrated.archives).toBe(original.archives);
     expect(JSON.stringify(original)).toBe(before);
-    expect(backupMigrations[19](backupMigrations[18](backupMigrations[17](backupMigrations[16](original))))).toEqual(migrated);
+    expect([16, 17, 18, 19, 20].reduce((backup, version) => backupMigrations[version](backup), original)).toEqual(migrated);
     const restored = parseBackup(exportBackup(migrated.profiles, migrated.routines, migrated.templates, migrated.archives));
     expect(restored.routines).toEqual(migrated.routines);
     expect(restored.templates).toEqual(migrated.templates);
@@ -147,7 +148,7 @@ describe('per-lift progression compatibility', () => {
     expect(await read('routines', configured.id)).toEqual(addStrongmanTracking(configured));
     expect(await read('routines', unknown.id)).toEqual(unknown);
     expect(await read('templates', template.id)).toEqual(addStrongmanTracking(addLiftProgressionModes(template)));
-    expect(await read('profiles', profile.id)).toEqual(profile);
+    expect(await read('profiles', profile.id)).toEqual({ ...profile, strongmanCompetition: null, strongmanCompetitionHistory: [] });
     expect(await read('archives', archive.id)).toEqual(archive);
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     database.close();

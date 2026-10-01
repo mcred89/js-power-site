@@ -61,6 +61,21 @@ it('shows active and completed plan states with delete actions', () => {
   act(() => root.unmount());
 });
 
+it('shows one shared competition above all plans and sends edits through the profile action', async () => {
+  global.IS_REACT_ACT_ENVIRONMENT = true;
+  const div = document.createElement('div');
+  const root = createRoot(div);
+  const routines = ['first', 'second'].map(id => ({ id, name: id, inputs: { strongmanCompetition: { name: 'Old snapshot', events: [] } }, workouts: [] }));
+  const localActions = { ...actions, saveCompetition: jest.fn().mockResolvedValue(undefined) };
+  act(() => root.render(<PlansScreen profile={{ name: 'Alex', strongmanCompetition: { id: 'shared', name: 'Shared meet', events: [] } }} routines={routines} templates={[]} actions={localActions} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} />));
+  expect(div.querySelectorAll('[aria-label="Next competition"]')).toHaveLength(1);
+  expect(div.textContent).not.toContain('Old snapshot');
+  act(() => [...div.querySelectorAll('button')].find(button => button.textContent === 'Edit competition').click());
+  await act(async () => div.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  expect(localActions.saveCompetition).toHaveBeenCalledWith(expect.objectContaining({ id: 'shared', name: 'Shared meet' }));
+  act(() => root.unmount());
+});
+
 it('puts the current plan first and opens an update for the chosen plan without changing the active selection', async () => {
   global.IS_REACT_ACT_ENVIRONMENT = true;
   const div = document.createElement('div');
@@ -102,7 +117,7 @@ it('keeps a competition draft when plan-update navigation is cancelled and disca
   const localActions = { ...actions, saveCompetition: jest.fn(), update: jest.fn() };
   const click = text => [...div.querySelectorAll('button')].find(button => button.textContent === text).click();
   try {
-    act(() => root.render(<PlansScreen profile={{ name: 'Alex' }} routines={[routine]}
+    act(() => root.render(<PlansScreen profile={{ name: 'Alex', strongmanCompetition: routine.inputs.strongmanCompetition }} routines={[routine]}
       selectedId="current" templates={[]} actions={localActions}
       RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} />));
     act(() => click('Edit competition'));

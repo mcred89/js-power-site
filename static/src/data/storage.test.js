@@ -32,7 +32,8 @@ describe('portable backups', () => {
       templates: [],
       archives: [],
       routines: [{ ...oldBackup.routines[0], kind: 'strength' }],
-      profiles: [{ id: 'p1', name: 'Alex', activeRoutineId: 'r1', activeWorkoutRoutineId: null, setTimerIntervalMs: 60000 }],
+      profiles: [{ id: 'p1', name: 'Alex', activeRoutineId: 'r1', activeWorkoutRoutineId: null, setTimerIntervalMs: 60000,
+        strongmanCompetition: null, strongmanCompetitionHistory: [] }],
     });
     expect(oldBackup.version).toBe(1);
   });

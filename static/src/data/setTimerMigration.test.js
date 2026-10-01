@@ -41,8 +41,8 @@ describe('set timer compatibility', () => {
     const migrated = migrateBackup(original);
     expect(migrated).toMatchObject({ version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION, unknown: { preserved: true } });
     expect(migrated.profiles).toEqual([
-      { id: 'default', unknown: true, setTimerIntervalMs: 60000 },
-      { id: 'chosen', setTimerIntervalMs: 90000 },
+      { id: 'default', unknown: true, setTimerIntervalMs: 60000, strongmanCompetition: null, strongmanCompetitionHistory: [] },
+      { id: 'chosen', setTimerIntervalMs: 90000, strongmanCompetition: null, strongmanCompetitionHistory: [] },
     ]);
     expect(migrated.routines[0].workouts[0].session.setTimer).toBeNull();
     expect(migrated.routines[1]).toBe(original.routines[1]);
@@ -50,6 +50,6 @@ describe('set timer compatibility', () => {
     expect(migrated.templates).toEqual(original.templates);
     expect(migrated.archives).toBe(original.archives);
     expect(JSON.stringify(original)).toBe(before);
-    expect(backupMigrations[19](backupMigrations[18](backupMigrations[17](backupMigrations[16](backupMigrations[15](original)))))).toEqual(migrated);
+    expect([15, 16, 17, 18, 19, 20].reduce((backup, version) => backupMigrations[version](backup), original)).toEqual(migrated);
   });
 });

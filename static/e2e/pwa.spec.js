@@ -142,7 +142,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   const backup = JSON.parse(Buffer.concat(chunks).toString());
-  expect(backup).toMatchObject({ version: 19, dataSchemaVersion: 19 });
+  expect(backup).toMatchObject({ version: 20, dataSchemaVersion: 20 });
   expect(backup.routines).toHaveLength(1);
   expect(backup.routines[0].inputs).toEqual({
     ...seeded.strength.inputs,
@@ -167,6 +167,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
     ...seeded.profile, activeRoutineId: seeded.strength.id, activeWorkoutRoutineId: null,
     activeStrongmanRoutineId: undefined, scheduledStrengthRoutineId: undefined,
     setTimerIntervalMs: 60000,
+    strongmanCompetition: null, strongmanCompetitionHistory: [],
   });
 
   await page.getByRole('button', { name: 'Today', exact: true }).click();
@@ -188,7 +189,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
     database.close();
     return result;
   });
-  expect(persisted).toEqual({ version: 19, archives: backup.archives });
+  expect(persisted).toEqual({ version: 20, archives: backup.archives });
 });
 
 const readWorkoutSession = async page => page.evaluate(async () => {
@@ -618,6 +619,7 @@ test('PWA coalesces typed drafts and folds an immediate action into one durable 
   await page.getByRole('button', { name: 'Open workout' }).click();
   await page.getByRole('button', { name: 'Start workout' }).click();
   const weight = page.getByRole('textbox', { name: 'Weight (lb)' });
+  await expect(weight).toBeVisible();
   await page.evaluate(() => { window.__routineWrites = 0; });
   await weight.fill('1234567890');
   await page.waitForTimeout(100);

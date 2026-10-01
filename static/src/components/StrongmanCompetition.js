@@ -146,9 +146,10 @@ export const StrongmanCompetitionEditor = ({ value, onChange, knownMovements = [
   );
 };
 
-const ResultSummary = ({ results, routineId, movement, scope = 'movement', target }) => {
+const ResultSummary = ({ results, routineId, competitionId, movement, scope = 'movement', target }) => {
   const options = { movement, scope, eventSnapshot: target };
-  const current = summarizeStrongmanResults(results, { ...options, routineId });
+  const current = summarizeStrongmanResults(results, { ...options, ...(competitionId ? { competitionId } : { routineId }) });
+  const periodLabel = competitionId ? 'This competition' : 'This plan';
   const lifetime = summarizeStrongmanResults(results, options);
   const goal = getStrongmanRecordGoal(target);
   const recordLabel = scope === 'medley' ? 'fastest full run' : `${goal.recordLabel.toLowerCase()} at this setup`;
@@ -158,8 +159,8 @@ const ResultSummary = ({ results, routineId, movement, scope = 'movement', targe
   return (
     <>
       <dl className="strongman-event-results">
-        <div><dt>This plan · {recordLabel}</dt><dd>{formatStrongmanResult(currentRecord)}</dd></div>
-        {showHeaviest && <div><dt>This plan · heaviest result (any setup)</dt><dd>{formatStrongmanResult(Number(current.best?.weight) > 0 ? current.best : null)}</dd></div>}
+        <div><dt>{periodLabel} · {recordLabel}</dt><dd>{formatStrongmanResult(currentRecord)}</dd></div>
+        {showHeaviest && <div><dt>{periodLabel} · heaviest result (any setup)</dt><dd>{formatStrongmanResult(Number(current.best?.weight) > 0 ? current.best : null)}</dd></div>}
         <div><dt>Last trained</dt><dd>{lifetime.latest ? <>{relativeDate(lifetime.latest.date)}<small>{formatStrongmanDate(lifetime.latest.date)}{lifetime.latest.successful === false ? ' · Attempt' : ''}</small></> : 'Not logged yet'}</dd></div>
       </dl>
       <details className="strongman-record-details"><summary>Lifetime and event records</summary><dl className="strongman-event-results">
@@ -170,35 +171,38 @@ const ResultSummary = ({ results, routineId, movement, scope = 'movement', targe
   );
 };
 
-const ComponentSummary = ({ component, index, results, routineId }) => {
+const ComponentSummary = ({ component, index, results, routineId, competitionId }) => {
   const options = { movement: component.name, scope: 'movement', eventSnapshot: component };
-  const current = component.name ? summarizeStrongmanResults(results, { ...options, routineId }) : null;
+  const current = component.name ? summarizeStrongmanResults(results, { ...options, ...(competitionId ? { competitionId } : { routineId }) }) : null;
   const lifetime = component.name ? summarizeStrongmanResults(results, options) : null;
   const primary = current && strongmanPrimaryRecord(current, component);
   const heaviest = Number(current?.best?.weight) > 0 ? current.best : null;
   return <summary>
     <span className="strongman-component-title"><strong>{component.name || `Implement ${index + 1} · To be announced`}</strong><span>{formatStrongmanTarget(component)}</span></span>
     {component.scoringRules && <small>Scoring: {component.scoringRules}</small>}
-    {component.name && <small>This plan · {primary || !heaviest ? getStrongmanRecordGoal(component).recordLabel.toLowerCase() : 'heaviest training'}: {formatStrongmanResult(primary || heaviest)}{lifetime.latest ? ` · Last ${relativeDate(lifetime.latest.date)}` : ''}</small>}
+    {component.name && <small>{competitionId ? 'This competition' : 'This plan'} · {primary || !heaviest ? getStrongmanRecordGoal(component).recordLabel.toLowerCase() : 'heaviest training'}: {formatStrongmanResult(primary || heaviest)}{lifetime.latest ? ` · Last ${relativeDate(lifetime.latest.date)}` : ''}</small>}
     {primary && heaviest && primary.id !== heaviest.id && <small>Heaviest training: {formatStrongmanResult(heaviest)}</small>}
   </summary>;
 };
 
-export const StrongmanCompetitionCard = ({ routine, routines = [], onSaveCompetition, onEditingChange }) => {
-  const competition = routine.inputs?.strongmanCompetition || { name: '', date: '', events: [] };
+export const StrongmanCompetitionCard = ({ routine, routines = [], competition: suppliedCompetition, profileId, onSaveCompetition, onEndCompetition, onEditingChange }) => {
+  const savedCompetition = suppliedCompetition === undefined ? routine?.inputs?.strongmanCompetition : suppliedCompetition;
+  const competition = savedCompetition || { name: '', date: '', events: [] };
   const [draft, setDraft] = useState(null);
+  const [ending, setEnding] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const editing = draft !== null;
+  const editing = draft !== null || ending !== null;
   useUnsavedChanges(editing, saving);
   useEffect(() => {
     onEditingChange?.(editing);
     return () => onEditingChange?.(false);
   }, [editing, onEditingChange]);
   const allRoutines = useMemo(() => {
-    const owned = routine.profileId ? routines.filter(item => item.profileId === routine.profileId) : routines;
-    return owned.some(item => item.id === routine.id) ? owned : [...owned, routine];
-  }, [routines, routine]);
+    const owner = profileId || routine?.profileId;
+    const owned = owner ? routines.filter(item => item.profileId === owner) : routines;
+    return !routine || owned.some(item => item.id === routine.id) ? owned : [...owned, routine];
+  }, [routines, routine, profileId]);
   const results = useMemo(() => strongmanResults(allRoutines), [allRoutines]);
   const knownMovements = useMemo(() => strongmanKnownMovements(allRoutines), [allRoutines]);
   const save = async event => {
@@ -213,10 +217,22 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], onSaveCompeti
       setError(failure.message || 'Could not save the competition. Please try again.');
     } finally { setSaving(false); }
   };
+  const endCompetition = async () => {
+    if (saving) return;
+    setSaving(true);
+    setError('');
+    try {
+      await onEndCompetition(ending);
+      setEnding(null);
+    } catch (failure) {
+      setError(failure.message || 'Could not update the competition. Please try again.');
+    } finally { setSaving(false); }
+  };
 
   return (
     <section className="strongman-competition-card" aria-label="Next competition">
-      <div className="strongman-card-heading"><div><p className="eyebrow">Next competition</p><h2>{competition.name || 'Your events'}</h2>{competition.date && <p className="strongman-help">{formatStrongmanDate(competition.date)}</p>}</div>{onSaveCompetition && !draft && <button className="text-button" type="button" onClick={() => { setDraft({ ...competition, events: [...(competition.events || [])] }); setError(''); }}>Edit competition</button>}</div>
+      <div className="strongman-card-heading"><div><p className="eyebrow">Next competition</p><h2>{competition.name || 'Your events'}</h2>{competition.date && <p className="strongman-help">{formatStrongmanDate(competition.date)}</p>}</div>{onSaveCompetition && !editing && <button className="text-button" type="button" onClick={() => { setDraft({ ...competition, events: [...(competition.events || [])] }); setError(''); }}>{savedCompetition ? 'Edit competition' : 'Add competition'}</button>}</div>
+      {savedCompetition && suppliedCompetition !== undefined && <p className="strongman-help">This competition carries across your plans until you complete or remove it.</p>}
       {draft ? (
         <form onSubmit={save}>
           <fieldset className="strongman-saving-fieldset" disabled={saving}>
@@ -234,23 +250,28 @@ export const StrongmanCompetitionCard = ({ routine, routines = [], onSaveCompeti
                 <p className="strongman-target">Full medley{present(event.seconds) ? ` · ${numberLabel(event.seconds)} sec limit` : ' · Time limit to be announced'}</p>
                 {event.scoringRules && <p className="strongman-help">Scoring: {event.scoringRules}</p>}
                 {!isCompleteStrongmanSetup(event) && <p className="strongman-help">Full-run comparisons become available when each implement and its load and task are known. Enter its distance, reps, hold time, or height; a points target alone does not define the physical task. You can log individual training now.</p>}
-                <ResultSummary results={results} routineId={routine.id} movement={event.name} scope="medley" target={event} />
+                <ResultSummary results={results} routineId={routine?.id} competitionId={competition.id} movement={event.name} scope="medley" target={event} />
                 {(event.components || []).length ? <div className="strongman-medley-components">{event.components.map((component, index) => (
                   <details className="strongman-component" key={component.id}>
-                    <ComponentSummary component={component} index={index} results={results} routineId={routine.id} />
-                    {component.name && <ResultSummary results={results} routineId={routine.id} movement={component.name} target={component} />}
+                    <ComponentSummary component={component} index={index} results={results} routineId={routine?.id} competitionId={competition.id} />
+                    {component.name && <ResultSummary results={results} routineId={routine?.id} competitionId={competition.id} movement={component.name} target={component} />}
                   </details>
                 ))}</div> : <p className="strongman-help">Implements to be announced. Add them whenever you know more.</p>}
               </> : <>
                 <p className="strongman-target">Competition: {formatStrongmanTarget(event)} · {getStrongmanRecordGoal(event).label}</p>
                 {event.scoringRules && <p className="strongman-help">Scoring: {event.scoringRules}</p>}
-                <ResultSummary results={results} routineId={routine.id} movement={event.name} target={event} />
+                <ResultSummary results={results} routineId={routine?.id} competitionId={competition.id} movement={event.name} target={event} />
               </>}
             </article>
           ))}
           <p className="strongman-help">Event records compare matching setups and scoring rules. Time windows stay separate from elapsed run times and holds. Heaviest results across setups are also shown with their actual reps and distance.</p>
         </div>
       ) : <p className="strongman-help">Add upcoming events to keep their weights and your training records in view. You can start with just an event name.</p>}
+      {savedCompetition && onEndCompetition && !draft && (ending ? <div className="strongman-delete-confirm" role="group" aria-label="Confirm competition change">
+        <p>{ending === 'completed' ? 'Mark this competition complete?' : 'Remove this competition from your plans?'} It will stop carrying into your plans. Your recorded training and records will stay saved.</p>
+        <div className="strongman-actions"><button className="secondary-button" type="button" disabled={saving} onClick={endCompetition}>{saving ? 'Saving…' : ending === 'completed' ? 'Confirm completion' : 'Confirm removal'}</button><button className="text-button" type="button" disabled={saving} onClick={() => { setEnding(null); setError(''); }}>Cancel</button></div>
+      </div> : <div className="strongman-actions"><button className="text-button" type="button" onClick={() => { setEnding('completed'); setError(''); }}>Mark competition complete</button><button className="text-button danger-text" type="button" onClick={() => { setEnding('removed'); setError(''); }}>Remove competition</button></div>)}
+      {!draft && error && <p className="form-error" role="alert">{error}</p>}
     </section>
   );
 };

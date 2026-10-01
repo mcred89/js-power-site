@@ -3,9 +3,14 @@
 Dedicated Strongman days use an open training log. Competition targets are
 reference information and never generate prescribed weights, sets, or reps.
 
-- Add competition details when building a routine, from its card in Plans, or
+- Add competition details when building a routine, from the shared card in Plans, or
   from any Strongman day. Leave unannounced details blank. A medley contains
   independently editable implements plus its own full-event results.
+- Each profile has one active competition. It carries across new plans, copies,
+  and templates until you explicitly mark it complete or remove it. Finishing
+  or deleting a plan, disabling Strongman days, or passing the competition date
+  does not end it. Editing targets updates the shared reference across plans.
+  Copies into another profile use that person's active competition.
 - Each saved medley's Add run action starts a separate result with its own
   actual setup. Its implements can be corrected later without changing other
   results. Multiple runs entered together share the setup shown in that editor.
@@ -13,7 +18,8 @@ reference information and never generate prescribed weights, sets, or reps.
   Record a pickup with reps, a carry with distance, and a run or hold with time.
   Unsuccessful attempts stay in history without becoming successful records.
 - Log past training with its original date to backfill a plan already underway.
-  A backfill belongs to that plan without fabricating a completed workout.
+  Choose its original competition when needed, including when one plan spans
+  multiple meets. A backfill belongs to that plan without fabricating a completed workout.
 - Deleting an unfinished Strongman day keeps saved actual results as dated
   history in Progress. Leaving an open editor requires confirming discard;
   save each exercise to retain it.
@@ -21,7 +27,10 @@ reference information and never generate prescribed weights, sets, or reps.
   Reusing the same movement name, ignoring capitalization and extra spaces,
   brings those records forward. Use distinct names for different variations.
 
-“This plan” means the entire routine, including its microcycles. Heaviest
+“This competition” includes preparation logged across plans for that meet.
+Completing or removing a competition retains training results and its saved
+details. A new competition starts a separate preparation record while matching
+lifetime records remain available. Heaviest
 results retain their actual distance/reps/time; weight takes priority, so this
 does not imply that a shorter, heavier carry is better at the competition task.
 Timed medley records compare saved actual courses, including implement order,
@@ -71,3 +80,13 @@ entire plan deletes its training history, including its Strongman records.
 Version 18 added the rep goal. Version 19 adds max-weight, distance, height,
 and points goals with optional height, points, and scoring-rule fields. Its
 migrations preserve existing records exactly; no historical results are inferred.
+
+Version 20 adds profile-level active competition and competition history, plus
+competition IDs on training entries. It adopts the active plan's existing meet
+when available, otherwise the most recently updated unarchived plan's meet.
+Only identical legacy configurations within one profile share an identity;
+other plan snapshots remain intact. Explicitly ended competitions never revive
+from old plans or templates. Profile writes use fresh records and conflict checks
+so another window's completion or removal cannot be overwritten by plan selection
+or routine workout updates. Backup imports retain distinct competition details
+while keeping the destination profile's current active or inactive choice.

@@ -1,9 +1,48 @@
 import { serializedRecordsEqual } from './recordComparison';
 import { isSupportedRoutine, retireStrongmanData } from './retiredStrongman';
 import { validateStrongmanRecord } from './strongman';
+import { validateProfileCompetitions } from './strongmanCompetitions';
 export { importPlanBatch, activateRoutineImport } from './importPersistence';
 
 const mergeRecord = (local, imported) => ({ ...imported, ...local });
+
+// Import never changes the meet a local profile is currently preparing for.
+// Keep other incoming configurations as inactive snapshots, including different
+// versions of a meet with the same ID, instead of silently dropping them.
+const mergeProfile = (local, imported) => {
+  const merged = mergeRecord(local, imported);
+  const localHistory = local.strongmanCompetitionHistory || [];
+  const importedHistory = imported.strongmanCompetitionHistory || [];
+  const active = merged.strongmanCompetition;
+  const incomingActive = imported.strongmanCompetition;
+  const incoming = [...importedHistory, ...(incomingActive && !serializedRecordsEqual(incomingActive, active)
+    ? [{ ...incomingActive, status: 'saved' }] : [])];
+  if (!Object.prototype.hasOwnProperty.call(local, 'strongmanCompetitionHistory') &&
+      !Object.prototype.hasOwnProperty.call(imported, 'strongmanCompetitionHistory') && !incoming.length) return merged;
+  const history = [...localHistory];
+  const reservedIds = new Set([active?.id, ...history.map(item => item.id), ...incoming.map(item => item.id)]);
+  const equivalent = (existing, candidate) => {
+    if (serializedRecordsEqual(existing, candidate)) return true;
+    if (existing.originalCompetitionId !== candidate.id) return false;
+    const restored = { ...existing, id: candidate.id };
+    if (!Object.prototype.hasOwnProperty.call(candidate, 'originalCompetitionId')) delete restored.originalCompetitionId;
+    return serializedRecordsEqual(restored, candidate);
+  };
+  incoming.forEach(candidate => {
+    if (history.some(existing => equivalent(existing, candidate))) return;
+    if (active?.id !== candidate.id && !history.some(existing => existing.id === candidate.id)) {
+      history.push(candidate);
+      return;
+    }
+    const baseId = `${candidate.id}:imported-copy`;
+    let id = baseId;
+    let suffix = 2;
+    while (reservedIds.has(id)) { id = `${baseId}:${suffix}`; suffix += 1; }
+    reservedIds.add(id);
+    history.push({ ...candidate, id, originalCompetitionId: candidate.id });
+  });
+  return { ...merged, strongmanCompetitionHistory: history };
+};
 
 // Preserve both versions of a conflicting training entry. Imported copies have
 // stable IDs, so importing the same backup again cannot duplicate history.
@@ -82,7 +121,8 @@ const planStore = (importedRecords, localRecords, type) => {
       action: 'merge',
       imported,
       local,
-      result: type === 'routine' ? mergeRoutine(local, imported) : mergeRecord(local, imported),
+      result: type === 'routine' ? mergeRoutine(local, imported)
+        : type === 'profile' ? mergeProfile(local, imported) : mergeRecord(local, imported),
     };
   });
 };
@@ -106,6 +146,7 @@ const reconcileProfile = (profile, routines) => {
 export const createImportPlan = (backup, profiles, routines, templates = [], archives = []) => {
   const incoming = [...backup.routines, ...(backup.templates || [])].some(record => !isSupportedRoutine(record))
     ? retireStrongmanData(backup, { preferScheduled: true }) : backup;
+  incoming.profiles.forEach(validateProfileCompetitions);
   [...incoming.routines, ...(incoming.templates || [])].forEach(validateStrongmanRecord);
   const plan = {
     profiles: planStore(incoming.profiles, profiles, 'profile'),
@@ -121,7 +162,7 @@ export const createImportPlan = (backup, profiles, routines, templates = [], arc
       const copy = copiedRoutines.get(imported[key]);
       if (copy?.profileId === imported.id) imported[key] = copy.id;
     });
-    return { ...item, result: item.local ? mergeRecord(item.local, imported) : imported };
+    return { ...item, result: item.local ? mergeProfile(item.local, imported) : imported };
   });
 
   // Pointers must describe the committed merge, since a local completed workout

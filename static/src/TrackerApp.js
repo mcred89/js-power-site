@@ -566,7 +566,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const addProfile = async name => {
-    const item = { id: makeId(), name, activeWorkoutRoutineId: null, setTimerIntervalMs: 60000, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const item = { id: makeId(), name, activeWorkoutRoutineId: null, strongmanCompetition: null, strongmanCompetitionHistory: [], setTimerIntervalMs: 60000, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     const shouldMakeDefault = profiles.length === 0;
     // The first profile and its default pointer are one logical record. Never publish either
     // in React unless the shared IndexedDB transaction commits both of them.
@@ -597,12 +597,25 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     return saveRoutine(transform(current));
   };
 
+  const patchProfile = async (profileId, changes, batch, options) => {
+    const { commitProfilePatch } = await import('./data/profilePersistence');
+    const updated = await commitProfilePatch(profileId, changes, batch, options);
+    setProfiles(current => current.map(item => item.id === updated.id ? updated : item));
+    return updated;
+  };
+
   const addRoutine = async (name, inputs) => {
-    const item = createRoutine(profile.id, name, inputs);
-    const updatedProfile = { ...profile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
-    await applyBatch({ puts: { routines: [item], profiles: [updatedProfile] } });
+    const { changeProfileCompetition } = await import('./data/strongmanCompetitions');
+    const draft = inputs.strongmanCompetition;
+    const creatingCompetition = !profile.strongmanCompetition && inputs.includeStrongmanDay &&
+      Boolean(draft?.name?.trim() || draft?.date || draft?.events?.length);
+    const prepared = creatingCompetition ? changeProfileCompetition(profile, draft) : profile;
+    const item = createRoutine(profile.id, name, { ...inputs, strongmanCompetition: prepared.strongmanCompetition || null });
+    await patchProfile(profile.id, {
+      activeRoutineId: item.id, updatedAt: new Date().toISOString(),
+      ...(creatingCompetition ? { strongmanCompetition: prepared.strongmanCompetition } : {}),
+    }, { puts: { routines: [item] } }, { expectedCompetition: profile.strongmanCompetition || null });
     setRoutines(current => [...current, item]);
-    setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedRoutineId(item.id);
     setBuilderTemplate(null);
     setView('today');
@@ -610,10 +623,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   };
 
   const selectRoutine = async item => {
-    const updatedProfile = { ...profile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
-    await save('profiles', updatedProfile);
-    setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
-    setSelectedRoutineId(item.id);
+    try {
+      await patchProfile(profile.id, { activeRoutineId: item.id, updatedAt: new Date().toISOString() });
+      setSelectedRoutineId(item.id);
+    } catch (error) { flash(error.message); }
   };
 
   const renameRoutine = async (item, name) => {
@@ -625,10 +638,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const addCopiedRoutine = async item => {
     const destinationProfile = profiles.find(entry => entry.id === item.profileId);
     if (!destinationProfile) return;
-    const updatedProfile = { ...destinationProfile, activeRoutineId: item.id, updatedAt: new Date().toISOString() };
-    await applyBatch({ puts: { routines: [item], profiles: [updatedProfile] } });
+    item = { ...item, inputs: { ...item.inputs, strongmanCompetition: destinationProfile.strongmanCompetition || null } };
+    await patchProfile(destinationProfile.id, { activeRoutineId: item.id, updatedAt: new Date().toISOString() },
+      { puts: { routines: [item] } }, { expectedCompetition: destinationProfile.strongmanCompetition || null });
     setRoutines(current => [...current, item]);
-    setProfiles(current => current.map(entry => entry.id === updatedProfile.id ? updatedProfile : entry));
     setSelectedProfileId(item.profileId);
     setSelectedRoutineId(item.id);
     setWorkoutId(null);
@@ -691,11 +704,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     }
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
     const updatedRoutine = startWorkoutSession(current, target.id);
-    const updatedProfile = profileWithActiveWorkout(profile, routine.id);
-    await saveRoutine(updatedRoutine, record => applyBatch({
-      puts: { routines: [record], profiles: [updatedProfile] },
-    }), true);
-    setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
+    await saveRoutine(updatedRoutine, record => patchProfile(profile.id,
+      { activeWorkoutRoutineId: routine.id, updatedAt: new Date().toISOString() },
+      { puts: { routines: [record] } }), true);
   };
 
   const adjustWorkoutSet = async (exerciseId, setId, values) => {
@@ -714,7 +725,14 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     return commitStrongmanChange(routinesRef.current.find(item => item.id === routineId), profile.id, action, value, saveRoutine);
   };
 
-  const saveStrongmanCompetition = (routineId, value) => saveStrongmanChanges(routineId, 'competition', value);
+  const saveStrongmanCompetition = async value => {
+    const { changeProfileCompetition } = await import('./data/strongmanCompetitions');
+    await patchProfile(profile.id, latest => {
+      const updated = changeProfileCompetition(latest, value);
+      return { strongmanCompetition: updated.strongmanCompetition,
+        strongmanCompetitionHistory: updated.strongmanCompetitionHistory, updatedAt: updated.updatedAt };
+    }, {}, { expectedCompetition: profile.strongmanCompetition || null });
+  };
 
   const saveStrongmanLog = (routineId, entries) => saveStrongmanChanges(routineId, 'log', entries);
 
@@ -728,12 +746,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
     const updated = updateSessionSetTimer(current, workout.id, timer);
     if (timer && timer.intervalMs !== (profile.setTimerIntervalMs || 60000)) {
-      const updatedProfile = { ...profile, setTimerIntervalMs: timer.intervalMs };
-      await saveRoutine(updated, record => applyBatch({
-        puts: { routines: [record], profiles: [updatedProfile] },
-      }));
-      setProfiles(items => items.map(item => item.id === updatedProfile.id
-        ? { ...item, setTimerIntervalMs: timer.intervalMs } : item));
+      await saveRoutine(updated, record => patchProfile(profile.id,
+        { setTimerIntervalMs: timer.intervalMs }, { puts: { routines: [record] } }));
     } else {
       await saveRoutine(updated);
     }
@@ -790,15 +804,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const finished = finishWorkoutSession(current, workout.id);
     const adaptive = refreshAdaptiveProgression(finished);
     const updated = adaptive.routine;
-    const updatedProfile = profileAfterFinishedRoutine(profile, routine.id);
-    const shouldClear = updatedProfile !== profile;
-    await saveRoutine(updated, record => applyBatch({
-      puts: {
-        routines: [record],
-        ...(shouldClear ? { profiles: [updatedProfile] } : {}),
-      },
-    }), true);
-    if (shouldClear) setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
+    await saveRoutine(updated, record => patchProfile(profile.id, latest => (
+      latest.activeWorkoutRoutineId === routine.id
+        ? { activeWorkoutRoutineId: null, updatedAt: new Date().toISOString() } : {}
+    ), { puts: { routines: [record] } }), true);
     setWorkoutSummary(updated.workouts.find(item => item.id === workout.id));
     if (adaptive.changed) flash('Adaptive maxes updated for future cycles.');
     setFinishPrompt(null);
@@ -815,18 +824,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     }
     const remaining = profileRoutines.filter(entry => entry.id !== item.id);
     const replacement = remaining[0] || null;
-    const profileUpdate = item.id === profile.activeRoutineId
-      ? { ...profile, activeRoutineId: replacement?.id || null, updatedAt: new Date().toISOString() }
-      : null;
-    await applyBatch({
-      deletes: { routines: [item.id] },
-      puts: profileUpdate ? { profiles: [profileUpdate] } : {},
-    });
+    await patchProfile(profile.id, latest => latest.activeRoutineId === item.id
+      ? { activeRoutineId: replacement?.id || null, updatedAt: new Date().toISOString() } : {},
+    { deletes: { routines: [item.id] } });
     routinesRef.current = routinesRef.current.filter(entry => entry.id !== item.id);
     setRoutines(routinesRef.current);
-    if (profileUpdate) {
-      setProfiles(current => current.map(entry => entry.id === profile.id ? profileUpdate : entry));
-    }
     if (item.id === selectedRoutineId) setSelectedRoutineId(replacement?.id || null);
     setPlanToDelete(null);
     flash(`${item.name} deleted.`);
@@ -842,11 +844,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       const { refreshAdaptiveProgression } = await import('./data/routineRecalculation');
       const current = routinesRef.current.find(item => item.id === routine.id) || routine;
       const updatedRoutine = refreshAdaptiveProgression(reopenWorkoutSession(current, target.id)).routine;
-      const updatedProfile = profileWithActiveWorkout(profile, routine.id);
-      await saveRoutine(updatedRoutine, record => applyBatch({
-        puts: { routines: [record], profiles: [updatedProfile] },
-      }), true);
-      setProfiles(items => items.map(item => item.id === updatedProfile.id ? updatedProfile : item));
+      await saveRoutine(updatedRoutine, record => patchProfile(profile.id,
+        { activeWorkoutRoutineId: routine.id, updatedAt: new Date().toISOString() },
+        { puts: { routines: [record] } }), true);
       flash('Workout returned to your queue.');
       return;
     }
@@ -998,7 +998,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     const local = await loadAllData();
     const profileId = destination === 'new' ? makeId() : destination;
     const destinationProfile = destination === 'new'
-      ? { id: profileId, name, activeWorkoutRoutineId: null, createdAt: new Date().toISOString() }
+      ? { id: profileId, name, activeWorkoutRoutineId: null, strongmanCompetition: null, strongmanCompetitionHistory: [], createdAt: new Date().toISOString() }
       : local.profiles.find(item => item.id === profileId);
     const incomingProfiles = destination === 'new' ? [destinationProfile] : [];
     const incomingRoutine = { ...receivedRoutine.routine, profileId };
@@ -1163,7 +1163,10 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
           !profileRoutinesLoaded ? <TrackerScreenFallback label="strongman records" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="strongman day" />}>
             <StrongmanDay key={workout.id} routine={routine} workout={workout} calendarWeek={calendar?.byWorkoutId.get(workout.id)} routines={profileRoutines}
               onBack={() => goBack(() => setWorkoutId(null))}
-              onSaveCompetition={value => saveStrongmanCompetition(routine.id, value)}
+              competition={profile.strongmanCompetition || null}
+              competitionHistory={profile.strongmanCompetitionHistory || []}
+              onSaveCompetition={saveStrongmanCompetition}
+              onEndCompetition={saveStrongmanCompetition}
               onSaveLog={entries => saveStrongmanLog(routine.id, entries)}
               onComplete={completeStrongmanDay}
               onDelete={() => setWorkoutToDelete(workout)}
@@ -1208,7 +1211,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
         ) : view === 'plans' ? (
-          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} actions={{ newRoutine: () => { if (!confirmNavigation()) return; setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, update: updatePlan, saveCompetition: saveStrongmanCompetition, useTemplate: item => { if (!confirmNavigation()) return; setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
+          !profileRoutinesLoaded || !templatesLoaded ? <TrackerScreenFallback label="plans" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="plans" />}><PlansScreen profile={profile} routines={profileRoutines} selectedId={routine?.id} templates={templates} RoutineNameEditor={RoutineNameEditor} PlanSetup={PlanSetup} actions={{ newRoutine: () => { if (!confirmNavigation()) return; setBuilderTemplate(null); setView('builder'); }, select: selectRoutine, rename: renameRoutine, copy: item => setCopyRequest({ type: 'routine', item }), saveTemplate: setTemplateSource, delete: setPlanToDelete, update: updatePlan, saveCompetition: saveStrongmanCompetition, endCompetition: saveStrongmanCompetition, useTemplate: item => { if (!confirmNavigation()) return; setBuilderTemplate(item); setView('builder'); }, renameTemplate, deleteTemplate: setTemplateToDelete }} /></Suspense>
         ) : view === 'history' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="history" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="history" />}>
             <HistoryScreen eyebrow={routine?.name || profile.name} routine={routine} completed={completed} PlanSetup={PlanSetup} WorkoutCard={WorkoutCard} onOpen={showWorkout} />

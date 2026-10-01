@@ -27,7 +27,7 @@ export const ProgressScreen = memo(({ profile, routines, onSaveLog, onScreenRend
     <div role="tabpanel" id={`progress-panel-${section}`} aria-labelledby={`progress-tab-${section}`}>
       {section === 'strength' ? <ProgressDashboard profile={profile} routines={routines} /> : <>
         <p className="eyebrow">{profile.name}</p><h1>Progress</h1>
-        <StrongmanProgress routines={routines} defaultRoutineId={profile.activeRoutineId} onSaveLog={onSaveLog} />
+        <StrongmanProgress routines={routines} competition={profile.strongmanCompetition} competitionHistory={profile.strongmanCompetitionHistory || []} defaultRoutineId={profile.activeRoutineId} onSaveLog={onSaveLog} />
       </>}
     </div>
   </>;

@@ -16,6 +16,8 @@ import {
   strongmanKnownMovements,
 } from './StrongmanCompetition';
 import './Strongman.css';
+import { competitionChoicesForTraining, competitionForPastTraining } from '../data/strongmanCompetitionContext';
+import { confirmNavigation } from '../data/navigationGuard';
 
 const PAGE_SIZE = 20;
 const movementKey = entry => `${entry.scope === 'medley' ? 'medley' : 'movement'}:${normalizeMovementName(entry.movement)}`;
@@ -33,7 +35,7 @@ const RecordMetric = ({ label, result, empty = 'No results yet' }) => (
   <div className="strongman-record-metric"><small>{label}</small><strong>{result ? formatStrongmanResult(result) : empty}</strong>{result && <span>{formatStrongmanDate(result.date)} · {result.routineName}{result.successful === false ? ' · Unsuccessful attempt' : ''}</span>}</div>
 );
 
-export const StrongmanProgress = ({ routines = [], onSaveLog, defaultRoutineId }) => {
+export const StrongmanProgress = ({ routines = [], competition, competitionHistory = [], onSaveLog, defaultRoutineId }) => {
   const results = useMemo(() => strongmanResults(routines), [routines]);
   const knownMovements = useMemo(() => strongmanKnownMovements(routines), [routines]);
   const [selectedMovement, setSelectedMovement] = useState('');
@@ -134,8 +136,10 @@ export const StrongmanProgress = ({ routines = [], onSaveLog, defaultRoutineId }
       <div className="strongman-card-heading"><div><p className="eyebrow">Strongman</p><h2>Event records</h2></div>{onSaveLog && routines.length > 0 && !editor && !removing && <button className="secondary-button" type="button" onClick={() => { setNewRoutineId(routineId === 'all' ? defaultRoutine.id : routineId); setEditor({ entry: null }); setError(''); }}>Log past result</button>}</div>
       <p className="strongman-help">Your implements and full events across every plan. Reuse the same movement name in a new competition to carry these records forward.</p>
       {editor && activeEditorRoutine && <div className="strongman-result-editor-slot">
-        {!editor.entry && <label className="form-field strongman-record-select"><span className="field-label">Plan for this result</span><select className="number-input" aria-label="Plan for past result" disabled={saving} value={activeEditorRoutine.id} onChange={event => setNewRoutineId(event.target.value)}>{routines.map(routine => <option value={routine.id} key={routine.id}>{routine.name}{routine.archived ? ' (archived)' : ''}</option>)}</select></label>}
-        <StrongmanResultEditor key={editor.entry?.id || 'new'} entry={editor.entry} onSave={saveEntry} onCancel={() => setEditor(null)} competition={activeEditorRoutine.inputs?.strongmanCompetition} knownMovements={knownMovements} workoutId={editor.entry?.workoutId || null} />
+        {!editor.entry && <label className="form-field strongman-record-select"><span className="field-label">Plan for this result</span><select className="number-input" aria-label="Plan for past result" disabled={saving} value={activeEditorRoutine.id} onChange={event => {
+          if (event.target.value !== activeEditorRoutine.id && confirmNavigation()) setNewRoutineId(event.target.value);
+        }}>{routines.map(routine => <option value={routine.id} key={routine.id}>{routine.name}{routine.archived ? ' (archived)' : ''}</option>)}</select></label>}
+        <StrongmanResultEditor key={editor.entry?.id || `new-${activeEditorRoutine.id}`} entry={editor.entry} onSave={saveEntry} onCancel={() => setEditor(null)} competition={competitionForPastTraining(activeEditorRoutine, competition, competitionHistory)} competitionOptions={competition === undefined ? undefined : competitionChoicesForTraining(competition, competitionHistory, activeEditorRoutine)} knownMovements={knownMovements} workoutId={editor.entry?.workoutId || null} />
       </div>}
       {movements.length > 0 ? <>
         <div className="strongman-record-filters">

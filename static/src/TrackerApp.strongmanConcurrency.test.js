@@ -2,6 +2,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import TrackerApp from './TrackerApp';
 import { createRoutine } from './data/routines';
+import { serializedRecordsEqual } from './data/recordComparison';
 import { applyBatch, get, getAll, getAllByIndex, save } from './data/storage';
 
 jest.mock('./data/storage', () => ({
@@ -19,6 +20,8 @@ jest.mock('./data/dataWorkerFactory', () => ({ createDataWorker: jest.fn() }));
 let container;
 let root;
 let stored;
+let storedProfile;
+let copiedRoutines;
 let original;
 
 const click = async label => {
@@ -32,12 +35,18 @@ const fill = (label, value) => act(() => {
   input.dispatchEvent(new Event('input', { bubbles: true }));
 });
 const commit = batch => {
-  const condition = batch.conditions.routines[0];
-  expect(condition.key).toBe(stored.id);
-  if (JSON.stringify(condition.expected) !== JSON.stringify(stored)) {
-    throw Object.assign(new Error('Conflict'), { name: 'BatchConflictError' });
-  }
-  stored = batch.puts.routines[0];
+  Object.entries(batch.conditions || {}).forEach(([store, conditions]) => conditions.forEach(condition => {
+    const current = store === 'profiles' ? storedProfile : condition.key === original.id ? stored
+      : copiedRoutines.find(item => item.id === condition.key);
+    if (!serializedRecordsEqual(condition.expected, current)) {
+      throw Object.assign(new Error('Conflict'), { name: 'BatchConflictError' });
+    }
+  }));
+  (batch.puts?.routines || []).forEach(record => {
+    if (record.id === original.id) stored = record;
+    else copiedRoutines = [...copiedRoutines.filter(item => item.id !== record.id), record];
+  });
+  (batch.puts?.profiles || []).forEach(record => { storedProfile = record; });
 };
 
 beforeEach(async () => {
@@ -50,11 +59,18 @@ beforeEach(async () => {
     strongmanCompetition: { name: 'Original competition', date: '', events: [] },
   });
   stored = original;
-  const profile = { id: 'profile', name: 'Alex', activeRoutineId: original.id };
-  getAll.mockImplementation(store => Promise.resolve(store === 'profiles' ? [profile] : []));
-  get.mockImplementation((store, key) => Promise.resolve(store === 'metadata' ? { key, value: profile.id } : stored));
-  getAllByIndex.mockImplementation(() => Promise.resolve([stored]));
-  save.mockImplementation(async (store, record) => { if (store === 'routines') stored = record; });
+  copiedRoutines = [];
+  storedProfile = { id: 'profile', name: 'Alex', activeRoutineId: original.id,
+    strongmanCompetition: { ...original.inputs.strongmanCompetition, id: 'meet', status: 'active',
+      createdAt: '2026-09-01T12:00:00.000Z' }, strongmanCompetitionHistory: [] };
+  getAll.mockImplementation(store => Promise.resolve(store === 'profiles' ? [storedProfile] : []));
+  get.mockImplementation((store, key) => Promise.resolve(store === 'metadata' ? { key, value: storedProfile.id }
+    : store === 'profiles' ? storedProfile : key === original.id ? stored : copiedRoutines.find(item => item.id === key)));
+  getAllByIndex.mockImplementation(() => Promise.resolve([stored, ...copiedRoutines].filter(Boolean)));
+  save.mockImplementation(async (store, record) => {
+    if (store === 'routines') stored = record;
+    if (store === 'profiles') storedProfile = record;
+  });
   applyBatch.mockImplementation(async batch => { commit(batch); });
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -70,7 +86,7 @@ afterEach(() => {
   global.IS_REACT_ACT_ENVIRONMENT = false;
 });
 
-it('preserves a competition save when a rename is submitted before its commit finishes', async () => {
+it('commits a plan rename independently while its profile competition save is pending', async () => {
   let finishCompetition;
   applyBatch.mockImplementationOnce(batch => new Promise(resolve => {
     finishCompetition = () => { commit(batch); resolve(); };
@@ -81,22 +97,24 @@ it('preserves a competition save when a rename is submitted before its commit fi
   fill('Competition name', 'New competition');
   await click('Save competition');
   await click('Save name');
-  expect(applyBatch).toHaveBeenCalledTimes(1);
-  expect(stored).toBe(original);
-  expect(container.querySelector('[aria-label="Routine name"]').disabled).toBe(true);
+  expect(applyBatch).toHaveBeenCalledTimes(2);
+  expect(stored.name).toBe('Renamed training');
+  expect(storedProfile.strongmanCompetition.name).toBe('Original competition');
+  expect(container.querySelector('[aria-label="Competition name"]').closest('fieldset').disabled).toBe(true);
 
   await act(async () => { finishCompetition(); });
 
   expect(applyBatch).toHaveBeenCalledTimes(2);
   expect(stored.name).toBe('Renamed training');
-  expect(stored.inputs.strongmanCompetition.name).toBe('New competition');
+  expect(stored.inputs.strongmanCompetition).toEqual(original.inputs.strongmanCompetition);
+  expect(storedProfile.strongmanCompetition.name).toBe('New competition');
   expect(stored.workouts).toEqual(original.workouts);
   expect(container.querySelector('.plan-select strong').textContent).toBe(stored.name);
   expect(container.querySelector('.strongman-competition-card h2').textContent).toBe('New competition');
   expect(container.querySelector('.routine-name-editor')).toBeNull();
 });
 
-it('retains a competition draft when a pending rename commits first, then safely retries it', async () => {
+it('commits a profile competition edit independently while a plan rename is pending', async () => {
   let finishRename;
   applyBatch.mockImplementationOnce(batch => new Promise(resolve => {
     finishRename = () => { commit(batch); resolve(); };
@@ -107,27 +125,24 @@ it('retains a competition draft when a pending rename commits first, then safely
   fill('Competition name', 'New competition');
   await click('Save name');
   await click('Save competition');
-  expect(applyBatch).toHaveBeenCalledTimes(1);
+  expect(applyBatch).toHaveBeenCalledTimes(2);
   expect(stored).toBe(original);
+  expect(storedProfile.strongmanCompetition.name).toBe('New competition');
+  expect(container.querySelector('[aria-label="Competition name"]')).toBeNull();
 
   await act(async () => { finishRename(); });
 
   expect(stored.name).toBe('Renamed training');
   expect(stored.inputs.strongmanCompetition.name).toBe('Original competition');
-  expect(container.querySelector('[aria-label="Competition name"]').value).toBe('New competition');
-  expect(container.querySelector('[role="alert"]').textContent).toContain('changed in another window');
-  await click('Save competition');
-  expect(stored.name).toBe('Renamed training');
-  expect(stored.inputs.strongmanCompetition.name).toBe('New competition');
+  expect(storedProfile.strongmanCompetition.name).toBe('New competition');
+  expect(container.querySelector('[role="alert"]')).toBeNull();
   expect(container.querySelector('.plan-select strong').textContent).toBe('Renamed training');
   expect(container.querySelector('.strongman-competition-card h2').textContent).toBe('New competition');
 });
 
 it('retains the typed rename after a conflict and retries without overwriting the other change', async () => {
   applyBatch.mockImplementationOnce(async () => {
-    stored = { ...stored, inputs: { ...stored.inputs, strongmanCompetition: {
-      ...stored.inputs.strongmanCompetition, name: 'Other window competition',
-    } } };
+    stored = { ...stored, notes: 'Other window change' };
     throw Object.assign(new Error('Conflict'), { name: 'BatchConflictError' });
   });
   await click('Rename');
@@ -140,8 +155,55 @@ it('retains the typed rename after a conflict and retries without overwriting th
   await click('Save name');
 
   expect(stored.name).toBe('Retained name');
-  expect(stored.inputs.strongmanCompetition.name).toBe('Other window competition');
-  expect(container.querySelector('.strongman-competition-card h2').textContent).toBe('Other window competition');
+  expect(stored.notes).toBe('Other window change');
+  expect(stored.inputs.strongmanCompetition).toEqual(original.inputs.strongmanCompetition);
+  expect(container.querySelector('.strongman-competition-card h2').textContent).toBe('Original competition');
+});
+
+it('retains a competition draft after another window completes that meet without reactivating it', async () => {
+  await click('Edit competition');
+  fill('Competition name', 'Unsaved target change');
+  const ended = { ...storedProfile.strongmanCompetition, status: 'completed', endedAt: '2026-10-01T12:00:00.000Z' };
+  storedProfile = { ...storedProfile, strongmanCompetition: null, strongmanCompetitionHistory: [ended] };
+  await click('Save competition');
+  expect(applyBatch).not.toHaveBeenCalled();
+  expect(storedProfile.strongmanCompetition).toBeNull();
+  expect(storedProfile.strongmanCompetitionHistory).toEqual([ended]);
+  expect(container.querySelector('[aria-label="Competition name"]').value).toBe('Unsaved target change');
+  expect(container.querySelector('[role="alert"]').textContent).toContain('changed in another window');
+});
+
+it('selects a plan using the fresh profile so a removed competition is not restored', async () => {
+  const ended = { ...storedProfile.strongmanCompetition, status: 'removed', endedAt: '2026-10-01T12:00:00.000Z' };
+  storedProfile = { ...storedProfile, strongmanCompetition: null, strongmanCompetitionHistory: [ended] };
+  await act(async () => { container.querySelector(`button[aria-label="View ${original.name}"]`).click(); });
+  expect(storedProfile.strongmanCompetition).toBeNull();
+  expect(storedProfile.strongmanCompetitionHistory).toEqual([ended]);
+  expect(stored.inputs.strongmanCompetition).toEqual(original.inputs.strongmanCompetition);
+  expect(container.querySelector('.strongman-competition-card h2').textContent).toBe('Your events');
+  expect(container.textContent).not.toContain('Mark competition complete');
+});
+
+it('carries the latest profile competition into a copied plan and stops after completion', async () => {
+  await click('Edit competition');
+  fill('Competition name', 'Latest competition targets');
+  await click('Save competition');
+  await click('Copy');
+  await click('Copy routine');
+  expect(copiedRoutines).toHaveLength(1);
+  expect(copiedRoutines[0].inputs.strongmanCompetition).toEqual(storedProfile.strongmanCompetition);
+  expect(copiedRoutines[0].inputs.strongmanCompetition.name).toBe('Latest competition targets');
+  expect(stored.inputs.strongmanCompetition.name).toBe('Original competition');
+
+  await click('Mark competition complete');
+  await click('Confirm completion');
+  await click('Copy');
+  await click('Copy routine');
+  expect(copiedRoutines).toHaveLength(2);
+  expect(copiedRoutines[1].inputs.strongmanCompetition).toBeNull();
+  expect(storedProfile.strongmanCompetition).toBeNull();
+  expect(storedProfile.strongmanCompetitionHistory).toHaveLength(1);
+  expect(storedProfile.strongmanCompetitionHistory[0]).toMatchObject({ id: 'meet', status: 'completed' });
 });
 
 it.each([undefined, { profileId: 'other-profile' }])('does not rename a removed or reassigned plan: %j', async replacement => {

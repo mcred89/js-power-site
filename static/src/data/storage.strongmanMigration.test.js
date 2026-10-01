@@ -2,6 +2,7 @@ import { IDBFactory } from 'fake-indexeddb';
 import { addStrongmanTracking, createStrongmanLogEntry } from './strongman';
 import { DATABASE_VERSION, runDatabaseMigrations } from './storageMigrations';
 import { BACKUP_VERSION, exportBackup, migrateBackup, parseBackup } from './storageBackup';
+import { migrateStrongmanCompetitions } from './strongmanCompetitions';
 
 if (!global.structuredClone) global.structuredClone = value => JSON.parse(JSON.stringify(value));
 
@@ -46,11 +47,11 @@ describe('strongman tracking migration', () => {
       templates: [{ id: 'template', inputs: legacyTracking.inputs }], archives: [archive], extension: { future: true } };
     const before = JSON.stringify(original);
     const migrated = migrateBackup(original);
-    expect(migrated).toEqual({ ...original, version: 19, dataSchemaVersion: 19 });
-    expect(migrated.routines).toBe(original.routines);
+    expect(migrated).toEqual(migrateStrongmanCompetitions({ ...original, version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION }));
+    expect(migrated.routines[0].workouts).toBe(original.routines[0].workouts);
     expect(migrated.routines[0].inputs.strongmanCompetition.events[0]).not.toHaveProperty('timeGoal');
     expect(migrated.routines[0].strongmanLog[0].eventSnapshot).not.toHaveProperty('timeGoal');
-    expect(parseBackup(JSON.stringify(original)).routines).toEqual(original.routines);
+    expect(parseBackup(JSON.stringify(original)).routines).toEqual(migrated.routines);
     expect(JSON.stringify(original)).toBe(before);
   });
 
@@ -61,7 +62,7 @@ describe('strongman tracking migration', () => {
         components: [{ id: 'bag', name: 'Sandbag load', weight: 200, reps: 3, timeGoal: 'reps' }] }],
     } }, strongmanLog: [{ ...legacyTracking.strongmanLog[0], eventSnapshot: repsEvent }] };
     const contents = exportBackup([{ id: 'p1' }], [saved]);
-    expect(JSON.parse(contents)).toMatchObject({ version: 19, dataSchemaVersion: 19 });
+    expect(JSON.parse(contents)).toMatchObject({ version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION });
     expect(parseBackup(contents).routines).toEqual([saved]);
   });
 
@@ -157,7 +158,7 @@ describe('strongman tracking migration', () => {
     expect(restored.routines[0]).toEqual(saved);
   });
 
-  it.each([0, 16, 17, 18])('creates or upgrades a v%i database to v19 with untouched snapshots', async oldVersion => {
+  it.each([0, 16, 17, 18])('creates or upgrades a v%i database with untouched workout and event snapshots', async oldVersion => {
     const indexedDB = new IDBFactory();
     const name = `strongman-migration-${oldVersion}`;
     if (oldVersion) await new Promise((resolve, reject) => {
@@ -189,7 +190,8 @@ describe('strongman tracking migration', () => {
     expect(database.objectStoreNames.contains('archives')).toBe(true);
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     if (oldVersion) {
-      expect(await read('routines', 'r1')).toEqual(oldVersion >= 17 ? legacyTracking : addStrongmanTracking(routine));
+      expect(await read('routines', 'r1')).toEqual(oldVersion >= 17
+        ? migrateStrongmanCompetitions({ routines: [legacyTracking] }).routines[0] : addStrongmanTracking(routine));
       expect(await read('routines', 'unknown')).toEqual({ id: 'unknown', custom: { preserved: true } });
       expect(await read('templates', 't1')).toEqual({ id: 't1', inputs: oldVersion >= 17
         ? legacyTracking.inputs : { strongmanCompetition: null } });

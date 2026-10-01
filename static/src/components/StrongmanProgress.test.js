@@ -12,6 +12,45 @@ beforeEach(() => {
 afterEach(() => act(() => root.unmount()));
 const makeRecord = (id, date, weight, distance) => ({ id, date, movement: 'Zercher yoke carry', scope: 'movement', sets: [{ id: `set-${id}`, weight, distance, reps: '', seconds: '', successful: true }] });
 
+it('keeps a past-result draft when changing its plan is cancelled and resets only after confirmation', () => {
+  const meet = id => ({ id, name: `${id} meet`, events: [{ id: `${id}-event`, name: `${id} carry`, type: 'single', weight: 300, distance: 50 }] });
+  const first = meet('first');
+  const second = meet('second');
+  const routines = [
+    { id: 'first-plan', name: 'First plan', inputs: { strongmanCompetition: first }, strongmanLog: [] },
+    { id: 'second-plan', name: 'Second plan', inputs: { strongmanCompetition: second }, strongmanLog: [] },
+  ];
+  const confirm = jest.spyOn(window, 'confirm').mockReturnValue(false);
+  const change = (element, value) => act(() => {
+    if (element.tagName === 'SELECT') element.value = value;
+    else Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(element, value);
+    element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
+  });
+  try {
+    act(() => root.render(<StrongmanProgress routines={routines} competition={second} competitionHistory={[first]} defaultRoutineId="first-plan" onSaveLog={jest.fn()} />));
+    act(() => [...container.querySelectorAll('button')].find(button => button.textContent === 'Log past result').click());
+    change(container.querySelector('[aria-label="Exercise"]'), 'event:first-event');
+    const weight = () => [...container.querySelectorAll('.strongman-training-set label')].find(label => label.textContent === 'Weight (lb)').querySelector('input');
+    change(weight(), '333');
+    change(container.querySelector('[aria-label="Plan for past result"]'), 'second-plan');
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('[aria-label="Plan for past result"]').value).toBe('first-plan');
+    expect(container.querySelector('[aria-label="Competition for this result"]').value).toBe('first');
+    expect(container.querySelector('[aria-label="Exercise"]').value).toBe('event:first-event');
+    expect(weight().value).toBe('333');
+
+    confirm.mockReturnValue(true);
+    change(container.querySelector('[aria-label="Plan for past result"]'), 'second-plan');
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(container.querySelector('[aria-label="Plan for past result"]').value).toBe('second-plan');
+    expect(container.querySelector('[aria-label="Competition for this result"]').value).toBe('second');
+    expect(container.querySelector('[aria-label="Exercise"]').value).toBe('');
+    expect(container.querySelector('.strongman-training-set')).toBeNull();
+    change(container.querySelector('[aria-label="Exercise"]'), 'event:second-event');
+    expect(weight().value).toBe('');
+  } finally { confirm.mockRestore(); }
+});
+
 it('retains lifetime records when the selected plan has no matching training', () => {
   const routines = [
     { id: 'current', name: 'Current plan', inputs: {}, strongmanLog: [] },

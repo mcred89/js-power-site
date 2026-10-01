@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createStrongmanLogEntry, normalizeMovementName, STRONGMAN_RECORD_GOALS } from '../data/strongman';
 import './StrongmanTraining.css';
 import { useUnsavedChanges } from './useUnsavedChanges';
+import { competitionChoicesForTraining, competitionForPastTraining } from '../data/strongmanCompetitionContext';
 
 const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
   ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -49,13 +50,13 @@ const MetricInput = ({ label, value, onChange, whole = false }) => <label>
 
 /** A dated result editor shared by the day logger and Progress backfill. */
 export const StrongmanResultEditor = ({
-  entry = null, appendToEntry = null, competition, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, newRun = false, newSet = false, onSave, onCancel,
+  entry = null, appendToEntry = null, competition, competitionOptions, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, newRun = false, newSet = false, onSave, onCancel,
 }) => {
   const [draft, setDraft] = useState(() => entry ? {
     ...entry, sets: entry.sets.map(set => entry.scope === 'medley' ? medleySet(set) : { ...set }),
     eventSnapshot: entry.eventSnapshot ? JSON.parse(JSON.stringify(entry.eventSnapshot)) : null,
   } : {
-    id: makeId(), date: initialDate || today(), workoutId, movement: '', eventId: null, componentId: null,
+    id: makeId(), date: initialDate || today(), workoutId, competitionId: competition?.id || null, movement: '', eventId: null, componentId: null,
     scope: 'movement', eventSnapshot: null, sets: [emptySet()], notes: '',
   });
   const [selected, setSelected] = useState(() => entry ? 'custom' : '');
@@ -66,7 +67,8 @@ export const StrongmanResultEditor = ({
   const headingRef = useRef(null);
   const setsRef = useRef(null);
   const focusSetRef = useRef(focusLastSet ? draft.sets[draft.sets.length - 1]?.id : null);
-  const choices = useMemo(() => competitionChoices(competition), [competition]);
+  const selectedCompetition = competitionOptions ? competitionOptions.find(item => item.id === draft.competitionId) : competition;
+  const choices = useMemo(() => competitionChoices(selectedCompetition), [selectedCompetition]);
   const movements = [...new Set(knownMovements)].filter(name => name && !choices.some(choice => (
     choice.scope === 'movement' && normalizeMovementName(choice.movement) === normalizeMovementName(name)
   ))).sort((a, b) => a.localeCompare(b));
@@ -136,7 +138,7 @@ export const StrongmanResultEditor = ({
     setError('');
     try {
       const normalized = createStrongmanLogEntry(draft);
-      const sameContext = appendToEntry && ['movement', 'date', 'scope', 'eventId', 'componentId', 'workoutId', 'notes']
+      const sameContext = appendToEntry && ['movement', 'date', 'scope', 'competitionId', 'eventId', 'componentId', 'workoutId', 'notes']
         .every(key => (draft[key] || '') === (appendToEntry[key] || '')) &&
         JSON.stringify(draft.eventSnapshot || null) === JSON.stringify(appendToEntry.eventSnapshot || null);
       await onSave(sameContext ? { ...appendToEntry, sets: [...appendToEntry.sets, ...normalized.sets], updatedAt: normalized.updatedAt } : normalized);
@@ -154,11 +156,18 @@ export const StrongmanResultEditor = ({
     <p className="muted">Record what you actually do. Start with one set and add more as you go.</p>
     {appendToEntry && <p className="muted">Add your new sets here. Changing the movement, record goal, rules, or notes saves them separately and keeps earlier sets unchanged.</p>}
     <fieldset disabled={saving}>
+      {!entry && competitionOptions?.length > 0 && <label className="strongman-training-field">
+        <span className="field-label">Competition for this result</span>
+        <select className="select-input" aria-label="Competition for this result" value={draft.competitionId || ''} onChange={event => {
+          setSelected(draft.movement ? 'custom' : '');
+          update({ competitionId: event.target.value || null, eventId: null, componentId: null });
+        }}><option value="">No competition</option>{competitionOptions.map(item => <option key={item.id} value={item.id}>{item.name || 'Unnamed competition'}{item.date ? ` · ${item.date}` : ''}</option>)}</select>
+      </label>}
       {!entry && <label className="strongman-training-field">
         <span className="field-label">Exercise</span>
         <select className="select-input" aria-label="Exercise" value={selected} onChange={event => selectExercise(event.target.value)} required>
           <option value="" disabled>Choose or add an exercise</option>
-          {choices.length > 0 && <optgroup label="Next competition">
+          {choices.length > 0 && <optgroup label="Competition events">
             {choices.map(choice => <option key={choice.key} value={choice.key}>{choice.label}</option>)}
           </optgroup>}
           {movements.length > 0 && <optgroup label="Previous training">
@@ -278,7 +287,7 @@ export const StrongmanResultEditor = ({
   </form>;
 };
 
-export const StrongmanTraining = ({ routine, workout, routines = [], onSaveLog, onEditingChange }) => {
+export const StrongmanTraining = ({ routine, workout, routines = [], competition, competitionHistory = [], onSaveLog, onEditingChange }) => {
   const [editing, setEditing] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -286,6 +295,10 @@ export const StrongmanTraining = ({ routine, workout, routines = [], onSaveLog, 
   const [notice, setNotice] = useState('');
   const entries = routine.strongmanLog || [];
   const dayEntries = entries.filter(entry => entry.workoutId === workout.id);
+  const currentCompetition = competition === undefined ? routine.inputs?.strongmanCompetition : competition;
+  const historical = editing?.mode === 'past' || Boolean(workout.completedAt);
+  const editorCompetition = historical ? competitionForPastTraining(routine, competition, competitionHistory, workout.completedAt ? workout : undefined) : currentCompetition;
+  const competitionOptions = historical ? competitionChoicesForTraining(currentCompetition, competitionHistory, routine) : undefined;
   const knownMovements = [...new Set([routine, ...routines].flatMap(item => (
     (item.strongmanLog || []).filter(entry => entry.scope !== 'medley').map(entry => entry.movement)
   )))];
@@ -360,7 +373,7 @@ export const StrongmanTraining = ({ routine, workout, routines = [], onSaveLog, 
     {notice && <p className="muted" role="status">{notice}</p>}
     {editing ? <StrongmanResultEditor key={editing.entry?.id || editing.mode} entry={editing.entry}
       appendToEntry={editing.appendToEntry}
-      competition={routine.inputs?.strongmanCompetition} knownMovements={knownMovements}
+      competition={editorCompetition} competitionOptions={competitionOptions?.length ? competitionOptions : undefined} knownMovements={knownMovements}
       workoutId={editing.mode === 'past' ? null : workout.id}
       initialDate={editing.mode !== 'past' && workout.completedAt ? localDate(workout.completedAt) : undefined}
       focusLastSet={editing.focusLastSet}

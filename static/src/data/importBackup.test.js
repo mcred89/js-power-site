@@ -169,4 +169,62 @@ describe('backup import planning', () => {
       result: { ...profile, activeWorkoutRoutineId: imported.id },
     })]);
   });
+
+  const meet = (id, changes = {}) => ({ id, name: 'Fall show', date: '2026-11-01', events: [],
+    createdAt: '2026-09-01T12:00:00.000Z', status: 'active', ...changes });
+
+  it('keeps the local active meet and preserves imported competitions and all historical definitions', () => {
+    const current = meet('current');
+    const former = meet('former', { status: 'completed', endedAt: '2026-09-20T12:00:00.000Z' });
+    const importedMeet = meet('other', { unknown: { keep: true } });
+    const otherFormer = meet('past', { status: 'removed', endedAt: '2026-09-10T12:00:00.000Z' });
+    const local = { ...localProfiles[0], strongmanCompetition: current, strongmanCompetitionHistory: [former] };
+    const incoming = { id: 'p1', strongmanCompetition: importedMeet, strongmanCompetitionHistory: [otherFormer] };
+    const backup = { profiles: [incoming], routines: [] };
+    const before = JSON.stringify({ backup, local });
+    const result = createImportPlan(backup, [local], []).profiles[0].result;
+    expect(result.strongmanCompetition).toEqual(current);
+    expect(result.strongmanCompetitionHistory).toEqual([
+      former, otherFormer, { ...importedMeet, status: 'saved' },
+    ]);
+    expect(JSON.stringify({ backup, local })).toBe(before);
+    expect(createImportPlan(backup, [result], []).profiles[0].action).toBe('skip');
+  });
+
+  it('does not reactivate a locally ended meet when an older backup still marks it active', () => {
+    const current = meet('current');
+    const ended = { ...current, status: 'completed', endedAt: '2026-09-20T12:00:00.000Z' };
+    const local = { ...localProfiles[0], strongmanCompetition: null, strongmanCompetitionHistory: [ended] };
+    const backup = { profiles: [{ id: 'p1', strongmanCompetition: current, strongmanCompetitionHistory: [] }], routines: [] };
+    const result = createImportPlan(backup, [local], []).profiles[0].result;
+    expect(result.strongmanCompetition).toBeNull();
+    expect(result.strongmanCompetitionHistory).toEqual([ended, {
+      ...current, id: 'current:imported-copy', originalCompetitionId: 'current', status: 'saved',
+    }]);
+    const repeated = createImportPlan(backup, [result], []);
+    expect(repeated.profiles[0].action).toBe('skip');
+    expect(repeated.profiles[0].result).toEqual(result);
+  });
+
+  it('preserves conflicting competition definitions with collision-safe repeatable IDs', () => {
+    const current = meet('shared', { name: 'Local definition' });
+    const occupied = meet('shared:imported-copy', { status: 'saved', name: 'Other saved meet' });
+    const alternate = meet('shared', { name: 'Imported definition', custom: true });
+    const local = { ...localProfiles[0], strongmanCompetition: current, strongmanCompetitionHistory: [occupied] };
+    const backup = { profiles: [{ id: 'p1', strongmanCompetition: alternate, strongmanCompetitionHistory: [] }], routines: [] };
+    const result = createImportPlan(backup, [local], []).profiles[0].result;
+    expect(result.strongmanCompetition).toEqual(current);
+    expect(result.strongmanCompetitionHistory).toEqual([occupied, {
+      ...alternate, id: 'shared:imported-copy:2', originalCompetitionId: 'shared', status: 'saved',
+    }]);
+    expect(createImportPlan(backup, [result], []).profiles[0].action).toBe('skip');
+  });
+
+  it('imports a new profile with its active meet and validates direct profile import data', () => {
+    const imported = { id: 'p2', name: 'Sam', strongmanCompetition: meet('meet'), strongmanCompetitionHistory: [] };
+    expect(createImportPlan({ profiles: [imported], routines: [] }, localProfiles, []).profiles[0].result).toEqual(imported);
+    expect(() => createImportPlan({ profiles: [{ ...imported,
+      strongmanCompetition: { ...imported.strongmanCompetition, id: '' },
+    }], routines: [] }, localProfiles, [])).toThrow();
+  });
 });

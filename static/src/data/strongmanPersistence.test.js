@@ -14,23 +14,11 @@ beforeEach(() => {
   applyBatch.mockResolvedValue(undefined);
 });
 
-it('normalizes reference targets and publishes only after a guarded save', async () => {
-  const before = JSON.stringify(routine);
-  await commitStrongmanChange(routine, 'p1', 'competition', { name: 'Next meet', events: [
-    { name: 'Yoke', weight: '600', distance: '100' },
-  ] }, saveRoutine);
-  const updated = saveRoutine.mock.calls[0][0];
-  expect(updated.inputs).toMatchObject({ unknown: true, strongmanCompetition: {
-    events: [{ name: 'Yoke', weight: 600, distance: 100 }],
-  } });
-  expect(updated.workouts).toBe(routine.workouts);
-  expect(updated.strongmanLog).toBe(routine.strongmanLog);
-  expect(saveRoutine.mock.calls[0][2]).toBe(true);
-  expect(applyBatch).toHaveBeenCalledWith({ puts: { routines: [updated] },
-    conditions: { routines: [{ key: routine.id, expected: routine }] } });
-  expect(JSON.stringify(routine)).toBe(before);
+it('does not write profile competitions through a plan-only action', async () => {
+  await expect(commitStrongmanChange(routine, 'p1', 'competition', { events: [] }, saveRoutine))
+    .rejects.toThrow('supported Strongman change');
+  expect(saveRoutine).not.toHaveBeenCalled();
 });
-
 it('validates and persists dated results without changing the workout', async () => {
   const entries = [createStrongmanLogEntry({ movement: 'Yoke', date: '2026-01-01',
     sets: [{ weight: 580, distance: 50 }] })];
