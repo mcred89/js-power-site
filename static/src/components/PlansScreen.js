@@ -1,8 +1,11 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { visibleExercise } from '../data/routines';
 import { PlanUpdateEditor } from './PlanUpdateEditor';
 import { StrongmanCompetitionCard } from './StrongmanCompetition';
 import { confirmNavigation } from '../data/navigationGuard';
+import { buildPlanCalendar } from '../data/planCalendar';
+import { useCalendarDay, WorkoutWeekLabel } from './WorkoutWeekLabel';
+import { PlanCalendar } from './PlanCalendar';
 
 export const isPlanComplete = routine => (
   routine.workouts.length > 0 && routine.workouts.every(workout => Boolean(workout.completedAt))
@@ -16,7 +19,7 @@ export const CompletedPlanDetails = ({ routine, PlanSetup }) => (
       <div className="completed-plan-days">
         <h3>Generated workout days</h3>
         {routine.workouts.map(workout => <details className="completed-plan-day" key={workout.id}>
-          <summary><span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong></span><span>{(workout.exercises || []).length} exercises</span></summary>
+          <summary><span><small><WorkoutWeekLabel workout={workout} /></small><strong>{workout.name}</strong></span><span>{(workout.exercises || []).length} exercises</span></summary>
           {workout.effectiveMaxes && <small className="workout-maxes">Maxes: Squat {workout.effectiveMaxes.maxSquat} · Press {workout.effectiveMaxes.maxPress} · Deadlift {workout.effectiveMaxes.maxDead} lb</small>}
           <div className="exercise-list">
             {(workout.exercises || []).map(exercise => {
@@ -33,6 +36,8 @@ export const CompletedPlanDetails = ({ routine, PlanSetup }) => (
 export const PlansScreen = ({ profile, routines, selectedId, templates, actions, RoutineNameEditor, PlanSetup }) => {
   const [editingId, setEditingId] = useState(null);
   const updateButtons = useRef(new Map());
+  const calendarDay = useCalendarDay();
+  const calendars = useMemo(() => new Map(routines.map(item => [item.id, buildPlanCalendar(item, calendarDay)])), [routines, calendarDay]);
   const editingRoutine = routines.find(item => item.id === editingId);
   const closeEditor = () => {
     const buttonId = editingId;
@@ -58,6 +63,7 @@ export const PlansScreen = ({ profile, routines, selectedId, templates, actions,
         const completed = isPlanComplete(item);
         return <article className={`plan-card ${item.id === selectedId ? 'selected' : ''} ${completed ? 'completed' : 'active'}`} key={item.id}>
           <button className="plan-select" type="button" onClick={() => actions.select(item)} aria-label={`View ${item.name}`} aria-pressed={item.id === selectedId}><span><strong>{item.name}</strong><small>{item.workouts.filter(day => day.completedAt).length} of {item.workouts.length} complete</small></span><span className={`plan-status ${completed ? 'completed' : 'active'}`}>{completed ? 'Completed' : item.id === selectedId ? 'Current plan' : 'Active'}</span></button>
+          <PlanCalendar calendar={calendars.get(item.id)} />
           {!completed && <div className="plan-update-action"><button ref={button => {
             if (button) updateButtons.current.set(item.id, button);
             else updateButtons.current.delete(item.id);

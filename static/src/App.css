@@ -163,6 +163,20 @@ body { min-width:320px; }
 .update-banner button:focus-visible { outline-color:var(--on-action); }
 .next-workout > p { margin:0 0 7px; color:var(--accent); font-size:13px; font-weight:750; }
 .next-workout > h2 { font:500 36px Georgia,serif; }
+.workout-week-label { line-height:1.6; }
+.calendar-week-date { display:inline-block; white-space:nowrap; }
+.next-workout > .calendar-outlook { margin:0 0 14px; color:var(--muted); font-size:12px; font-weight:400; }
+.plan-calendar { padding:0 20px 20px; }
+.plan-calendar-range { display:flex; flex-wrap:wrap; gap:16px 32px; margin:0; }
+.plan-calendar-range dt { color:var(--muted); font-size:12px; }
+.plan-calendar-range dd { margin:4px 0 0; font-size:15px; font-weight:650; font-variant-numeric:tabular-nums; }
+.plan-calendar .calendar-outlook { margin:12px 0 0; color:var(--muted); font-size:12px; line-height:1.6; }
+.plan-calendar-details { margin-top:12px; }
+.plan-calendar-details > summary { padding:4px 0; color:var(--accent); cursor:pointer; font-size:13px; font-weight:650; }
+.plan-calendar-details .field-help { line-height:1.6; }
+.plan-calendar-weeks { list-style:none; margin:12px 0 0; padding:0; }
+.plan-calendar-weeks li { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 16px; padding:10px 0; border-top:1px solid var(--line); font-size:13px; }
+.plan-calendar-weeks li > span:last-child { color:var(--muted); }
 .workout-maxes { display:block; margin-top:7px; color:var(--muted); font-size:12px; font-weight:500; line-height:1.5; }
 .adaptive-max-status { display:block; color:var(--accent); font-weight:700; }
 .exercise-list { display:grid; gap:0; margin:24px 0; }

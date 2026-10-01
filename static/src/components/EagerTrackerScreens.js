@@ -7,4 +7,4 @@ import { ActiveWorkoutSession } from './WorkoutSession';
 export const ActiveWorkoutScreen = memo(({ onScreenRender, ...props }) => {
   onScreenRender?.();
   return <ActiveWorkoutSession {...props} />;
-}, (previous, next) => previous.workout === next.workout);
+}, (previous, next) => previous.workout === next.workout && previous.calendarWeek === next.calendarWeek);

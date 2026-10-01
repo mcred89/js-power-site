@@ -2,6 +2,7 @@ import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useStat
 import { getLatestSessionAction, sessionElapsedSeconds } from '../data/routines';
 import { isTabataExercise, isTabataRound, tabataRoundCount } from '../data/tabata';
 import { getTimerElapsedMs as getSetTimerElapsedMs } from '../data/elapsedTimer';
+import { WorkoutWeekLabel } from './WorkoutWeekLabel';
 
 const SubstituteDialog = lazy(() => import('./WorkoutSubstituteDialog'));
 const TabataTimer = lazy(() => import('./TabataTimer'));
@@ -82,6 +83,7 @@ const Stepper = ({ label, value, step, onBlur, onChange }) => {
 
 export const ActiveWorkoutSession = ({
   workout,
+  calendarWeek,
   onAdjust,
   onCompleteSet,
   onFinish,
@@ -335,7 +337,7 @@ export const ActiveWorkoutSession = ({
         <span className="session-progress">{completedCount}/{totalCount} {progressLabel}</span>
       </div>
 
-      <p className="eyebrow">{workout.weekLabel} · {workout.name}</p>
+      <p className="eyebrow"><WorkoutWeekLabel workout={workout} calendarWeek={calendarWeek} /> · {workout.name}</p>
       {exercisePager}
       {setTally}
 

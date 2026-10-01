@@ -3,8 +3,9 @@ import { StrongmanCompetitionCard } from './StrongmanCompetition';
 import { StrongmanTraining } from './StrongmanTraining';
 import { WorkoutSessionHistory } from './WorkoutSessionHistory';
 import { visibleExercise } from '../data/routines';
+import { WorkoutWeekLabel } from './WorkoutWeekLabel';
 
-export const StrongmanDay = ({ routine, workout, routines, onBack, onSaveCompetition, onSaveLog, onComplete, onDelete }) => {
+export const StrongmanDay = ({ routine, workout, calendarWeek, routines, onBack, onSaveCompetition, onSaveLog, onComplete, onDelete }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
@@ -26,7 +27,7 @@ export const StrongmanDay = ({ routine, workout, routines, onBack, onSaveCompeti
   };
   return <section className="workout-detail strongman-day">
     <button className="text-button" type="button" onClick={onBack} disabled={busy}>← Back</button>
-    <p className="eyebrow">{routine.name} · {workout.weekLabel}</p>
+    <p className="eyebrow"><WorkoutWeekLabel workout={workout} calendarWeek={calendarWeek} /></p>
     <h1>Strongman day</h1>
     <p>{workout.completedAt ? 'Your recorded training. You can add or correct results here.' : 'Choose what to work on today. Record each effort as you go.'}</p>
     <StrongmanCompetitionCard routine={routine} routines={routines} onSaveCompetition={onSaveCompetition} onEditingChange={setEditingCompetition} />

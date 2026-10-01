@@ -7,6 +7,20 @@ The code in this repo deploys a serverless React website into AWS S3.
 Deferred ideas and design notes live in [potential features](potential_features/README.md).
 Start there when revisiting a proposal or recording a new idea.
 
+## Plan calendar estimates
+
+Today shows the calendar **Week of MM/DD/YY** beside the cycle and week number,
+plus the estimated end date and weeks remaining. Upcoming workouts, workout
+details, and active workouts use the same dates. In **Plans**, each plan shows
+its start and end dates; expand **Week-by-week dates** to see later cycles.
+
+Estimates assume one plan week per Monday–Sunday calendar week, without assigning
+workouts to specific days. An unstarted plan begins in the current week. Dates
+shift with progress: an unfinished week moves forward when you fall behind;
+finishing a week puts the next one on the following Monday unless you have
+already started it. Recorded start and finish dates come from workout history.
+Dates are calculated locally from existing records and need no backup migration.
+
 ## Progression by lift
 
 When building a mesocycle, **Max progression** sets the shared strategy for all

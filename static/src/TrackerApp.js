@@ -2,6 +2,8 @@ import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useStat
 import { ActiveWorkoutScreen } from './components/EagerTrackerScreens';
 import { isTabataExercise } from './data/tabata';
 import { confirmNavigation } from './data/navigationGuard';
+import { buildPlanCalendar, formatCalendarDate } from './data/planCalendar';
+import { useCalendarDay, WorkoutWeekLabel } from './components/WorkoutWeekLabel';
 import {
   adjustSessionSet,
   adaptiveStatusForWorkout,
@@ -275,9 +277,9 @@ export const formatCompletedDate = completedAt => new Intl.DateTimeFormat('en-US
   year: 'numeric',
 }).format(new Date(completedAt));
 
-export const WorkoutCard = ({ routine, workout, onOpen }) => (
+export const WorkoutCard = ({ routine, workout, calendarWeek, onOpen }) => (
   <button className="workout-card" type="button" onClick={onOpen}>
-    <span><small>{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</small><strong>{workout.name}</strong>{workout.completedAt && <small>Completed {formatCompletedDate(workout.completedAt)}</small>}<WorkoutMaxes routine={routine} workout={workout} /></span>
+    <span><small><WorkoutWeekLabel workout={workout} calendarWeek={calendarWeek} /></small><strong>{workout.name}</strong>{workout.completedAt && <small>Completed {formatCompletedDate(workout.completedAt)}</small>}<WorkoutMaxes routine={routine} workout={workout} /></span>
     <span aria-hidden="true">→</span>
   </button>
 );
@@ -519,6 +521,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   }, [routines, selectedProfileId]);
   const routine = profileRoutines.find(item => item.id === selectedRoutineId) ||
     profileRoutines.find(item => item.id === profile?.activeRoutineId) || profileRoutines[0];
+  const calendarDay = useCalendarDay();
+  const calendar = useMemo(() => buildPlanCalendar(routine, calendarDay), [routine, calendarDay]);
   const { workout, pending, completed } = useMemo(() => {
     const nextPending = [];
     const nextCompleted = [];
@@ -1131,6 +1135,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
           <ActiveWorkoutScreen
             key={workout.id}
             workout={workout}
+            calendarWeek={calendar?.byWorkoutId.get(workout.id)}
             initialSetTimerIntervalMs={profile.setTimerIntervalMs || 60000}
             onSetTimer={changeWorkoutSetTimer}
             onAdjust={adjustWorkoutSet}
@@ -1156,7 +1161,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
           </Suspense>
         ) : workout?.name === 'Strongman' && workout.session?.status !== 'paused' ? (
           !profileRoutinesLoaded ? <TrackerScreenFallback label="strongman records" error={profileRoutinesError} onRetry={() => setProfileRoutinesRetry(value => value + 1)} /> : <Suspense fallback={<TrackerScreenFallback label="strongman day" />}>
-            <StrongmanDay key={workout.id} routine={routine} workout={workout} routines={profileRoutines}
+            <StrongmanDay key={workout.id} routine={routine} workout={workout} calendarWeek={calendar?.byWorkoutId.get(workout.id)} routines={profileRoutines}
               onBack={() => goBack(() => setWorkoutId(null))}
               onSaveCompetition={value => saveStrongmanCompetition(routine.id, value)}
               onSaveLog={entries => saveStrongmanLog(routine.id, entries)}
@@ -1167,7 +1172,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
         ) : workout ? (
           <section className="workout-detail">
             <button className="text-button" type="button" onClick={() => goBack(() => { setWorkoutId(null); setEditingWorkout(false); })}>← Back</button>
-            <p className="eyebrow">{workout.cycleLabel ? `${workout.cycleLabel} · ` : ''}{workout.weekLabel}</p>
+            <p className="eyebrow"><WorkoutWeekLabel workout={workout} calendarWeek={calendar?.byWorkoutId.get(workout.id)} /></p>
             <div className="detail-heading"><h1>{workout.name}</h1>{!workout.completedAt && <button className="secondary-button" type="button" onClick={() => setEditingWorkout(!editingWorkout)}>{editingWorkout ? 'Done editing' : 'Edit exercises'}</button>}</div>
             <WorkoutMaxes routine={routine} workout={workout} />
             {workout.session?.status === 'completed'
@@ -1189,15 +1194,16 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
               <>
                 {activeEntry && <div className="resume-workout"><div><p>Workout in progress</p><strong>{activeEntry.workout.name}</strong></div><button className="primary-button" type="button" onClick={resumeActiveWorkout}>Resume workout</button></div>}
                 <div className="next-workout">
-                  <p>{pending[0].cycleLabel && <>{pending[0].cycleLabel} · </>}{pending[0].weekLabel}</p>
+                  <p><WorkoutWeekLabel workout={pending[0]} calendarWeek={calendar?.byWorkoutId.get(pending[0].id)} /></p>
                   <h2>{pending[0].name}</h2>
+                  {calendar && <p className="calendar-outlook">Est. end {formatCalendarDate(calendar.end)} · {calendar.remainingWeeks} {calendar.remainingWeeks === 1 ? 'week' : 'weeks'} remaining</p>}
                   {pending[0].name === 'Strongman' ? <p>Open competition targets and log your training.</p> : <>
                     <WorkoutMaxes routine={routine} workout={pending[0]} />
                     <WorkoutExercises routine={routine} workout={pending[0]} editable={false} />
                   </>}
                   <button className="primary-button" type="button" onClick={() => showWorkout(pending[0])}>Open workout</button>
                 </div>
-                {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
+                {pending.length > 1 && <div className="up-next"><div className="list-heading"><h2>Coming up</h2>{pending.length > 6 && <button className="text-button" type="button" onClick={() => setShowAllPending(!showAllPending)}>{showAllPending ? 'Show less' : `View all ${pending.length}`}</button>}</div>{(showAllPending ? pending.slice(1) : pending.slice(1, 6)).map(item => <WorkoutCard routine={routine} workout={item} calendarWeek={calendar?.byWorkoutId.get(item.id)} onOpen={() => showWorkout(item)} key={item.id} />)}</div>}
               </>
             ) : <div className="empty-card"><p>Every workout in this routine is complete.</p><button className="primary-button" type="button" onClick={() => setView('builder')}>Build another routine</button></div>}
           </section>
