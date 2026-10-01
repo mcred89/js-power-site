@@ -24,7 +24,10 @@ const enterCompetition = async (page, name, movement = 'Zercher yoke carry', wei
   await page.getByLabel('Event 1 Weight (lb)', { exact: true }).fill(weight);
   await page.getByLabel('Event 1 Distance (ft)', { exact: true }).fill('100');
 };
-const generatePlan = page => page.getByRole('button', { name: /Generate plan/ }).click();
+const generatePlan = async page => {
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await expect(page.getByRole('heading', { name: 'Your next workout', exact: true })).toBeVisible();
+};
 const preparationBest = page => competitionCard(page).locator('.strongman-event-results > div').filter({ has: page.locator('dt', { hasText: 'This competition · heaviest result' }) });
 const copyPlan = async (page, source, name, destination) => {
   await page.locator('.plan-card').filter({ has: page.getByRole('button', { name: `View ${source}`, exact: true }) }).getByRole('button', { name: 'Copy', exact: true }).click();
@@ -52,6 +55,7 @@ test('competition preparation continues across new plans and ends without losing
   await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
   await expect(preparationBest(page)).toContainText('580 lb · 50 ft');
   await page.getByRole('button', { name: 'Finish strongman day', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Your next workout', exact: true })).toBeVisible();
 
   await openPlans(page);
   await preparePlan(page, 'Second prep block');
