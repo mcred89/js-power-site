@@ -1,14 +1,12 @@
 import React, { lazy, Suspense, useEffect, useState } from 'react';
 import TrackerApp from './TrackerApp';
+import { isInstalledApp } from './data/appInstallation';
 import './App.css';
 
 const CalculatorWebsite = lazy(() => import('./components/CalculatorWebsite'));
 const APPEARANCE_KEY = 'mcilroy-method-appearance';
 
-export const isInstalledApp = () => (
-  (typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches) ||
-  (typeof navigator !== 'undefined' && navigator.standalone === true)
-);
+export { isInstalledApp } from './data/appInstallation';
 
 const App = () => {
   const [appearance, setAppearance] = useState(() => {

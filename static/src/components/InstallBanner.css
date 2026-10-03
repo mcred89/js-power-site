@@ -1,0 +1,12 @@
+.install-banner { background:var(--accent-soft); color:var(--ink); border-bottom:1px solid var(--line); }
+.install-banner-inner { width:min(1120px,calc(100% - 40px)); margin:auto; padding:14px 0; display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; }
+.install-banner-copy { flex:1 1 230px; }
+.install-banner-copy strong { font-size:15px; }
+.install-banner-copy p { margin:4px 0 0; font-size:14px; color:var(--ink); }
+.install-banner-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.install-banner-actions button { min-height:44px; padding:10px 16px; border-radius:10px; font-size:14px; font-weight:700; cursor:pointer; }
+.install-banner-primary { border:1px solid var(--action); color:var(--on-action); background:var(--action); }
+.install-banner-primary:hover { background:var(--action-hover); }
+.install-banner-primary:disabled { opacity:.7; cursor:wait; }
+.install-banner-dismiss { border:1px solid var(--line); color:var(--ink); background:var(--paper); }
+.install-banner-help { flex-basis:100%; margin:0; font-size:14px; line-height:1.6; }

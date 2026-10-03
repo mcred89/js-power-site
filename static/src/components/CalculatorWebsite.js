@@ -1,6 +1,7 @@
 import React from 'react';
 import { HashRouter as Router, Link, Route, Routes } from 'react-router-dom';
 import { MaxesForm } from '../containers/MaxesForm';
+import InstallBanner from './InstallBanner';
 
 const AppearanceControl = ({ appearance, onChange }) => (
   <label className="form-field appearance-control">
@@ -16,6 +17,7 @@ const AppearanceControl = ({ appearance, onChange }) => (
 const CalculatorWebsite = ({ appearance, onAppearanceChange }) => (
   <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
     <div className="site-shell">
+      <InstallBanner />
       <header className="site-header">
         <nav className="nav-wrap" aria-label="Main navigation">
           <Link className="brand" to="/">

@@ -48,8 +48,8 @@ describe('deterministic performance fixtures', () => {
 });
 
 describe('bundle budget inspection', () => {
-  it('keeps the tracker budget at 68.7 kB including synchronous calendar estimates', () => {
-    expect(TRACKER_JS_BUDGET_BYTES).toBe(68700);
+  it('keeps the tracker budget at 69 kB including calendar estimates and early install events', () => {
+    expect(TRACKER_JS_BUDGET_BYTES).toBe(69000);
   });
 
   it('rejects website-only router sources in the initial entry', () => {

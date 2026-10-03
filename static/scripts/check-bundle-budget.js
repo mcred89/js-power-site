@@ -5,8 +5,9 @@ const path = require('path');
 const zlib = require('zlib');
 
 // Calendar estimates are available immediately on Today, including offline.
-// Allow 2 kB over the previous 66.7 kB entry for dates, progress, and rollover.
-const TRACKER_JS_BUDGET_BYTES = 68700;
+// Allow 2 kB over the previous 66.7 kB entry for dates, progress, and rollover,
+// plus 0.3 kB to capture install events before the website's lazy UI loads.
+const TRACKER_JS_BUDGET_BYTES = 69000;
 const WEBSITE_ONLY_SOURCE_PATTERNS = [
   /node_modules\/react-router(?:-dom)?\//,
   /src\/containers\/MaxesForm\.js$/,
