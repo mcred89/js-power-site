@@ -5,11 +5,10 @@ import { WorkoutSessionHistory } from './WorkoutSessionHistory';
 import { visibleExercise } from '../data/routines';
 import { WorkoutWeekLabel } from './WorkoutWeekLabel';
 
-export const StrongmanDay = ({ routine, workout, calendarWeek, routines, competition, competitionHistory = [], onBack, onSaveCompetition, onEndCompetition, onSaveLog, onComplete, onDelete }) => {
+export const StrongmanDay = ({ routine, workout, calendarWeek, routines, competition, competitionHistory = [], onBack, onSaveLog, onComplete, onDelete }) => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
-  const [editingCompetition, setEditingCompetition] = useState(false);
   const legacyExercises = (workout.exercises || []).map(visibleExercise).filter(exercise => (
     exercise.movement !== 'Strongman day' || exercise.weight !== '' || exercise.prescription
   ));
@@ -30,7 +29,7 @@ export const StrongmanDay = ({ routine, workout, calendarWeek, routines, competi
     <p className="eyebrow"><WorkoutWeekLabel workout={workout} calendarWeek={calendarWeek} /></p>
     <h1>Strongman day</h1>
     <p>{workout.completedAt ? 'Your recorded training. You can add or correct results here.' : 'Choose what to work on today. Record each effort as you go.'}</p>
-    <StrongmanCompetitionCard routine={routine} routines={routines} competition={competition} onSaveCompetition={onSaveCompetition} onEndCompetition={onEndCompetition} onEditingChange={setEditingCompetition} />
+    <StrongmanCompetitionCard routine={routine} routines={routines} competition={competition} />
     {workout.session?.status === 'completed' && <details>
       <summary>Previously recorded workout</summary>
       <WorkoutSessionHistory workout={workout} />
@@ -44,10 +43,10 @@ export const StrongmanDay = ({ routine, workout, calendarWeek, routines, competi
     </details>}
     <StrongmanTraining routine={routine} workout={workout} routines={routines} competition={competition} competitionHistory={competitionHistory} onSaveLog={onSaveLog} onEditingChange={setEditing} />
     {error && <p role="alert">{error}</p>}
-    <button className="primary-button full-button" type="button" onClick={complete} disabled={busy || editing || editingCompetition}>
+    <button className="primary-button full-button" type="button" onClick={complete} disabled={busy || editing}>
       {busy ? 'Saving…' : workout.completedAt ? 'Return to workout queue' : 'Finish strongman day'}
     </button>
-    {(editing || editingCompetition) && <p className="field-help">Save or cancel your changes before finishing the day.</p>}
-    {!workout.completedAt && onDelete && <button className="danger-button full-button" type="button" onClick={onDelete} disabled={busy || editing || editingCompetition}>Delete future workout</button>}
+    {editing && <p className="field-help">Save or cancel your changes before finishing the day.</p>}
+    {!workout.completedAt && onDelete && <button className="danger-button full-button" type="button" onClick={onDelete} disabled={busy || editing}>Delete future workout</button>}
   </section>;
 };

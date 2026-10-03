@@ -47,6 +47,8 @@ test('competition preparation continues across new plans and ends without losing
   await enterCompetition(page, 'Autumn Strongman');
   await generatePlan(page);
   await openStrongmanDay(page);
+  await expect(competitionCard(page).getByRole('button')).toHaveCount(0);
+  await competitionCard(page).screenshot({ path: testInfo.outputPath('today-competition-reference.png') });
   await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
   const editor = page.locator('.strongman-result-editor');
   await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Zercher yoke carry' });
@@ -90,7 +92,9 @@ test('competition preparation continues across new plans and ends without losing
   await expect(competitionCard(page)).not.toContainText('Autumn Strongman');
   await page.getByRole('button', { name: 'Today', exact: true }).click();
   await openStrongmanDay(page);
-  await expect(competitionCard(page).getByRole('button', { name: 'Add competition', exact: true })).toBeVisible();
+  await expect(competitionCard(page)).toBeVisible();
+  await expect(competitionCard(page).getByRole('button')).toHaveCount(0);
+  await expect(competitionCard(page)).not.toContainText('Autumn Strongman');
 
   await openPlans(page);
   await competitionCard(page).getByRole('button', { name: 'Add competition', exact: true }).click();

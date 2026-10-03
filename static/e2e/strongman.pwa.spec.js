@@ -96,10 +96,12 @@ test('rep events retain their goal and rank matching loads and time windows', as
   await page.reload();
   await openStrongmanDay(page);
   await expect(record).toContainText('200 lb · 10 reps · 60 sec');
+  await expect(competition(page).getByRole('button')).toHaveCount(0);
+  await page.getByRole('button', { name: '← Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Plans', exact: true }).click();
   await competition(page).getByRole('button', { name: 'Edit competition', exact: true }).click();
   await expect(page.getByLabel('Event 1 record goal', { exact: true })).toHaveValue('reps');
   await competition(page).getByRole('button', { name: 'Cancel', exact: true }).click();
-  await page.getByRole('button', { name: '← Back', exact: true }).click();
   await page.getByRole('button', { name: 'Progress', exact: true }).click();
   await page.getByRole('tab', { name: 'Strongman records', exact: true }).click();
   await expect(page.getByLabel('Strongman record setup')).toBeVisible();
@@ -170,6 +172,9 @@ test('strongman training supports unknown medleys, backfill, actual sets and rec
   await openStrongmanDay(page);
   await expect(page.locator('.strongman-training-entry')).toContainText('650 lb · 0 ft');
 
+  await expect(competition(page).getByRole('button')).toHaveCount(0);
+  await page.getByRole('button', { name: '← Back', exact: true }).click();
+  await page.getByRole('button', { name: 'Plans', exact: true }).click();
   await competition(page).getByRole('button', { name: 'Edit competition', exact: true }).click();
   for (const [index, name, weight] of [[1, 'Farmers carry', '200'], [2, 'Keg carry', '250'], [3, 'Sandbag carry', '300']]) {
     await page.getByLabel(`Event 2 implement ${index} name`, { exact: true }).fill(name);
@@ -177,6 +182,9 @@ test('strongman training supports unknown medleys, backfill, actual sets and rec
     await page.getByLabel(`Event 2 implement ${index} Distance (ft)`, { exact: true }).fill('50');
   }
   await page.getByRole('button', { name: 'Save competition', exact: true }).click();
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await openStrongmanDay(page);
+  await expect(competition(page).getByRole('button')).toHaveCount(0);
   await page.getByRole('button', { name: 'Add exercise', exact: true }).click();
   await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Sandbag carry · Carry medley' });
   await editor.getByLabel('Weight (lb)', { exact: true }).fill('275');
