@@ -25,6 +25,7 @@ export const duplicateRoutine = (routine, profileId, name) => {
       ...(routine.inputs?.strongmanCompetition ? { strongmanCompetition: cloneStrongmanCompetition(routine.inputs.strongmanCompetition) } : {}),
     },
     strongmanLog: [],
+    ...(routine.cycleWeekGroups ? { cycleWeekGroups: JSON.parse(JSON.stringify(routine.cycleWeekGroups)) } : {}),
     workouts: routine.workouts.map(workout => ({
       ...workout,
       id: makeId(),

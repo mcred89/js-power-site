@@ -39,6 +39,7 @@ describe('updating an existing plan', () => {
     expect(getPlanUpdateSummary(routine, updated)).toEqual({
       changedWorkouts: 1, completedWorkouts: 1, startedWorkouts: 3, preservedOverrides: 0,
       removedWorkouts: 0, removedByName: {}, removedOverrides: 0, preservedExtraWorkouts: 0,
+      futureWeeks: [],
     });
   });
 

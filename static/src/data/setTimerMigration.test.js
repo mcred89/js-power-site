@@ -50,6 +50,6 @@ describe('set timer compatibility', () => {
     expect(migrated.templates).toEqual(original.templates);
     expect(migrated.archives).toBe(original.archives);
     expect(JSON.stringify(original)).toBe(before);
-    expect([15, 16, 17, 18, 19, 20, 21].reduce((backup, version) => backupMigrations[version](backup), original)).toEqual(migrated);
+    expect([15, 16, 17, 18, 19, 20, 21, 22].reduce((backup, version) => backupMigrations[version](backup), original)).toEqual(migrated);
   });
 });

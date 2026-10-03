@@ -248,7 +248,7 @@ it('reviews the removed workouts and customized exercises before shortening a si
   act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
 
   expect(container.querySelector('[name="duration"]').closest('label').textContent).toContain('Cycle duration');
-  expect(container.textContent).toContain('compresses the five lifting stages into three weeks');
+  expect(container.textContent).toContain('combines remaining untouched weeks in pairs');
   fill('duration', '3 weeks');
   expect(button('Review changes').disabled).toBe(false);
   review();
@@ -259,6 +259,11 @@ it('reviews the removed workouts and customized exercises before shortening a si
   expect(container.textContent).toContain('Strongman: 2');
   expect(container.textContent).toContain('The removed workouts include 1 customized exercise.');
   expect(container.textContent).toContain('1 individual exercise customization stays in place on remaining workouts.');
+  expect([...container.querySelectorAll('.plan-update-schedule li')].map(item => item.textContent)).toEqual([
+    'Week 1 · 6 workoutsSquat → Press → Deadlift → Squat → Press → Strongman',
+    'Week 2 · 6 workoutsSquat → Press → Deadlift → Squat → Press → Strongman',
+    'Week 3 · 4 workoutsSquat → Press → Deadlift → Strongman',
+  ]);
   expect(container.textContent).not.toContain('Your workout order and cycle schedule stay the same.');
   expect(onSave).not.toHaveBeenCalled();
   expect(routine).toEqual(original);
@@ -266,7 +271,7 @@ it('reviews the removed workouts and customized exercises before shortening a si
   expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ duration: '3 weeks', includeStrongmanDay: true }));
 });
 
-it('shortens the final cycle of a started plan and explains protected extra workouts', async () => {
+it('shortens only untouched weeks after the latest started week', async () => {
   let routine = createRoutine('profile', 'Partly completed plan', {
     ...inputs, mesoMode: true, includeStrongmanDay: true,
     microCycles: [{ duration: '3 weeks', volume: 'Low' }, { duration: '5 weeks', volume: 'High' }],
@@ -283,15 +288,44 @@ it('shortens the final cycle of a started plan and explains protected extra work
   review();
   expect(container.querySelector('dl').textContent).toBe('Cycle 2 durationFrom5 weeksTo3 weeks');
   expect(container.textContent).toContain('1 completed · 1 already started — preserved');
-  expect(container.textContent).toContain('3 unstarted workouts will be removed');
+  expect(container.textContent).toContain('2 unstarted workouts will be removed');
   expect(container.textContent).toContain('Deadlift: 1');
-  expect(container.textContent).toContain('Strongman: 2');
-  expect(container.textContent).toContain('1 recorded or started workout falls outside the shorter schedule and will stay in the plan.');
+  expect(container.textContent).toContain('Strongman: 1');
+  expect(container.textContent).not.toContain('outside the shorter schedule');
+  expect(container.textContent).toContain('Only untouched weeks after your latest recorded or started workout are combined.');
+  expect([...container.querySelectorAll('.plan-update-schedule li')].slice(-4).map(item => item.textContent)).toEqual([
+    'Cycle 2 · Week 1 · 3 workoutsPress → Deadlift → Strongman',
+    'Cycle 2 · Week 2 · 4 workoutsSquat → Press → Deadlift → Strongman',
+    'Cycle 2 · Week 3 · 6 workoutsSquat → Press → Deadlift → Squat → Press → Strongman',
+    'Cycle 2 · Week 4 · 4 workoutsSquat → Press → Deadlift → Strongman',
+  ]);
   expect(routine).toEqual(original);
   await act(async () => button('Save update').click());
   expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
     microCycles: [{ duration: '3 weeks', volume: 'Low' }, { duration: '3 weeks', volume: 'High' }],
   }));
+});
+
+it('previews one six-day week after three completed weeks of a final cycle', () => {
+  const routine = createRoutine('profile', 'Three weeks completed', {
+    ...inputs, mesoMode: true, includeStrongmanDay: true,
+    microCycles: [{ duration: '3 weeks', volume: 'Low' }, { duration: '5 weeks', volume: 'Low' }],
+  });
+  routine.workouts.forEach(workout => {
+    if (workout.cycleIndex === 0 || workout.weekIndex < 3) workout.completedAt = '2026-10-01T12:00:00Z';
+  });
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={() => {}} onCancel={() => {}} />));
+  fill('duration', '3 weeks', 1);
+  review();
+
+  expect(container.textContent).toContain('28 completed · 0 already started — preserved');
+  expect(container.textContent).toContain('2 unstarted workouts will be removed');
+  expect(container.textContent).toContain('Deadlift: 1');
+  expect(container.textContent).toContain('Strongman: 1');
+  expect([...container.querySelectorAll('.plan-update-schedule li')].map(item => item.textContent)).toEqual([
+    'Cycle 2 · Week 4 · 6 workoutsSquat → Press → Deadlift → Squat → Press → Strongman',
+  ]);
+  expect(container.textContent).toContain('the total cycle may span more than three calendar weeks');
 });
 
 it('does not offer to expand a single three-week cycle', () => {

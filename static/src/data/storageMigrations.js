@@ -4,8 +4,9 @@ import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { addStrongmanTracking } from './strongman';
 import { migrateStrongmanCompetitions } from './strongmanCompetitions';
 import { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
+import { repairShortenedCycles } from './cycleShorteningRepair';
 
-export const DATABASE_VERSION = 21;
+export const DATABASE_VERSION = 22;
 
 export { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 
@@ -331,6 +332,9 @@ export const databaseMigrations = {
   21: ({ transaction, done }) => migrateRecordStores(transaction, 21, {
     routines: addWorkoutSourceWeeks,
     templates: addWorkoutSourceWeeks,
+  }, done),
+  22: ({ transaction, done }) => migrateRecordStores(transaction, 22, {
+    routines: repairShortenedCycles,
   }, done),
 };
 

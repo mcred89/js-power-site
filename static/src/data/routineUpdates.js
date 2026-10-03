@@ -1,6 +1,7 @@
 import { getLiftProgressionMode, MAX_PROGRESSION_MODES } from './routineGeneration';
 import { hasExerciseOverrides, isRemovedByShortening, regenerateFutureWorkouts } from './routineRecalculation';
 import { applyBatch } from './storage';
+import { isShortenedCycle, withShortenedWeekGroups } from './cycleShortening';
 
 const liftKeys = ['squat', 'press', 'deadlift'];
 const editableKeys = [
@@ -147,11 +148,12 @@ export const updateRoutinePlan = (routine, changes) => {
   }
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('Enter the plan settings to update.');
   const inputs = updatedInputs(routine.inputs, changes);
-  const workouts = regenerateFutureWorkouts(routine, inputs);
+  const scheduled = withShortenedWeekGroups(routine, inputs);
+  const workouts = regenerateFutureWorkouts(scheduled, inputs);
   if (JSON.stringify(inputs) === JSON.stringify(routine.inputs) &&
       workouts.length === routine.workouts.length &&
       workouts.every((workout, index) => workout === routine.workouts[index])) return routine;
-  return { ...routine, inputs, workouts, updatedAt: new Date().toISOString() };
+  return { ...scheduled, inputs, workouts, updatedAt: new Date().toISOString() };
 };
 
 // Keep update-only persistence and conflict handling in the lazy Plans graph.
@@ -175,6 +177,13 @@ export const commitPlanUpdate = async (routine, changes, saveRoutine) => {
 export const getPlanUpdateSummary = (routine, updatedRoutine) => {
   const updatedById = new Map(updatedRoutine.workouts.map(workout => [workout.id, workout]));
   const loggedIds = new Set((routine.strongmanLog || []).map(entry => entry.workoutId));
+  const futureWeeks = new Map();
+  updatedRoutine.workouts.forEach(workout => {
+    if (workout.completedAt || workout.skippedAt || !isShortenedCycle(routine.inputs, updatedRoutine.inputs, workout.cycleIndex)) return;
+    const key = `${workout.cycleIndex}:${workout.weekIndex}`;
+    if (!futureWeeks.has(key)) futureWeeks.set(key, { cycleLabel: workout.cycleLabel, weekLabel: workout.weekLabel, workouts: [] });
+    futureWeeks.get(key).workouts.push(workout.name);
+  });
   return routine.workouts.reduce((summary, workout) => {
     const updated = updatedById.get(workout.id);
     if (!updated) {
@@ -183,7 +192,7 @@ export const getPlanUpdateSummary = (routine, updatedRoutine) => {
       summary.removedOverrides += (workout.exercises || []).filter(hasExerciseOverrides).length;
       return summary;
     }
-    if (isRemovedByShortening(workout, routine.inputs, updatedRoutine.inputs) &&
+    if (isRemovedByShortening(workout, routine.inputs, updatedRoutine.inputs, updatedRoutine.cycleWeekGroups) &&
         (workout.completedAt || workout.skippedAt || workout.session || loggedIds.has(workout.id))) {
       summary.preservedExtraWorkouts += 1;
     }
@@ -199,5 +208,6 @@ export const getPlanUpdateSummary = (routine, updatedRoutine) => {
   }, {
     changedWorkouts: 0, completedWorkouts: 0, startedWorkouts: 0, preservedOverrides: 0,
     removedWorkouts: 0, removedByName: {}, removedOverrides: 0, preservedExtraWorkouts: 0,
+    futureWeeks: [...futureWeeks.values()],
   });
 };

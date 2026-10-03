@@ -142,7 +142,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   const backup = JSON.parse(Buffer.concat(chunks).toString());
-  expect(backup).toMatchObject({ version: 21, dataSchemaVersion: 21 });
+  expect(backup).toMatchObject({ version: 22, dataSchemaVersion: 22 });
   expect(backup.routines).toHaveLength(1);
   expect(backup.routines[0].inputs).toEqual({
     ...seeded.strength.inputs,
@@ -189,7 +189,7 @@ test('PWA upgrades a version 11 training database while preserving ordinary stro
     database.close();
     return result;
   });
-  expect(persisted).toEqual({ version: 21, archives: backup.archives });
+  expect(persisted).toEqual({ version: 22, archives: backup.archives });
 });
 
 const readWorkoutSession = async page => page.evaluate(async () => {

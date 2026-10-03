@@ -1,3 +1,5 @@
+import { getSavedWorkoutWeekIndex } from './cycleShortening';
+
 const validDate = value => {
   if (value === null || value === undefined || value === '') return null;
   if (!(value instanceof Date) && typeof value !== 'string' && typeof value !== 'number') return null;
@@ -96,7 +98,8 @@ export const buildPlanCalendar = (routine, today = new Date()) => {
   });
   const groups = new Map();
   workouts.forEach(workout => {
-    const { cycle, week } = workoutIndices(workout);
+    const { cycle, week: originalWeek } = workoutIndices(workout);
+    const week = getSavedWorkoutWeekIndex(routine, workout) ?? originalWeek;
     lengths.set(cycle, Math.max(lengths.get(cycle) || 0, week + 1));
     const key = `${cycle}:${week}`;
     if (!groups.has(key)) groups.set(key, { cycle, week, workouts: [] });

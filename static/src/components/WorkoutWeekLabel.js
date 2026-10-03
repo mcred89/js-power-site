@@ -28,7 +28,7 @@ export const useCalendarDay = () => {
 
 export const WorkoutWeekLabel = ({ workout, calendarWeek }) => (
   <span className="workout-week-label">
-    <span>{workoutWeekText(workout)}</span>
+    <span>{workoutWeekText(!workout.completedAt && calendarWeek?.weekLabel ? calendarWeek : workout)}</span>
     {!workout.completedAt && calendarWeek?.start && <span className="calendar-week-date">
       <span aria-hidden="true"> · </span>Week of <time dateTime={localDateKey(calendarWeek.start)}>{formatCalendarDate(calendarWeek.start)}</time>
     </span>}

@@ -1,4 +1,5 @@
 import { TABATA_PRESCRIPTION } from './tabata';
+import { getCycleWeekGroups } from './cycleShortening';
 
 const percentages = {
   Low: [{ percent: .65, reps: '4 × 6' }, { percent: .7, reps: '4 × 5' }, { percent: .75, reps: '4 × 4' }, { percent: .8, reps: '4 × 3' }, { percent: .85, reps: '4 × 2' }],
@@ -28,9 +29,6 @@ const accessoryMovements = {
     Hamstrings: 'Romanian deadlifts',
   },
 };
-const getWeekGroups = duration => duration === '3 weeks'
-  ? [[0, 1], [2, 3], [4]]
-  : [[0], [1], [2], [3], [4]];
 
 export const MAX_PROGRESSION_MODES = {
   SAME: 'same',
@@ -101,12 +99,12 @@ const getExercises = (day, props) => {
 
 // This module must stay React-free: tracker persistence imports it while calculator
 // presentation is lazy. Importing UI here would pull the website graph into standalone.
-export const buildRoutinePlan = (props, resolvedCycleMaxes = []) => {
+export const buildRoutinePlan = (props, resolvedCycleMaxes = [], cycleWeekGroups = {}) => {
   const cycles = props.mesoMode ? props.microCycles : [{ duration: props.duration, volume: props.mainLiftChoice }];
   return cycles.map((cycle, cycleIndex) => {
     const effectiveMaxes = resolvedCycleMaxes[cycleIndex] || getEffectiveMaxes(props, cycleIndex);
     const routineProps = { ...props, ...effectiveMaxes, mainLiftChoice: cycle.volume, duration: cycle.duration };
-    const weeks = getWeekGroups(cycle.duration).map(weekIndexes => (
+    const weeks = getCycleWeekGroups(props, cycleIndex, cycleWeekGroups).map(weekIndexes => (
       getSessions(weekIndexes, props.includeStrongmanDay, cycle.duration).map((day, dayIndex) => ({
         name: day.lift,
         sourceWeek: day.sourceWeek,

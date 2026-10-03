@@ -38,3 +38,13 @@ it('refreshes the calendar after local midnight and after resuming an idle app',
   act(() => document.dispatchEvent(new Event('visibilitychange')));
   expect(container.textContent).toBe('2026-10-12');
 });
+
+it('uses the repaired calendar label for pending sessions while preserving historical labels', () => {
+  const workout = { cycleLabel: 'Cycle 2', weekLabel: 'Week 2', session: { status: 'inProgress' } };
+  const calendarWeek = { cycleLabel: 'Cycle 2', weekLabel: 'Week 4', start: new Date(2026, 9, 5) };
+  act(() => root.render(<WorkoutWeekLabel workout={workout} calendarWeek={calendarWeek} />));
+  expect(container.textContent).toBe('Cycle 2 · Week 4 · Week of 10/05/26');
+  expect(workout.weekLabel).toBe('Week 2');
+  act(() => root.render(<WorkoutWeekLabel workout={{ ...workout, completedAt: '2026-10-06' }} calendarWeek={calendarWeek} />));
+  expect(container.textContent).toBe('Cycle 2 · Week 2');
+});

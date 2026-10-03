@@ -24,11 +24,11 @@ export const visibleExercise = exercise => ({
   prescription: exercise.overrides.prescription ?? exercise.generated.prescription,
 });
 
-export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) => {
+export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = [], cycleWeekGroups = {}) => {
   let sequence = 0;
   const workouts = [];
 
-  buildRoutinePlan(inputs, resolvedCycleMaxes).forEach((cycle, cycleIndex) => {
+  buildRoutinePlan(inputs, resolvedCycleMaxes, cycleWeekGroups).forEach((cycle, cycleIndex) => {
     cycle.weeks.forEach((week, weekIndex) => {
       week.forEach(day => {
         sequence += 1;
@@ -66,6 +66,7 @@ export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) 
       ...(inputs.liftProgressionModes ? { liftProgressionModes: { ...inputs.liftProgressionModes } } : {}),
     },
     workouts,
+    ...(Object.keys(cycleWeekGroups).length ? { cycleWeekGroups: JSON.parse(JSON.stringify(cycleWeekGroups)) } : {}),
     strongmanLog: [],
     archived: false,
     createdAt: timestamp,

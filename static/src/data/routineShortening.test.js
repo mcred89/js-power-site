@@ -53,18 +53,18 @@ it('keeps completed prior cycles and two completed weeks of the final cycle byte
   const updated = shortenFinal(routine);
   snapshots.forEach(workout => expect(updated.workouts.find(item => item.id === workout.id)).toBe(workout));
   expect(getPlanUpdateSummary(routine, updated)).toMatchObject({
-    removedWorkouts: 2, removedByName: { Deadlift: 1, Strongman: 1 }, preservedExtraWorkouts: 2,
+    removedWorkouts: 2, removedByName: { Deadlift: 1, Strongman: 1 }, preservedExtraWorkouts: 0,
   });
   expect(updated.workouts.filter(workout => !workout.completedAt).map(workout => [workout.name, workout.weekIndex])).toEqual([
-    ['Squat', 1], ['Press', 1], ['Deadlift', 1], ['Squat', 1], ['Press', 1], ['Strongman', 1],
-    ['Squat', 2], ['Press', 2], ['Deadlift', 2], ['Strongman', 2],
+    ['Squat', 2], ['Press', 2], ['Deadlift', 2], ['Squat', 2], ['Press', 2], ['Strongman', 2],
+    ['Squat', 3], ['Press', 3], ['Deadlift', 3], ['Strongman', 3],
   ]);
   expect(stage(updated, 'Press', 3, 1).exercises[0].overrides).toEqual({ movement: 'Log press', weight: '150' });
   expect(stage(updated, 'Squat', 3, 1).exercises[0].generated.weight).toBe(250);
   expect(JSON.stringify(routine)).toBe(before);
 });
 
-it('preserves started, paused, skipped, imported-session and separately logged days even outside the shortened schedule', () => {
+it('preserves entire weeks through the latest started, skipped, imported-session or logged activity', () => {
   let routine = make();
   const started = stage(routine, 'Deadlift', 1);
   routine = startWorkoutSession(routine, started.id, '2026-09-30T12:00:00Z');
@@ -77,7 +77,8 @@ it('preserves started, paused, skipped, imported-session and separately logged d
   const updated = updateRoutinePlan(routine, { duration: '3 weeks', maxDead: '450' });
   protectedWorkouts.forEach(workout => expect(updated.workouts.find(item => item.id === workout.id)).toBe(workout));
   expect(updated.strongmanLog).toBe(routine.strongmanLog);
-  expect(getPlanUpdateSummary(routine, updated)).toMatchObject({ removedWorkouts: 0, preservedExtraWorkouts: 4 });
+  expect(updated.workouts).toHaveLength(20);
+  expect(getPlanUpdateSummary(routine, updated)).toMatchObject({ removedWorkouts: 0, preservedExtraWorkouts: 0 });
 });
 
 it('keeps manual deletion gaps and custom records through shortening, further edits and max correction', () => {
@@ -146,7 +147,7 @@ it('retains historical Week 4 while forecasting only one future week after four 
   const calendar = buildPlanCalendar(updated, '2026-10-03');
   expect(calendar.remainingWeeks).toBe(1);
   expect(calendar.weeks.find(week => week.weekLabel === 'Week 4').completed).toBe(true);
-  expect(stage(updated, 'Deadlift', 4).weekLabel).toBe('Week 3');
+  expect(stage(updated, 'Deadlift', 4).weekLabel).toBe('Week 5');
 });
 
 it('does not allow lengthening a shortened cycle or changing the number of cycles', () => {

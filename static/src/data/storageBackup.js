@@ -10,9 +10,10 @@ import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { addStrongmanTracking, validateStrongmanRecord } from './strongman';
 import { migrateStrongmanCompetitions, validateProfileCompetitions } from './strongmanCompetitions';
 import { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
+import { repairShortenedCycles } from './cycleShorteningRepair';
 
 // Backup preparation runs in the on-demand data task worker, outside startup.
-export const BACKUP_VERSION = 21;
+export const BACKUP_VERSION = 22;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -139,6 +140,12 @@ export const backupMigrations = {
     dataSchemaVersion: 21,
     routines: Array.isArray(backup.routines) ? backup.routines.map(addWorkoutSourceWeeks) : backup.routines,
     templates: Array.isArray(backup.templates) ? backup.templates.map(addWorkoutSourceWeeks) : backup.templates,
+  }),
+  22: backup => ({
+    ...backup,
+    version: 22,
+    dataSchemaVersion: 22,
+    routines: Array.isArray(backup.routines) ? backup.routines.map(repairShortenedCycles) : backup.routines,
   }),
 };
 

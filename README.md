@@ -25,18 +25,32 @@ Dates are calculated locally from existing records and need no backup migration.
 
 Open **Plans → Update plan → Cycle length** to change a 5-week cycle to
 3 weeks, including a partly completed final cycle. Review the affected workout
-counts, then choose **Save update**. The shorter cycle groups the same five
-lifting stages into three weeks; it does not discard the final two stages.
-With dedicated Strongman days enabled, the shorter schedule omits the second
-and fourth Deadlift stages and the first and third Strongman days, but only
-when those workouts have no recorded or started activity.
+counts and the remaining week-by-week workout list, then choose **Save update**.
+Only untouched weeks after your latest recorded or started workout are combined
+in pairs. Earlier weeks keep their original schedule. This preserves the five
+lifting stages, so a cycle shortened midway can span more than three calendar
+weeks.
+
+With dedicated Strongman days enabled, each combined pair becomes **Squat,
+Press, Deadlift, Squat, Press, Strongman**: it keeps the first week's Deadlift
+and the second week's Strongman day. After three completed weeks, weeks 4 and 5
+become one six-day Week 4. After two completed weeks, the remaining weeks have
+six and four days. A final unpaired week keeps Squat, Press, Deadlift, and
+Strongman. Without dedicated Strongman days, a combined week keeps all six
+lifting days.
 
 Completed and skipped workouts, started sessions, and workouts with Strongman
 logs retain their history and original week labels. Remaining workouts retain
 their IDs, queue order, and exercise edits. The review explicitly warns if a
-removed future workout contains exercise customizations. Previously deleted
-workouts stay deleted. Later max updates continue to use the correct lifting
+removed future workout contains exercise customizations. Manually deleted
+workouts stay deleted during later plan edits. Later max updates use the correct lifting
 stage. A 3-week cycle cannot be expanded back to 5 weeks with this editor.
+
+The update also repairs recognizable plans affected by the earlier shortening
+bug when the app opens, and when importing an older backup. It restores missing
+generated future days and corrects future week grouping while preserving
+recorded workouts, surviving exercise edits, and unknown records. Exercise
+customizations on days already deleted by the old version cannot be recovered.
 
 ## Progression by lift
 

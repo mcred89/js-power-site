@@ -1,6 +1,9 @@
 import { adaptiveCycleMaxes, createRoutine, visibleExercise } from './routines';
 import { hasAdaptiveProgression } from './routineGeneration';
 import { isTabataExercise } from './tabata';
+import { isShortenedCycle, isRemovedByShortening } from './cycleShortening';
+
+export { isShortenedCycle, isRemovedByShortening } from './cycleShortening';
 
 const now = () => new Date().toISOString();
 
@@ -24,20 +27,6 @@ const generatedExerciseRole = (exercise, workout) => {
 
 export const hasExerciseOverrides = exercise => Object.values(exercise.overrides || {})
   .some(value => value !== null && value !== undefined);
-
-const cycleDuration = (inputs, cycleIndex) => inputs.mesoMode
-  ? inputs.microCycles?.[cycleIndex]?.duration : inputs.duration;
-
-export const isShortenedCycle = (before, after, cycleIndex) => (
-  cycleDuration(before, cycleIndex) === '5 weeks' && cycleDuration(after, cycleIndex) === '3 weeks'
-);
-
-export const isRemovedByShortening = (workout, before, after) => (
-  isShortenedCycle(before, after, workout.cycleIndex) && before.includeStrongmanDay && (
-    (workout.name === 'Deadlift' && [1, 3].includes(workout.sourceWeek)) ||
-    (workout.name === 'Strongman' && [0, 2].includes(workout.sourceWeek))
-  )
-);
 
 const stageKey = workout => Number.isInteger(workout.sourceWeek) && workout.sourceWeek >= 0 && workout.sourceWeek < 5
   ? `${workout.cycleIndex}:${workout.name}:${workout.sourceWeek}` : null;
@@ -74,7 +63,7 @@ export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
   const cycleMaxes = inputs.mesoMode && hasAdaptiveProgression(inputs)
     ? adaptiveCycleMaxes(nextRoutine)
     : [];
-  const regenerated = createRoutine(routine.profileId, routine.name, inputs, cycleMaxes);
+  const regenerated = createRoutine(routine.profileId, routine.name, inputs, cycleMaxes, routine.cycleWeekGroups);
   const generatedByStage = new Map(regenerated.workouts.map(workout => [stageKey(workout), workout]));
   const loggedIds = new Set((routine.strongmanLog || []).map(entry => entry.workoutId));
   // Duplicate imported stages are retained as custom records. Only the earliest
@@ -92,7 +81,7 @@ export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
     // annotate recognized legacy workouts before any schedule can be changed.
     if (!key || stageOwners.get(key) !== workout) return [workout];
     const generatedWorkout = generatedByStage.get(key);
-    if (!generatedWorkout) return isRemovedByShortening(workout, routine.inputs, inputs) ? [] : [workout];
+    if (!generatedWorkout) return isRemovedByShortening(workout, routine.inputs, inputs, routine.cycleWeekGroups) ? [] : [workout];
     const next = {
       ...workout,
       ...(key && isShortenedCycle(routine.inputs, inputs, workout.cycleIndex) ? {

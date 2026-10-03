@@ -184,9 +184,18 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
               </div>
             ))}
           </dl>
+          {shortening && review.futureWeeks?.length > 0 && <section className="plan-update-schedule" aria-label="Remaining workout schedule">
+            <h2 className="plan-update-subheading">Remaining workout schedule</h2>
+            <ol>
+              {review.futureWeeks.map((week, index) => <li key={index}>
+                <strong>{week.cycleLabel ? `${week.cycleLabel} · ` : ''}{week.weekLabel} · {week.workouts.length} {week.workouts.length === 1 ? 'workout' : 'workouts'}</strong>
+                <p>{week.workouts.join(' → ')}</p>
+              </li>)}
+            </ol>
+          </section>}
           {review.removedOverrides > 0 && <p className="plan-update-warning">The removed workouts include {review.removedOverrides} customized {review.removedOverrides === 1 ? 'exercise' : 'exercises'}. Those exercise edits will be removed with their workouts.</p>}
           <p className="plan-update-note">{review.preservedOverrides > 0 ? `${review.preservedOverrides} individual exercise ${review.preservedOverrides === 1 ? 'customization stays' : 'customizations stay'} in place on remaining workouts. ` : ''}Individual exercise edits on remaining workouts are kept, including customized exercises whose plan option you turn off. Edit those exercises from the workout if needed.</p>
-          <p className="plan-update-note">{shortening ? 'Remaining workouts keep their order. Unstarted workouts use the shorter cycle schedule; recorded and started workouts keep their original week labels.' : 'Your workout order and cycle schedule stay the same.'}</p>
+          <p className="plan-update-note">{shortening ? 'Remaining workouts keep their order. Only untouched weeks after your latest recorded or started workout are combined. Earlier weeks keep their original schedule, so the total cycle may span more than three calendar weeks.' : 'Your workout order and cycle schedule stay the same.'}</p>
           {error && <p className="plan-update-error" role="alert">{error}</p>}
           <div className="plan-update-actions">
             <button type="button" className="primary-button" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save update'}</button>
@@ -246,7 +255,7 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
           </fieldset>
           <fieldset className="plan-update-group">
             <legend>Cycle length</legend>
-            <p className="field-help" id="plan-update-duration-help">A 3-week cycle compresses the five lifting stages into three weeks. Shortening removes only unstarted Deadlift and Strongman days that the shorter schedule does not need. Completed, skipped, started, and logged workouts are kept.</p>
+            <p className="field-help" id="plan-update-duration-help">Changing to 3 weeks combines remaining untouched weeks in pairs. Weeks with completed, skipped, started, or logged workouts and all earlier weeks keep their original schedule. With dedicated Strongman days, each combined week is Squat, Press, Deadlift, Squat, Press, Strongman. A final unpaired week keeps its usual days.</p>
             <div className="plan-update-volumes">
               {cycles.map((cycle, index) => (
                 <label className="form-field" key={index}>

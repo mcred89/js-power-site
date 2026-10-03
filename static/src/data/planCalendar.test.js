@@ -1,4 +1,6 @@
 import { buildPlanCalendar, formatCalendarDate, localDateKey, workoutWeekText } from './planCalendar';
+import { createRoutine } from './routines';
+import { repairShortenedCycles } from './cycleShorteningRepair';
 
 const day = (id, cycleIndex, weekIndex, extra = {}) => ({
   id, cycleIndex, weekIndex, cycleLabel: `Cycle ${cycleIndex + 1}`, weekLabel: `Week ${weekIndex + 1}`, completedAt: null, ...extra,
@@ -253,4 +255,50 @@ it('retains large valid histories without filling absent cycle indexes', () => {
   const calendar = buildPlanCalendar(routine([day('history', 1333, 4)]), '2026-10-01');
   expect(calendar.weeks).toHaveLength(1);
   expect(calendar.byWorkoutId.get('history')).toMatchObject({ key: '1333:4', cycleLabel: 'Cycle 1334', weekLabel: 'Week 5' });
+});
+
+it('forecasts a started bad Week 2 snapshot together with the repaired six-day Week 4 without rewriting it', () => {
+  const original = createRoutine('profile', 'Shortened', { maxSquat: '300', maxPress: '200', maxDead: '400',
+    duration: '5 weeks', mainLiftChoice: 'Low', includeStrongmanDay: true,
+  });
+  original.inputs.duration = '3 weeks';
+  original.workouts = original.workouts.flatMap(workout => {
+    if (workout.sourceWeek < 3) return [{ ...workout, completedAt: '2026-09-30T12:00:00Z' }];
+    if (workout.sourceWeek === 3 && workout.name === 'Deadlift') return [];
+    const weekIndex = Math.floor(workout.sourceWeek / 2);
+    return [{ ...workout, weekIndex, weekLabel: `Week ${weekIndex + 1}` }];
+  });
+  const started = original.workouts.find(workout => workout.name === 'Squat' && workout.sourceWeek === 3);
+  started.session = { status: 'inProgress', startedAt: '2026-10-01T12:00:00Z' };
+  const snapshot = JSON.stringify(started);
+  const repaired = repairShortenedCycles(original);
+  expect(repaired.workouts.find(workout => workout.id === started.id)).toBe(started);
+  expect(started.weekLabel).toBe('Week 2');
+  const before = JSON.stringify(repaired);
+  const calendar = buildPlanCalendar(repaired, '2026-10-01');
+  expect(calendar.remainingWeeks).toBe(1);
+  expect(calendar.weeks.filter(week => !week.completed && !week.empty)).toHaveLength(1);
+  const remaining = repaired.workouts.filter(workout => !workout.completedAt);
+  expect(remaining).toHaveLength(6);
+  remaining.forEach(workout => expect(calendar.byWorkoutId.get(workout.id)).toMatchObject({ key: '0:3', weekLabel: 'Week 4' }));
+  expect(JSON.stringify(started)).toBe(snapshot);
+  expect(JSON.stringify(repaired)).toBe(before);
+});
+
+it('ignores absent, invalid or inapplicable saved groupings and unknown workout identities', () => {
+  const workout = day('future', 0, 1, { name: 'Squat', sourceWeek: 3 });
+  const saved = { 0: [[0], [1], [2], [3, 4]] };
+  const base = routine([workout], ['3 weeks']);
+  const expected = buildPlanCalendar(base, '2026-10-01');
+  [undefined, null, { 0: [[0], [1], [3, 4]] }, { 0: [[0], [1], [2], [3, 3]] }, { 0: 'unknown' }]
+    .forEach(cycleWeekGroups => expect(buildPlanCalendar({ ...base, cycleWeekGroups }, '2026-10-01')).toEqual(expected));
+  const fiveWeeks = routine([workout]);
+  expect(buildPlanCalendar({ ...fiveWeeks, cycleWeekGroups: saved }, '2026-10-01'))
+    .toEqual(buildPlanCalendar(fiveWeeks, '2026-10-01'));
+  [{ ...workout, name: 'Custom' }, { ...workout, sourceWeek: undefined }, { ...workout, cycleIndex: undefined }]
+    .forEach(unknown => {
+      const plan = { ...base, workouts: [unknown] };
+      expect(buildPlanCalendar({ ...plan, cycleWeekGroups: saved }, '2026-10-01'))
+        .toEqual(buildPlanCalendar(plan, '2026-10-01'));
+    });
 });
