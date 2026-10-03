@@ -9,9 +9,10 @@ import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { addStrongmanTracking, validateStrongmanRecord } from './strongman';
 import { migrateStrongmanCompetitions, validateProfileCompetitions } from './strongmanCompetitions';
+import { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 
 // Backup preparation runs in the on-demand data task worker, outside startup.
-export const BACKUP_VERSION = 20;
+export const BACKUP_VERSION = 21;
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -132,6 +133,13 @@ export const backupMigrations = {
   // New score fields stay optional, preserving unknown data and saved setups.
   19: backup => ({ ...backup, version: 19, dataSchemaVersion: 19 }),
   20: backup => migrateStrongmanCompetitions({ ...backup, version: 20, dataSchemaVersion: 20 }),
+  21: backup => ({
+    ...backup,
+    version: 21,
+    dataSchemaVersion: 21,
+    routines: Array.isArray(backup.routines) ? backup.routines.map(addWorkoutSourceWeeks) : backup.routines,
+    templates: Array.isArray(backup.templates) ? backup.templates.map(addWorkoutSourceWeeks) : backup.templates,
+  }),
 };
 
 export const migrateBackup = original => {

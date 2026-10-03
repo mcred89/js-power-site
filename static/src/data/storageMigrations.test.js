@@ -83,6 +83,7 @@ describe('IndexedDB migrations', () => {
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 18 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 19 } },
       { name: 'metadata', value: { key: 'dataSchemaVersion', value: 20 } },
+      { name: 'metadata', value: { key: 'dataSchemaVersion', value: 21 } },
     ]);
   });
 
@@ -333,8 +334,8 @@ describe('Tabata sprint compatibility', () => {
   });
 
   it('advances the database and backup versions for independent sprint options', () => {
-    expect(DATABASE_VERSION).toBe(20);
-    expect(BACKUP_VERSION).toBe(20);
+    expect(DATABASE_VERSION).toBe(21);
+    expect(BACKUP_VERSION).toBe(21);
   });
 
   it('adds disabled defaults while preserving explicit options, unknown data, and workout snapshots', () => {

@@ -21,6 +21,23 @@ finishing a week puts the next one on the following Monday unless you have
 already started it. Recorded start and finish dates come from workout history.
 Dates are calculated locally from existing records and need no backup migration.
 
+## Shortening an existing cycle
+
+Open **Plans → Update plan → Cycle length** to change a 5-week cycle to
+3 weeks, including a partly completed final cycle. Review the affected workout
+counts, then choose **Save update**. The shorter cycle groups the same five
+lifting stages into three weeks; it does not discard the final two stages.
+With dedicated Strongman days enabled, the shorter schedule omits the second
+and fourth Deadlift stages and the first and third Strongman days, but only
+when those workouts have no recorded or started activity.
+
+Completed and skipped workouts, started sessions, and workouts with Strongman
+logs retain their history and original week labels. Remaining workouts retain
+their IDs, queue order, and exercise edits. The review explicitly warns if a
+removed future workout contains exercise customizations. Previously deleted
+workouts stay deleted. Later max updates continue to use the correct lifting
+stage. A 3-week cycle cannot be expanded back to 5 weeks with this editor.
+
 ## Progression by lift
 
 When building a mesocycle, **Max progression** sets the shared strategy for all

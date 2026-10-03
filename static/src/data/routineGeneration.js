@@ -59,11 +59,11 @@ const getSessions = (weekIndexes, includeStrongmanDay, duration) => {
   if (!includeStrongmanDay) return sessions;
   if (duration === '3 weeks') {
     const scheduled = sessions.map(session => session.cycleIndex === 1 && session.lift === 'Deadlift'
-      ? { lift: 'Strongman', isStrongman: true }
+      ? { lift: 'Strongman', isStrongman: true, sourceWeek: session.sourceWeek }
       : session);
-    return weekIndexes.length > 1 ? scheduled : [...scheduled, { lift: 'Strongman', isStrongman: true }];
+    return weekIndexes.length > 1 ? scheduled : [...scheduled, { lift: 'Strongman', isStrongman: true, sourceWeek: weekIndexes[0] }];
   }
-  return [...sessions, { lift: 'Strongman', isStrongman: true }];
+  return [...sessions, { lift: 'Strongman', isStrongman: true, sourceWeek: weekIndexes[0] }];
 };
 
 const getExercises = (day, props) => {
@@ -109,6 +109,7 @@ export const buildRoutinePlan = (props, resolvedCycleMaxes = []) => {
     const weeks = getWeekGroups(cycle.duration).map(weekIndexes => (
       getSessions(weekIndexes, props.includeStrongmanDay, cycle.duration).map((day, dayIndex) => ({
         name: day.lift,
+        sourceWeek: day.sourceWeek,
         dayNumber: dayIndex + 1,
         exercises: getExercises(day, routineProps),
       }))

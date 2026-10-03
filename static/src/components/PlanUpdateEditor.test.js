@@ -32,8 +32,8 @@ afterEach(() => {
 const button = label => [...container.querySelectorAll('button')].find(item => item.textContent === label);
 const click = element => act(() => element.click());
 const review = () => act(() => container.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
-const fill = (name, value) => {
-  const element = container.querySelector(`[name="${name}"]`);
+const fill = (name, value, cycleIndex) => {
+  const element = container.querySelector(`[name="${name}"]${cycleIndex === undefined ? '' : `[data-cycle-index="${cycleIndex}"]`}`);
   const prototype = element.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
   act(() => {
     Object.getOwnPropertyDescriptor(prototype, 'value').set.call(element, value);
@@ -78,9 +78,11 @@ it('keeps the draft when going back and never saves when cancelling either step'
   const onCancel = jest.fn();
   act(() => root.render(<PlanUpdateEditor routine={createRoutine('profile', 'Plan', inputs)} onSave={onSave} onCancel={onCancel} />));
   click(container.querySelector('[name="deadliftTabataEnabled"]'));
+  fill('duration', '3 weeks');
   review();
   click(button('Back to editing'));
   expect(container.querySelector('[name="deadliftTabataEnabled"]').checked).toBe(false);
+  expect(container.querySelector('[name="duration"]').value).toBe('3 weeks');
   click(button('Cancel'));
   expect(onCancel).toHaveBeenCalledTimes(1);
   review();
@@ -133,7 +135,14 @@ it('seeds older optional controls without inventing progression or pending chang
   expect(container.querySelector('[name="pressWeakPoint"]').value).toBe('');
   expect(container.querySelector('[name="pressWeakPoint"] option:checked').textContent).toBe('None');
   expect(button('Review changes').disabled).toBe(true);
-  expect(container.querySelector('[name="duration"]')).toBeNull();
+  const durations = [...container.querySelectorAll('[name="duration"]')];
+  expect(durations).toHaveLength(2);
+  expect(durations[0].value).toBe('3 weeks');
+  expect(durations[0].disabled).toBe(true);
+  expect(durations[0].closest('label').textContent).toContain('Cycle 1 duration');
+  expect(durations[1].value).toBe('5 weeks');
+  expect(durations[1].disabled).toBe(false);
+  expect(container.textContent).toContain('Existing 3-week cycles cannot be lengthened.');
   expect(container.querySelector('[name="includeStrongmanDay"]')).toBeNull();
 });
 
@@ -227,4 +236,69 @@ it('restores saved per-lift choices and can return a lift to the shared setting'
   expect(container.querySelector('dl').textContent).toContain('Deadlift progressionFromIncrease by set amountsToUse shared setting (Adapt from completed sets)');
   await act(async () => button('Save update').click());
   expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ liftProgressionModes: {} }));
+});
+
+it('reviews the removed workouts and customized exercises before shortening a single cycle', async () => {
+  const routine = createRoutine('profile', 'Shorten my plan', { ...inputs, includeStrongmanDay: true });
+  const removedDeadlift = routine.workouts.find(workout => workout.weekIndex === 1 && workout.name === 'Deadlift');
+  removedDeadlift.exercises[0].overrides = { weight: 250 };
+  routine.workouts[0].exercises[0].overrides = { movement: 'Front squat' };
+  const original = JSON.parse(JSON.stringify(routine));
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
+
+  expect(container.querySelector('[name="duration"]').closest('label').textContent).toContain('Cycle duration');
+  expect(container.textContent).toContain('compresses the five lifting stages into three weeks');
+  fill('duration', '3 weeks');
+  expect(button('Review changes').disabled).toBe(false);
+  review();
+
+  expect(container.querySelector('dl').textContent).toBe('Cycle durationFrom5 weeksTo3 weeks');
+  expect(container.textContent).toContain('4 unstarted workouts will be removed');
+  expect(container.textContent).toContain('Deadlift: 2');
+  expect(container.textContent).toContain('Strongman: 2');
+  expect(container.textContent).toContain('The removed workouts include 1 customized exercise.');
+  expect(container.textContent).toContain('1 individual exercise customization stays in place on remaining workouts.');
+  expect(container.textContent).not.toContain('Your workout order and cycle schedule stay the same.');
+  expect(onSave).not.toHaveBeenCalled();
+  expect(routine).toEqual(original);
+  await act(async () => button('Save update').click());
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ duration: '3 weeks', includeStrongmanDay: true }));
+});
+
+it('shortens the final cycle of a started plan and explains protected extra workouts', async () => {
+  let routine = createRoutine('profile', 'Partly completed plan', {
+    ...inputs, mesoMode: true, includeStrongmanDay: true,
+    microCycles: [{ duration: '3 weeks', volume: 'Low' }, { duration: '5 weeks', volume: 'High' }],
+  });
+  const completed = routine.workouts.find(workout => workout.cycleIndex === 1 && workout.name === 'Squat');
+  const started = routine.workouts.find(workout => workout.cycleIndex === 1 && workout.weekIndex === 1 && workout.name === 'Deadlift');
+  routine = setWorkoutComplete(routine, completed.id, true);
+  routine = startWorkoutSession(routine, started.id);
+  const original = JSON.parse(JSON.stringify(routine));
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
+
+  fill('duration', '3 weeks', 1);
+  review();
+  expect(container.querySelector('dl').textContent).toBe('Cycle 2 durationFrom5 weeksTo3 weeks');
+  expect(container.textContent).toContain('1 completed · 1 already started — preserved');
+  expect(container.textContent).toContain('3 unstarted workouts will be removed');
+  expect(container.textContent).toContain('Deadlift: 1');
+  expect(container.textContent).toContain('Strongman: 2');
+  expect(container.textContent).toContain('1 recorded or started workout falls outside the shorter schedule and will stay in the plan.');
+  expect(routine).toEqual(original);
+  await act(async () => button('Save update').click());
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+    microCycles: [{ duration: '3 weeks', volume: 'Low' }, { duration: '3 weeks', volume: 'High' }],
+  }));
+});
+
+it('does not offer to expand a single three-week cycle', () => {
+  const routine = createRoutine('profile', 'Three weeks', { ...inputs, duration: '3 weeks' });
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={() => {}} onCancel={() => {}} />));
+  expect(container.querySelector('[name="duration"]').disabled).toBe(true);
+  expect(container.querySelector('[name="duration"]').value).toBe('3 weeks');
+  expect(container.textContent).toContain('Existing 3-week cycles cannot be lengthened.');
+  expect(button('Review changes').disabled).toBe(true);
 });

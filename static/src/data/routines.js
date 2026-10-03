@@ -38,6 +38,7 @@ export const createRoutine = (profileId, name, inputs, resolvedCycleMaxes = []) 
           cycleIndex,
           cycleLabel: inputs.mesoMode ? `Cycle ${cycleIndex + 1}` : null,
           weekIndex,
+          sourceWeek: day.sourceWeek,
           weekLabel: `Week ${weekIndex + 1}`,
           name: day.name,
           effectiveMaxes: { ...cycle.effectiveMaxes },

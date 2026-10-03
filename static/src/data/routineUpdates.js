@@ -1,5 +1,5 @@
 import { getLiftProgressionMode, MAX_PROGRESSION_MODES } from './routineGeneration';
-import { hasExerciseOverrides, regenerateFutureWorkouts } from './routineRecalculation';
+import { hasExerciseOverrides, isRemovedByShortening, regenerateFutureWorkouts } from './routineRecalculation';
 import { applyBatch } from './storage';
 
 const liftKeys = ['squat', 'press', 'deadlift'];
@@ -14,6 +14,12 @@ const editableKeys = [
 ];
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const isBlank = value => value === undefined || value === null || String(value).trim() === '';
+
+const validateDurationChange = (before, after) => {
+  if (after !== before && !(before === '5 weeks' && after === '3 weeks')) {
+    throw new Error('Cycle duration can only change from 5 weeks to 3 weeks.');
+  }
+};
 
 const validateNumber = (value, label, minimum, maximum, integer = false) => {
   const numeric = Number(value);
@@ -33,11 +39,11 @@ const updatedInputs = (original, changes) => {
       throw new Error('The workout schedule cannot change after a plan has been created.');
     }
   });
-  if (has(changes, 'duration') && changes.duration !== original.duration) {
-    throw new Error('Cycle duration cannot change after a plan has been created.');
-  }
-
   const inputs = { ...original };
+  if (has(changes, 'duration')) {
+    validateDurationChange(original.duration, changes.duration);
+    inputs.duration = changes.duration;
+  }
   editableKeys.forEach(key => {
     if (has(changes, key) && changes[key] !== undefined) inputs[key] = changes[key];
   });
@@ -57,12 +63,15 @@ const updatedInputs = (original, changes) => {
   if (has(changes, 'microCycles') && changes.microCycles !== undefined) {
     const cycles = original.microCycles || [];
     if (!Array.isArray(changes.microCycles) || changes.microCycles.length !== cycles.length ||
-        changes.microCycles.some((cycle, index) => !cycle || typeof cycle !== 'object' || Array.isArray(cycle) ||
-          (has(cycle, 'duration') && cycle.duration !== cycles[index].duration))) {
-      throw new Error('The number and duration of cycles cannot change after a plan has been created.');
+        changes.microCycles.some(cycle => !cycle || typeof cycle !== 'object' || Array.isArray(cycle))) {
+      throw new Error('The number of cycles cannot change after a plan has been created.');
     }
+    changes.microCycles.forEach((cycle, index) => {
+      if (has(cycle, 'duration')) validateDurationChange(cycles[index].duration, cycle.duration);
+    });
     inputs.microCycles = cycles.map((cycle, index) => ({
       ...cycle,
+      ...(has(changes.microCycles[index], 'duration') ? { duration: changes.microCycles[index].duration } : {}),
       ...(has(changes.microCycles[index], 'volume') ? { volume: changes.microCycles[index].volume } : {}),
     }));
   }
@@ -140,6 +149,7 @@ export const updateRoutinePlan = (routine, changes) => {
   const inputs = updatedInputs(routine.inputs, changes);
   const workouts = regenerateFutureWorkouts(routine, inputs);
   if (JSON.stringify(inputs) === JSON.stringify(routine.inputs) &&
+      workouts.length === routine.workouts.length &&
       workouts.every((workout, index) => workout === routine.workouts[index])) return routine;
   return { ...routine, inputs, workouts, updatedAt: new Date().toISOString() };
 };
@@ -164,16 +174,30 @@ export const commitPlanUpdate = async (routine, changes, saveRoutine) => {
 
 export const getPlanUpdateSummary = (routine, updatedRoutine) => {
   const updatedById = new Map(updatedRoutine.workouts.map(workout => [workout.id, workout]));
+  const loggedIds = new Set((routine.strongmanLog || []).map(entry => entry.workoutId));
   return routine.workouts.reduce((summary, workout) => {
+    const updated = updatedById.get(workout.id);
+    if (!updated) {
+      summary.removedWorkouts += 1;
+      summary.removedByName[workout.name] = (summary.removedByName[workout.name] || 0) + 1;
+      summary.removedOverrides += (workout.exercises || []).filter(hasExerciseOverrides).length;
+      return summary;
+    }
+    if (isRemovedByShortening(workout, routine.inputs, updatedRoutine.inputs) &&
+        (workout.completedAt || workout.skippedAt || workout.session || loggedIds.has(workout.id))) {
+      summary.preservedExtraWorkouts += 1;
+    }
     if (workout.completedAt || workout.skippedAt) {
       summary.completedWorkouts += 1;
     } else if (workout.session) {
       summary.startedWorkouts += 1;
     } else {
-      const updated = updatedById.get(workout.id);
       if (updated && JSON.stringify(workout) !== JSON.stringify(updated)) summary.changedWorkouts += 1;
       summary.preservedOverrides += (updated?.exercises || []).filter(hasExerciseOverrides).length;
     }
     return summary;
-  }, { changedWorkouts: 0, completedWorkouts: 0, startedWorkouts: 0, preservedOverrides: 0 });
+  }, {
+    changedWorkouts: 0, completedWorkouts: 0, startedWorkouts: 0, preservedOverrides: 0,
+    removedWorkouts: 0, removedByName: {}, removedOverrides: 0, preservedExtraWorkouts: 0,
+  });
 };

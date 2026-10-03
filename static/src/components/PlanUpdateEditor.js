@@ -78,8 +78,12 @@ const describeChanges = (before, after) => {
   }
   lifts.forEach(({ key, label }) => add(`${label} day Strongman`, eventDescription(before, key), eventDescription(after, key)));
   if (after.mesoMode) {
-    after.microCycles.forEach((cycle, index) => add(`Cycle ${index + 1} volume`, before.microCycles[index].volume, cycle.volume));
+    after.microCycles.forEach((cycle, index) => {
+      add(`Cycle ${index + 1} duration`, before.microCycles[index].duration, cycle.duration);
+      add(`Cycle ${index + 1} volume`, before.microCycles[index].volume, cycle.volume);
+    });
   } else {
+    add('Cycle duration', before.duration, after.duration);
     add('Training volume', before.mainLiftChoice, after.mainLiftChoice);
   }
   add('Low-volume back-off sets', before.includeBackoffSets ? 'On' : 'Off', after.includeBackoffSets ? 'On' : 'Off');
@@ -110,10 +114,10 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
     setError('');
   };
 
-  const changeCycleVolume = (index, volume) => {
+  const changeCycle = (index, key, value) => {
     setDraft(current => ({
       ...current,
-      microCycles: current.microCycles.map((cycle, cycleIndex) => cycleIndex === index ? { ...cycle, volume } : cycle),
+      microCycles: current.microCycles.map((cycle, cycleIndex) => cycleIndex === index ? { ...cycle, [key]: value } : cycle),
     }));
     setError('');
   };
@@ -148,6 +152,9 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
   const lowVolume = draft.mesoMode
     ? draft.microCycles.some(cycle => cycle.volume === 'Low')
     : draft.mainLiftChoice === 'Low';
+  const cycles = draft.mesoMode ? draft.microCycles : [{ duration: draft.duration }];
+  const originalCycles = original.mesoMode ? original.microCycles : [{ duration: original.duration }];
+  const shortening = cycles.some((cycle, index) => cycle.duration !== originalCycles[index].duration);
 
   return (
     <section className="plan-update-editor" aria-labelledby="plan-update-heading" aria-busy={saving}>
@@ -161,7 +168,12 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
           <div className="plan-update-impact" role="status">
             <strong>{review.changedWorkouts} future {review.changedWorkouts === 1 ? 'workout' : 'workouts'} will change</strong>
             <p>{review.completedWorkouts} completed · {review.startedWorkouts} already started — preserved</p>
-            {!review.changedWorkouts && <p>These settings will be saved, but no remaining workout prescriptions change.</p>}
+            {review.removedWorkouts > 0 && <React.Fragment>
+              <strong>{review.removedWorkouts} unstarted {review.removedWorkouts === 1 ? 'workout' : 'workouts'} will be removed</strong>
+              <p>{Object.entries(review.removedByName).map(([name, count]) => `${name}: ${count}`).join(' · ')}</p>
+            </React.Fragment>}
+            {review.preservedExtraWorkouts > 0 && <p>{review.preservedExtraWorkouts} recorded or started {review.preservedExtraWorkouts === 1 ? 'workout falls' : 'workouts fall'} outside the shorter schedule and will stay in the plan.</p>}
+            {!review.changedWorkouts && !review.removedWorkouts && <p>These settings will be saved, but no remaining workout prescriptions change.</p>}
           </div>
           <h2 className="plan-update-subheading">Your changes</h2>
           <dl className="plan-update-changes">
@@ -172,8 +184,9 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
               </div>
             ))}
           </dl>
-          <p className="plan-update-note">{review.preservedOverrides > 0 ? `${review.preservedOverrides} individual exercise ${review.preservedOverrides === 1 ? 'customization stays' : 'customizations stay'} in place. ` : ''}Individual exercise edits are kept, including customized exercises whose plan option you turn off. Edit those exercises from the workout if needed.</p>
-          <p className="plan-update-note">Your workout order and cycle schedule stay the same.</p>
+          {review.removedOverrides > 0 && <p className="plan-update-warning">The removed workouts include {review.removedOverrides} customized {review.removedOverrides === 1 ? 'exercise' : 'exercises'}. Those exercise edits will be removed with their workouts.</p>}
+          <p className="plan-update-note">{review.preservedOverrides > 0 ? `${review.preservedOverrides} individual exercise ${review.preservedOverrides === 1 ? 'customization stays' : 'customizations stay'} in place on remaining workouts. ` : ''}Individual exercise edits on remaining workouts are kept, including customized exercises whose plan option you turn off. Edit those exercises from the workout if needed.</p>
+          <p className="plan-update-note">{shortening ? 'Remaining workouts keep their order. Unstarted workouts use the shorter cycle schedule; recorded and started workouts keep their original week labels.' : 'Your workout order and cycle schedule stay the same.'}</p>
           {error && <p className="plan-update-error" role="alert">{error}</p>}
           <div className="plan-update-actions">
             <button type="button" className="primary-button" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save update'}</button>
@@ -232,12 +245,27 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
             ))}
           </fieldset>
           <fieldset className="plan-update-group">
+            <legend>Cycle length</legend>
+            <p className="field-help" id="plan-update-duration-help">A 3-week cycle compresses the five lifting stages into three weeks. Shortening removes only unstarted Deadlift and Strongman days that the shorter schedule does not need. Completed, skipped, started, and logged workouts are kept.</p>
+            <div className="plan-update-volumes">
+              {cycles.map((cycle, index) => (
+                <label className="form-field" key={index}>
+                  <span className="field-label">{draft.mesoMode ? `Cycle ${index + 1} duration` : 'Cycle duration'}</span>
+                  <select className="select-input" name="duration" data-cycle-index={index} value={cycle.duration} disabled={originalCycles[index].duration === '3 weeks'} aria-describedby="plan-update-duration-help" onChange={event => draft.mesoMode ? changeCycle(index, 'duration', event.target.value) : changeInput(event)}>
+                    <option>5 weeks</option><option>3 weeks</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+            {originalCycles.some(cycle => cycle.duration === '3 weeks') && <p className="field-help">Existing 3-week cycles cannot be lengthened.</p>}
+          </fieldset>
+          <fieldset className="plan-update-group">
             <legend>Volume and accessories</legend>
             <div className="plan-update-volumes">
               {draft.mesoMode ? draft.microCycles.map((cycle, index) => (
                 <label className="form-field" key={index}>
                   <span className="field-label">Cycle {index + 1} volume <small>({cycle.duration})</small></span>
-                  <select className="select-input" name="volume" data-cycle-index={index} value={cycle.volume} onChange={event => changeCycleVolume(index, event.target.value)}>
+                  <select className="select-input" name="volume" data-cycle-index={index} value={cycle.volume} onChange={event => changeCycle(index, 'volume', event.target.value)}>
                     <option>Low</option><option>High</option>
                   </select>
                 </label>
@@ -264,7 +292,7 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
               ))}
             </div>
           </fieldset>
-          <p className="plan-update-note">Individual exercise edits are kept. Your workout order, cycle lengths, and dedicated Strongman day stay the same. Create a new plan to change that schedule.</p>
+          <p className="plan-update-note">Individual exercise edits on remaining workouts are kept. Review the exact changes and any workouts that will be removed before saving. Workout order and the dedicated Strongman day setting stay the same.</p>
           {error && <p className="plan-update-error" role="alert">{error}</p>}
           <div className="plan-update-actions">
             <button type="submit" className="primary-button" disabled={!changes.length}>Review changes</button>

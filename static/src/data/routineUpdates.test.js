@@ -38,6 +38,7 @@ describe('updating an existing plan', () => {
     expect(JSON.stringify(routine)).toBe(before);
     expect(getPlanUpdateSummary(routine, updated)).toEqual({
       changedWorkouts: 1, completedWorkouts: 1, startedWorkouts: 3, preservedOverrides: 0,
+      removedWorkouts: 0, removedByName: {}, removedOverrides: 0, preservedExtraWorkouts: 0,
     });
   });
 
@@ -210,15 +211,14 @@ describe('updating an existing plan', () => {
   });
 
   it.each([
-    { mesoMode: true }, { duration: '3 weeks' }, { includeStrongmanDay: true },
+    { mesoMode: true }, { includeStrongmanDay: true },
     { microCycles: [{ duration: '5 weeks', volume: 'High' }] },
   ])('rejects schedule topology changes: %o', changes => {
     expect(() => updateRoutinePlan(makeRoutine(), changes)).toThrow(/cannot change/);
   });
 
-  it('rejects cycle duration and count changes while accepting volume edits', () => {
+  it('rejects cycle count changes while accepting volume edits', () => {
     const routine = makeRoutine({ mesoMode: true, microCycles: [{ duration: '5 weeks', volume: 'Low' }] });
-    expect(() => updateRoutinePlan(routine, { microCycles: [{ duration: '3 weeks', volume: 'Low' }] })).toThrow(/cannot change/);
     expect(() => updateRoutinePlan(routine, { microCycles: [] })).toThrow(/cannot change/);
     const updated = updateRoutinePlan(routine, { microCycles: [{ volume: 'High' }] });
     expect(updated.workouts[0].exercises[0].generated.prescription).toBe('5 × 10');
@@ -228,6 +228,7 @@ describe('updating an existing plan', () => {
   it.each([
     { maxSquat: '' }, { maxPress: Infinity }, { maxDead: 'NaN' }, { maxSquat: 1002 }, { maxPress: 0 },
     { maxSquat: true },
+    { duration: '4 weeks' }, { duration: null },
     { maxProgressionMode: 'surprise' }, { maxProgressionMode: '' }, { maxProgressionMode: null },
     { liftProgressionModes: null }, { liftProgressionModes: [] }, { liftProgressionModes: 'fixed' },
     { liftProgressionModes: { squat: 'surprise' } }, { liftProgressionModes: { press: '' } },

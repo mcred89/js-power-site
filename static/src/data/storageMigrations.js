@@ -3,8 +3,11 @@ import { addTabataTimers } from './tabataSessionMigration';
 import { addSetTimerPreference, addSetTimers } from './setTimerMigration';
 import { addStrongmanTracking } from './strongman';
 import { migrateStrongmanCompetitions } from './strongmanCompetitions';
+import { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 
-export const DATABASE_VERSION = 20;
+export const DATABASE_VERSION = 21;
+
+export { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 
 // These shipped steps remain available for installations that skipped releases.
 export const addRoutineKind = record => ({ ...record, kind: record.kind || 'strength' });
@@ -325,6 +328,10 @@ export const databaseMigrations = {
     };
     readStore(0);
   },
+  21: ({ transaction, done }) => migrateRecordStores(transaction, 21, {
+    routines: addWorkoutSourceWeeks,
+    templates: addWorkoutSourceWeeks,
+  }, done),
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {
