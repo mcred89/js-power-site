@@ -51,8 +51,28 @@ beforeEach(async () => {
 
 afterEach(() => {
   act(() => root.unmount());
+  jest.useRealTimers();
   container.remove();
   global.IS_REACT_ACT_ENVIRONMENT = false;
+});
+
+it('keeps a replacement notification visible for its full duration', async () => {
+  jest.useFakeTimers();
+  applyBatch.mockResolvedValue();
+  await click('Save update');
+  const message = 'Plan updated. Completed and started workouts kept unchanged.';
+  expect(container.querySelector('[role="status"]').textContent).toBe(message);
+  act(() => jest.advanceTimersByTime(2500));
+  await click('Update plan');
+  act(() => container.querySelector('input[name="deadliftTabataEnabled"]').click());
+  await click('Review changes');
+  await click('Save update');
+  act(() => jest.advanceTimersByTime(500));
+  expect(container.querySelector('[role="status"]').textContent).toBe(message);
+  act(() => jest.advanceTimersByTime(2499));
+  expect(container.querySelector('[role="status"]').textContent).toBe(message);
+  act(() => jest.advanceTimersByTime(1));
+  expect(container.querySelector('.toast')).toBeNull();
 });
 
 it('publishes a plan update only after its guarded database transaction commits', async () => {

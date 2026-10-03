@@ -307,6 +307,8 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   const [addingProfile, setAddingProfile] = useState(false);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
+  const messageTimer = useRef(null);
+  useEffect(() => () => window.clearTimeout(messageTimer.current), []);
   const [persistent, setPersistent] = useState(false);
   const [profileRoutinesLoaded, setProfileRoutinesLoaded] = useState(false);
   const [profileRoutinesError, setProfileRoutinesError] = useState('');
@@ -562,8 +564,9 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
   }, [routine, selectedRoutineId]);
 
   const flash = text => {
+    window.clearTimeout(messageTimer.current);
     setMessage(text);
-    window.setTimeout(() => setMessage(''), 3000);
+    messageTimer.current = window.setTimeout(() => setMessage(''), 3000);
   };
 
   const loadAllData = async () => {
