@@ -1,6 +1,7 @@
 import { buildPlanCalendar, formatCalendarDate, localDateKey, workoutWeekText } from './planCalendar';
 import { createRoutine } from './routines';
 import { repairShortenedCycles } from './cycleShorteningRepair';
+import { updateRoutinePlan } from './routineUpdates';
 
 const day = (id, cycleIndex, weekIndex, extra = {}) => ({
   id, cycleIndex, weekIndex, cycleLabel: `Cycle ${cycleIndex + 1}`, weekLabel: `Week ${weekIndex + 1}`, completedAt: null, ...extra,
@@ -12,6 +13,61 @@ const routine = (workouts, durations = ['5 weeks']) => ({
   workouts,
 });
 const dates = calendar => calendar.weeks.map(week => [week.key, localDateKey(week.start), localDateKey(week.end)]);
+
+const trainingPlan = (completedWeeks, includeStrongmanDay = true, extra = {}) => {
+  const plan = createRoutine('profile', 'Duration change', {
+    maxSquat: '300', maxPress: '200', maxDead: '400', mainLiftChoice: 'Low',
+    duration: '5 weeks', includeStrongmanDay, ...extra,
+  });
+  plan.workouts.forEach(workout => {
+    if (workout.cycleIndex === 0 && workout.sourceWeek < completedWeeks) workout.completedAt = '2026-09-25T12:00:00';
+  });
+  return plan;
+};
+
+describe.each([true, false])('estimated end after shortening with Strongman = %s', includeStrongmanDay => {
+  it.each([
+    [0, '2026-11-01', '2026-10-18', 3],
+    [1, '2026-10-25', '2026-10-11', 2],
+    [2, '2026-10-18', '2026-10-11', 2],
+    [3, '2026-10-11', '2026-10-04', 1],
+    [4, '2026-10-04', '2026-10-04', 1],
+  ])('uses the remaining schedule after %i completed weeks', (completedWeeks, oldEnd, newEnd, remainingWeeks) => {
+    const plan = trainingPlan(completedWeeks, includeStrongmanDay);
+    const snapshot = JSON.stringify(plan);
+    expect(localDateKey(buildPlanCalendar(plan, '2026-10-03').end)).toBe(oldEnd);
+    const shortened = updateRoutinePlan(plan, { duration: '3 weeks' });
+    const calendar = buildPlanCalendar(shortened, '2026-10-03');
+    expect(localDateKey(calendar.end)).toBe(newEnd);
+    expect(calendar.remainingWeeks).toBe(remainingWeeks);
+    expect(JSON.stringify(plan)).toBe(snapshot);
+    expect(localDateKey(buildPlanCalendar(JSON.parse(JSON.stringify(shortened)), '2026-10-03').end)).toBe(newEnd);
+  });
+});
+
+it('moves the end of later cycles earlier when an earlier cycle is shortened', () => {
+  const plan = trainingPlan(3, true, { mesoMode: true, microCycles: [
+    { duration: '5 weeks', volume: 'Low' }, { duration: '5 weeks', volume: 'Low' },
+  ] });
+  expect(localDateKey(buildPlanCalendar(plan, '2026-10-03').end)).toBe('2026-11-15');
+  const shortened = updateRoutinePlan(plan, { microCycles: [
+    { duration: '3 weeks', volume: 'Low' }, { duration: '5 weeks', volume: 'Low' },
+  ] });
+  const calendar = buildPlanCalendar(shortened, '2026-10-03');
+  expect(localDateKey(calendar.end)).toBe('2026-11-08');
+  expect(calendar.remainingWeeks).toBe(6);
+  const nextCycle = shortened.workouts.find(workout => workout.cycleIndex === 1);
+  expect(localDateKey(calendar.byWorkoutId.get(nextCycle.id).start)).toBe('2026-10-05');
+});
+
+it('keeps the next-week anchor when shortening immediately after this week was completed', () => {
+  const plan = trainingPlan(3);
+  plan.workouts.filter(workout => workout.sourceWeek === 2).forEach(workout => { workout.completedAt = '2026-10-01T12:00:00'; });
+  expect(localDateKey(buildPlanCalendar(plan, '2026-10-03').end)).toBe('2026-10-18');
+  const calendar = buildPlanCalendar(updateRoutinePlan(plan, { duration: '3 weeks' }), '2026-10-03');
+  expect(localDateKey(calendar.end)).toBe('2026-10-11');
+  expect(calendar.remainingWeeks).toBe(1);
+});
 
 it('forecasts mixed cycle durations from this local Monday without changing the plan', () => {
   const plan = routine([day('first', 0, 0), day('third', 1, 0), day('last', 2, 2)], ['3 weeks', '5 weeks', '3 weeks']);

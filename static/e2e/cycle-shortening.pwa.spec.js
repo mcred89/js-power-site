@@ -159,8 +159,41 @@ const expectedFinalWeek = [
   ['Squat', 4, 3], ['Press', 4, 3], ['Strongman', 4, 3],
 ];
 
+const plansEstimatedEnd = page => page.locator('.plan-card.selected .plan-calendar-range > div').filter({ hasText: 'Est. end' }).locator('time');
+
+test('updates estimated end in Plans and Today immediately when an untouched cycle is shortened', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-10-03T17:00:00.000Z'));
+  await createProfile(page, 'Calendar Athlete');
+  await page.getByRole('button', { name: 'Build a routine' }).click();
+  await page.getByLabel('Routine name').fill('Untouched five weeks');
+  await fillMaxes(page);
+  await selectVolume(page);
+  await selectWeakPoints(page);
+  await page.getByLabel('Include a dedicated Strongman day').check();
+  await page.getByRole('button', { name: /Generate plan/ }).click();
+  await expect(page.getByText('Routine created on this phone.')).toBeVisible();
+  await expect(page.locator('.next-workout .calendar-outlook')).toHaveText('Est. end 11/01/26 · 5 weeks remaining');
+  await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  await expect(plansEstimatedEnd(page)).toHaveText('11/01/26');
+  await page.locator('.plan-card.selected').getByRole('button', { name: 'Update plan', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Cycle duration', exact: true }).selectOption('3 weeks');
+  await page.getByRole('button', { name: 'Review changes', exact: true }).click();
+  await page.getByRole('button', { name: 'Save update', exact: true }).click();
+
+  await expect(plansEstimatedEnd(page)).toHaveText('10/18/26');
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await expect(page.locator('.next-workout .calendar-outlook')).toHaveText('Est. end 10/18/26 · 3 weeks remaining');
+  const saved = await storedRoutine(page);
+  await page.reload();
+  await expect(page.locator('.next-workout .calendar-outlook')).toHaveText('Est. end 10/18/26 · 3 weeks remaining');
+  await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  await expect(plansEstimatedEnd(page)).toHaveText('10/18/26');
+  expect(await storedRoutine(page)).toEqual(saved);
+});
+
 test('combines weeks four and five into six days after three completed weeks', async ({ page }, testInfo) => {
   test.setTimeout(60000);
+  await page.clock.setFixedTime(new Date('2026-10-03T17:00:00.000Z'));
   await buildMesocycle(page);
   const before = await storedRoutine(page, 3);
   const history = before.workouts.filter(workout => workout.completedAt);
@@ -172,7 +205,9 @@ test('combines weeks four and five into six days after three completed weeks', a
   expect(history).toHaveLength(28);
 
   await page.reload();
+  await expect(page.locator('.next-workout .calendar-outlook')).toHaveText('Est. end 10/18/26 · 2 weeks remaining');
   await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  await expect(plansEstimatedEnd(page)).toHaveText('10/18/26');
   await page.locator('.plan-card.selected').getByRole('button', { name: 'Update plan', exact: true }).click();
   await page.getByRole('combobox', { name: 'Cycle 2 duration', exact: true }).selectOption('3 weeks');
   await page.getByRole('button', { name: 'Review changes', exact: true }).click();
@@ -186,6 +221,7 @@ test('combines weeks four and five into six days after three completed weeks', a
   expect(await storedRoutine(page)).toEqual(before);
   await page.getByRole('button', { name: 'Save update', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Plans', exact: true })).toBeVisible();
+  await expect(plansEstimatedEnd(page)).toHaveText('10/11/26');
   const shortened = await storedRoutine(page);
   expect(finalWeekSchedule(shortened)).toEqual(expectedFinalWeek);
   expect(shortened.cycleWeekGroups[1]).toEqual([[0], [1], [2], [3, 4]]);
@@ -195,13 +231,16 @@ test('combines weeks four and five into six days after three completed weeks', a
   );
   expect(shortened.workouts.find(workout => workout.id === deadlift.id).exercises).toEqual(deadlift.exercises);
 
+  await page.getByRole('button', { name: 'Today', exact: true }).click();
+  await expect(page.locator('.next-workout .calendar-outlook')).toHaveText('Est. end 10/11/26 · 1 week remaining');
   await page.reload();
   await page.getByRole('button', { name: 'Today', exact: true }).click();
   await expect(page.locator('.next-workout .workout-week-label')).toContainText('Cycle 2 · Week 4');
-  await expect(page.locator('.next-workout .calendar-outlook')).toContainText('1 week remaining');
+  await expect(page.locator('.next-workout .calendar-outlook')).toHaveText('Est. end 10/11/26 · 1 week remaining');
   expect(await storedRoutine(page)).toEqual(shortened);
 
   await page.getByRole('button', { name: 'Plans', exact: true }).click();
+  await expect(plansEstimatedEnd(page)).toHaveText('10/11/26');
   await page.locator('.plan-card.selected').getByRole('button', { name: 'Update plan', exact: true }).click();
   await page.getByLabel('Deadlift max', { exact: true }).fill('500');
   await page.getByRole('button', { name: 'Review changes', exact: true }).click();

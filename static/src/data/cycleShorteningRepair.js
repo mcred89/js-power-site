@@ -43,6 +43,9 @@ const legacyCycle = (workouts, protectedWorkout, includeStrongmanDay) => {
   return { owners, base, start, stride };
 };
 
+// Migration-only transform: call from the v22 database/backup steps, never from
+// normal loading or editing. Saved cycle groups also make repaired records
+// idempotent without interpreting later manual deletions as missing work.
 export const repairShortenedCycles = record => {
   if (!record || (record.kind && record.kind !== 'strength') || typeof record.id !== 'string' ||
       !Array.isArray(record.workouts) || !record.inputs || typeof record.inputs !== 'object' ||

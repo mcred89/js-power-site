@@ -26,6 +26,9 @@ Dates are calculated locally from existing records and need no backup migration.
 Open **Plans → Update plan → Cycle length** to change a 5-week cycle to
 3 weeks, including a partly completed final cycle. Review the affected workout
 counts and the remaining week-by-week workout list, then choose **Save update**.
+The review shows the estimated end before and after the change. Saving updates
+the estimate on both Plans and Today immediately. If no remaining weeks can be
+combined, the review explains why the estimated end stays the same.
 Only untouched weeks after your latest recorded or started workout are combined
 in pairs. Earlier weeks keep their original schedule. This preserves the five
 lifting stages, so a cycle shortened midway can span more than three calendar
@@ -47,10 +50,14 @@ workouts stay deleted during later plan edits. Later max updates use the correct
 stage. A 3-week cycle cannot be expanded back to 5 weeks with this editor.
 
 The update also repairs recognizable plans affected by the earlier shortening
-bug when the app opens, and when importing an older backup. It restores missing
-generated future days and corrects future week grouping while preserving
-recorded workouts, surviving exercise edits, and unknown records. Exercise
-customizations on days already deleted by the old version cannot be recovered.
+bug once, when the app upgrades its saved database to version 22. Reloading the
+app or editing plans does not repeat this repair. Importing a backup from before
+version 22 applies the same compatibility migration to that file; backups
+exported after this update skip it, preserving later manual deletions. The repair
+restores missing generated future days and corrects future week grouping while
+preserving recorded workouts, surviving exercise edits, and unknown records.
+Exercise customizations on days already deleted by the old version cannot be
+recovered.
 
 ## Progression by lift
 

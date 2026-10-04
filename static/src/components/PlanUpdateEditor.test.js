@@ -26,6 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   act(() => root.unmount());
+  jest.useRealTimers();
   container.remove();
 });
 
@@ -40,6 +41,32 @@ const fill = (name, value, cycleIndex) => {
     element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }));
   });
 };
+
+it.each([
+  [0, false, 'Before11/01/265 weeks remainingAfter10/18/263 weeks remaining', false],
+  [3, false, 'Before10/11/262 weeks remainingAfter10/04/261 week remaining', false],
+  [4, false, 'Before10/04/261 week remainingAfter10/04/261 week remaining', true],
+  [3, true, 'Before10/11/262 weeks remainingAfter10/11/262 weeks remaining', true],
+])('previews the actual estimated end after %i completed weeks (next week started: %s)', (completedWeeks, started, dates, unchanged) => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(2026, 9, 3, 12));
+  const routine = createRoutine('profile', 'My plan', { ...inputs, includeStrongmanDay: true });
+  routine.workouts.forEach(workout => {
+    if (workout.sourceWeek < completedWeeks) workout.completedAt = '2026-09-25T12:00:00';
+  });
+  if (started) routine.workouts.find(workout => workout.sourceWeek === completedWeeks).session = {
+    status: 'inProgress', startedAt: '2026-10-01T12:00:00',
+  };
+  const snapshot = JSON.stringify(routine);
+  const onSave = jest.fn();
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
+  fill('duration', '3 weeks');
+  review();
+  expect(container.querySelector('.plan-update-dates dl').textContent).toBe(dates);
+  expect(Boolean(container.querySelector('.plan-update-dates .field-help'))).toBe(unchanged);
+  expect(JSON.stringify(routine)).toBe(snapshot);
+  expect(onSave).not.toHaveBeenCalled();
+});
 
 it('reviews removing deadlift Tabata while preserving past and started workouts', async () => {
   let routine = createRoutine('profile', 'My plan', inputs);

@@ -226,6 +226,23 @@ it('keeps restored stage 3 deadlifts responsive to max correction, plan updates 
   expect(find(refreshAdaptiveProgression(adaptive).routine, 'Deadlift', 3, 1)).toBeDefined();
 });
 
+it('does not invoke migration repair from ordinary plan editing, max correction or adaptive refresh', () => {
+  const original = brokenRoutine(3, { mesoMode: true, maxProgressionMode: 'adaptive', microCycles: [
+    { duration: '5 weeks', volume: 'Low' },
+  ] });
+  const ordinaryResults = [
+    updateRoutinePlan(original, { includeBackoffSets: true }),
+    correctMaxes(original, { maxDead: '500' }),
+    refreshAdaptiveProgression(original).routine,
+  ];
+  ordinaryResults.forEach(result => {
+    expect(result.shorteningRepair).toBeUndefined();
+    expect(result.cycleWeekGroups).toBeUndefined();
+    expect(result.workouts.map(workout => workout.id)).toEqual(original.workouts.map(workout => workout.id));
+    expect(find(result, 'Deadlift', 3)).toBeUndefined();
+  });
+});
+
 it('leaves native three-week plans, unchanged five-week plans and ambiguous imported shapes alone', () => {
   const native = createRoutine('profile', 'Native', { ...inputs, duration: '3 weeks' });
   native.workouts.slice(0, 9).forEach(workout => { workout.completedAt = '2026-09-30'; });
@@ -278,15 +295,19 @@ it('repairs week labels without dropping deadlifts when no strongman days were i
 });
 
 describe('version 22 repair migration', () => {
-  it('upgrades an actual version 21 database and retains profiles, historical snapshots and unrelated records', async () => {
+  it('repairs an actual version 21 database once, preserving history and later manual deletions across reloads', async () => {
     const factory = new IDBFactory();
     const original = brokenRoutine();
     const unknown = { id: 'unknown', futureData: { retain: true } };
     const template = { ...brokenRoutine(), id: 'template', unknown: true };
     const profile = { id: 'profile', activeRoutineId: original.id, unknown: true };
+    const upgrades = [];
     const open = version => new Promise((resolve, reject) => {
       const request = factory.open('cycle-repair', version);
-      request.onupgradeneeded = event => runDatabaseMigrations(request.result, request.transaction, event.oldVersion, version);
+      request.onupgradeneeded = event => {
+        upgrades.push([event.oldVersion, version]);
+        runDatabaseMigrations(request.result, request.transaction, event.oldVersion, version);
+      };
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve(request.result);
     });
@@ -301,18 +322,43 @@ describe('version 22 repair migration', () => {
       transaction.onerror = () => reject(transaction.error);
     });
     previous.close();
-    const database = await open(DATABASE_VERSION);
+    let database = await open(DATABASE_VERSION);
     const read = (store, id) => new Promise((resolve, reject) => {
       const request = database.transaction(store, 'readonly').objectStore(store).get(id);
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
-    expect(await read('routines', original.id)).toEqual(repairShortenedCycles(original));
+    const repaired = await read('routines', original.id);
+    expect(repaired).toEqual(repairShortenedCycles(original));
     expect(await read('routines', unknown.id)).toEqual(unknown);
     expect(await read('profiles', profile.id)).toEqual(profile);
     expect(await read('templates', template.id)).toEqual(template);
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
+    const restoredId = find(repaired, 'Deadlift', 3).id;
+    const manuallyChanged = updateRoutinePlan(correctMaxes(deleteFutureWorkout(repaired, restoredId), { maxDead: '500' }), {
+      includeBackoffSets: true,
+    });
+    expect(find(manuallyChanged, 'Deadlift', 3)).toBeUndefined();
+    expect(manuallyChanged.shorteningRepair).toBe(repaired.shorteningRepair);
+    // This deliberately retains the old bug's recognizable shape. A general
+    // startup repair would change it on reload, whereas an upgrade-only repair
+    // must leave records subsequently written to a v22 database untouched.
+    const laterRecord = { ...brokenRoutine(), id: 'written-after-version-22' };
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction('routines', 'readwrite');
+      transaction.objectStore('routines').put(manuallyChanged);
+      transaction.objectStore('routines').put(laterRecord);
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
     database.close();
+    for (let reload = 0; reload < 2; reload += 1) {
+      database = await open(DATABASE_VERSION);
+      expect(await read('routines', original.id)).toEqual(manuallyChanged);
+      expect(await read('routines', laterRecord.id)).toEqual(laterRecord);
+      database.close();
+    }
+    expect(upgrades).toEqual([[0, 21], [21, DATABASE_VERSION]]);
   });
 
   it('migrates version 21 backups purely and retains repair identity and archives through current backup import', () => {
@@ -331,5 +377,35 @@ describe('version 22 repair migration', () => {
     const imported = parseBackup(exportBackup(migrated.profiles, migrated.routines, migrated.templates));
     expect(imported.routines[0]).toEqual(migrated.routines[0]);
     expect(JSON.stringify(backup)).toBe(before);
+  });
+
+  it('does not repair current-version backups even when a record matches the old failure pattern', () => {
+    const original = brokenRoutine();
+    const current = { format: 'mcilroy-method-backup', version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION,
+      profiles: [{ id: 'profile' }], routines: [original], templates: [], archives: [],
+    };
+    expect(migrateBackup(current)).toBe(current);
+    const imported = parseBackup(JSON.stringify(current));
+    expect(imported.routines[0]).toEqual(original);
+    expect(imported.routines[0].cycleWeekGroups).toBeUndefined();
+    expect(imported.routines[0].shorteningRepair).toBeUndefined();
+    expect(find(imported.routines[0], 'Deadlift', 3)).toBeUndefined();
+  });
+
+  it('migrates an older backup deliberately, then preserves later manual deletions through current backup round trips', () => {
+    const original = { format: 'mcilroy-method-backup', version: 21, dataSchemaVersion: 21,
+      profiles: [{ id: 'profile' }], routines: [brokenRoutine()], templates: [], archives: [],
+    };
+    const upgraded = parseBackup(JSON.stringify(original));
+    const repaired = upgraded.routines[0];
+    expect(find(repaired, 'Deadlift', 3)).toBeDefined();
+    const deleted = deleteFutureWorkout(repaired, find(repaired, 'Deadlift', 3).id);
+    const firstRoundTrip = parseBackup(exportBackup(upgraded.profiles, [deleted]));
+    const secondRoundTrip = parseBackup(exportBackup(firstRoundTrip.profiles, firstRoundTrip.routines));
+    [firstRoundTrip, secondRoundTrip].forEach(backup => {
+      expect(backup.version).toBe(BACKUP_VERSION);
+      expect(backup.routines[0]).toEqual(deleted);
+      expect(find(backup.routines[0], 'Deadlift', 3)).toBeUndefined();
+    });
   });
 });

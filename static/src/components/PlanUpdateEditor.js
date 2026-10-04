@@ -3,6 +3,8 @@ import NumberInput from './NumberInput';
 import LiftProgressionControls from './LiftProgressionControls';
 import { getLiftProgressionMode } from '../data/routineGeneration';
 import { getPlanUpdateSummary, updateRoutinePlan } from '../data/routineUpdates';
+import { buildPlanCalendar, formatCalendarDate, localDateKey } from '../data/planCalendar';
+import { useCalendarDay } from './WorkoutWeekLabel';
 import './PlanUpdateEditor.css';
 
 const lifts = [
@@ -102,6 +104,7 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const headingRef = useRef(null);
+  const calendarDay = useCalendarDay();
   const changes = describeChanges(original, draft);
 
   useEffect(() => {
@@ -127,7 +130,7 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
     if (!changes.length) return;
     try {
       const updated = updateRoutinePlan(routine, draft);
-      setReview(getPlanUpdateSummary(routine, updated));
+      setReview({ ...getPlanUpdateSummary(routine, updated), routine: updated });
       setError('');
     } catch (reviewError) {
       setError(reviewError.message || 'Could not review this update. Check the plan settings and try again.');
@@ -155,6 +158,8 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
   const cycles = draft.mesoMode ? draft.microCycles : [{ duration: draft.duration }];
   const originalCycles = original.mesoMode ? original.microCycles : [{ duration: original.duration }];
   const shortening = cycles.some((cycle, index) => cycle.duration !== originalCycles[index].duration);
+  const calendarBefore = review && shortening ? buildPlanCalendar(routine, calendarDay) : null;
+  const calendarAfter = review && shortening ? buildPlanCalendar(review.routine, calendarDay) : null;
 
   return (
     <section className="plan-update-editor" aria-labelledby="plan-update-heading" aria-busy={saving}>
@@ -184,6 +189,18 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
               </div>
             ))}
           </dl>
+          {calendarBefore && calendarAfter && <section className="plan-update-dates" aria-label="Estimated end change">
+            <h2 className="plan-update-subheading">Estimated end</h2>
+            <dl>
+              {[['Before', calendarBefore], ['After', calendarAfter]].map(([label, calendar]) => <div key={label}>
+                <dt>{label}</dt>
+                <dd>{calendar.end ? <time dateTime={localDateKey(calendar.end)}>{formatCalendarDate(calendar.end)}</time> : 'Not recorded'}</dd>
+                <dd>{calendar.remainingWeeks} {calendar.remainingWeeks === 1 ? 'week' : 'weeks'} remaining</dd>
+              </div>)}
+            </dl>
+            {localDateKey(calendarBefore.end) === localDateKey(calendarAfter.end) &&
+              calendarBefore.remainingWeeks === calendarAfter.remainingWeeks && <p className="field-help">The estimated end stays the same because the remaining schedule still spans the same number of weeks. Started and recorded weeks are kept.</p>}
+          </section>}
           {shortening && review.futureWeeks?.length > 0 && <section className="plan-update-schedule" aria-label="Remaining workout schedule">
             <h2 className="plan-update-subheading">Remaining workout schedule</h2>
             <ol>

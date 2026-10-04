@@ -141,6 +141,8 @@ export const backupMigrations = {
     routines: Array.isArray(backup.routines) ? backup.routines.map(addWorkoutSourceWeeks) : backup.routines,
     templates: Array.isArray(backup.templates) ? backup.templates.map(addWorkoutSourceWeeks) : backup.templates,
   }),
+  // Compatibility for explicitly imported pre-v22 files. Current backups skip
+  // this step, so later manual deletions remain intentional after export/import.
   22: backup => ({
     ...backup,
     version: 22,

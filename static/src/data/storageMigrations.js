@@ -333,6 +333,8 @@ export const databaseMigrations = {
     routines: addWorkoutSourceWeeks,
     templates: addWorkoutSourceWeeks,
   }, done),
+  // One-time upgrade repair. IndexedDB invokes this only while crossing v22;
+  // ordinary opens, saves and plan edits must not repair user records again.
   22: ({ transaction, done }) => migrateRecordStores(transaction, 22, {
     routines: repairShortenedCycles,
   }, done),
