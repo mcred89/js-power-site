@@ -3,6 +3,7 @@ import { getLatestSessionAction, sessionElapsedSeconds } from '../data/routines'
 import { isTabataExercise, isTabataRound, tabataRoundCount } from '../data/tabata';
 import { getTimerElapsedMs as getSetTimerElapsedMs } from '../data/elapsedTimer';
 import { WorkoutWeekLabel } from './WorkoutWeekLabel';
+import { RpePicker } from './RpePicker';
 
 const SubstituteDialog = lazy(() => import('./WorkoutSubstituteDialog'));
 const TabataTimer = lazy(() => import('./TabataTimer'));
@@ -309,12 +310,7 @@ export const ActiveWorkoutSession = ({
     <button className="text-button skip-set-button" type="button" onClick={skipSet}>Skip this set</button>
   </div> : <div className="exercise-finished"><strong>Exercise complete</strong><span>Use the arrows to review another exercise.</span></div>);
 
-  const rpePicker = exercise.exerciseId === session.primaryExerciseId && <fieldset className="rpe-picker">
-    <legend>Main-lift RPE</legend>
-    <div>{Array.from({ length: 10 }, (_, index) => index + 1).map(value => (
-      <button className={session.rpe === value ? 'selected' : ''} type="button" aria-pressed={session.rpe === value} onClick={() => { flushAllDrafts(); onRpe(value); }} key={value}>{value}</button>
-    ))}</div>
-  </fieldset>;
+  const rpePicker = exercise.exerciseId === session.primaryExerciseId && <RpePicker value={session.rpe} onChange={value => { flushAllDrafts(); onRpe(value); }} />;
 
   const undoButton = <button className="secondary-button" type="button" disabled={!canUndo} onClick={() => {
     flushAllDrafts();

@@ -211,6 +211,7 @@ body { min-width:320px; }
 .confirmation-modal h2 { margin-bottom:10px; }
 .confirmation-modal p { color:var(--muted); line-height:1.6; }
 .modal-actions { justify-content:flex-end; margin-top:24px; }
+.finish-workout-modal { max-height:calc(100dvh - 40px); overflow:auto; }
 .confirmation-field { margin-top:18px; }
 .confirmation-field .number-input { width:100%; }
 .danger-button:disabled { opacity:.45; cursor:not-allowed; }

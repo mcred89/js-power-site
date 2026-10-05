@@ -86,6 +86,7 @@ const RoutineNameEditor = lazy(() => import('./components/PlanControls').then(mo
 const PlanSetup = lazy(() => import('./components/PlanControls').then(module => ({ default: module.PlanSetup })));
 const ProfileForm = lazy(() => import('./components/TrackerForms').then(module => ({ default: module.ProfileForm })));
 const ConfirmationDialog = lazy(() => import('./components/TrackerForms').then(module => ({ default: module.ConfirmationModal })));
+const FinishWorkoutDialog = lazy(() => import('./components/FinishWorkoutDialog').then(module => ({ default: module.FinishWorkoutDialog })));
 const ConfirmationModal = props => <Suspense fallback={null}><ConfirmationDialog {...props} /></Suspense>;
 const loadImportTools = () => import('./data/importBackup');
 const DATA_TASKS = {
@@ -809,10 +810,11 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
     finishActiveWorkout();
   };
 
-  const finishActiveWorkout = async () => {
+  const finishActiveWorkout = async rpe => {
     const { refreshAdaptiveProgression } = await import('./data/routineRecalculation');
     const current = routinesRef.current.find(item => item.id === routine.id) || routine;
-    const finished = finishWorkoutSession(current, workout.id);
+    const rated = rpe === undefined ? current : setSessionRpe(current, workout.id, rpe);
+    const finished = finishWorkoutSession(rated, workout.id);
     const adaptive = refreshAdaptiveProgression(finished);
     const updated = adaptive.routine;
     await saveRoutine(updated, record => patchProfile(profile.id, latest => (
@@ -1235,7 +1237,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
       </main>
 
       {workoutToDelete && <ConfirmationModal title="Delete future workout?" confirmLabel="Delete workout" onCancel={() => setWorkoutToDelete(null)} onConfirm={confirmDeleteWorkout}>This removes {workoutToDelete.weekLabel} · {workoutToDelete.name} from this routine. It will not be marked complete. Any saved Strongman results remain in Progress.</ConfirmationModal>}
-      {finishPrompt && <ConfirmationModal title="Finish this workout?" confirmLabel="Finish workout" onCancel={() => setFinishPrompt(null)} onConfirm={finishActiveWorkout}>{finishPrompt.pendingSets ? `${finishPrompt.pendingSets} planned set${finishPrompt.pendingSets === 1 ? '' : 's'} will be recorded as skipped. ` : ''}{finishPrompt.missingRpe ? 'The main-lift RPE is still blank.' : ''}</ConfirmationModal>}
+      {finishPrompt && <Suspense fallback={null}><FinishWorkoutDialog {...finishPrompt} onCancel={() => setFinishPrompt(null)} onConfirm={finishActiveWorkout} /></Suspense>}
       <Suspense fallback={null}>
       {importPlan && <ImportPreview plan={importPlan} busy={dataTaskBusy} onCancel={() => { if (!dataTaskBusy) setImportPlan(null); }} onConfirm={confirmImport} />}
       {(createdTransfer || receivingQr) && <QrTransfer transfer={createdTransfer} onClose={() => { setCreatedTransfer(null); setReceivingQr(false); }} onReceive={async contents => { setReceivingQr(false); await receiveTransferFile(new File([contents], 'Device transfer', { type: 'text/plain' })); }} />}
