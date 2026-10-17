@@ -76,7 +76,7 @@ export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
   return routine.workouts.flatMap(workout => {
     const key = stageKey(workout);
     // Every existing session is a snapshot, including imported/unknown statuses.
-    if (workout.completedAt || workout.skippedAt || workout.session || loggedIds.has(workout.id)) return [workout];
+    if (workout.completedAt || workout.skippedAt || workout.session || workout.strongmanQueue?.length || loggedIds.has(workout.id)) return [workout];
     // Missing identity denotes an unknown imported/custom record. Migrations
     // annotate recognized legacy workouts before any schedule can be changed.
     if (!key || stageOwners.get(key) !== workout) return [workout];

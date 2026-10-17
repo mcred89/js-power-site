@@ -1179,6 +1179,7 @@ const TrackerApp = ({ appearance, onAppearanceChange }) => {
               competition={profile.strongmanCompetition || null}
               competitionHistory={profile.strongmanCompetitionHistory || []}
               onSaveLog={entries => saveStrongmanLog(routine.id, entries)}
+              onSaveTraining={(entries, queue) => saveStrongmanChanges(routine.id, 'training', { workoutId: workout.id, entries, queue })}
               onComplete={completeStrongmanDay}
               onDelete={() => setWorkoutToDelete(workout)}
             />

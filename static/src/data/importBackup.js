@@ -68,23 +68,47 @@ const mergeStrongmanLogs = (local, imported) => {
   return merged;
 };
 
+// A backup may contain logged efforts that are still pending in the local
+// queue. Match by workout and set ID: changed setup can give the actual effort
+// a different entry ID, but it is still the same copied set.
+const reconcileStrongmanQueues = (workouts, entries) => {
+  const loggedSetIds = new Map();
+  entries.forEach(entry => {
+    if (!entry.workoutId) return;
+    if (!loggedSetIds.has(entry.workoutId)) loggedSetIds.set(entry.workoutId, new Set());
+    entry.sets.forEach(set => loggedSetIds.get(entry.workoutId).add(set.id));
+  });
+  return workouts.map(workout => {
+    const logged = loggedSetIds.get(workout.id);
+    if (!workout.strongmanQueue?.length || !logged?.size) return workout;
+    const queue = workout.strongmanQueue.flatMap(entry => {
+      const sets = entry.sets.filter(set => !logged.has(set.id));
+      if (sets.length === entry.sets.length) return [entry];
+      return sets.length ? [{ ...entry, sets }] : [];
+    });
+    return queue.length === workout.strongmanQueue.length && queue.every((entry, index) => entry === workout.strongmanQueue[index])
+      ? workout : { ...workout, strongmanQueue: queue };
+  });
+};
+
 const mergeRoutine = (local, imported) => {
   const localWorkouts = Array.isArray(local.workouts) ? local.workouts : [];
   const localWorkoutIds = new Set(localWorkouts.map(workout => workout.id));
+  const hasStrongmanLog = Array.isArray(local.strongmanLog) || Array.isArray(imported.strongmanLog);
+  const strongmanLog = hasStrongmanLog ? mergeStrongmanLogs(
+    Array.isArray(local.strongmanLog) ? local.strongmanLog : [],
+    Array.isArray(imported.strongmanLog) ? imported.strongmanLog : [],
+  ) : [];
+  const workouts = [
+    ...localWorkouts,
+    ...(Array.isArray(imported.workouts)
+      ? imported.workouts.filter(workout => !localWorkoutIds.has(workout.id))
+      : []),
+  ].sort((left, right) => (left.sequence || 0) - (right.sequence || 0));
   return {
     ...mergeRecord(local, imported),
-    ...((Array.isArray(local.strongmanLog) || Array.isArray(imported.strongmanLog)) ? {
-      strongmanLog: mergeStrongmanLogs(
-        Array.isArray(local.strongmanLog) ? local.strongmanLog : [],
-        Array.isArray(imported.strongmanLog) ? imported.strongmanLog : [],
-      ),
-    } : {}),
-    workouts: [
-      ...localWorkouts,
-      ...(Array.isArray(imported.workouts)
-        ? imported.workouts.filter(workout => !localWorkoutIds.has(workout.id))
-        : []),
-    ].sort((left, right) => (left.sequence || 0) - (right.sequence || 0)),
+    ...(hasStrongmanLog ? { strongmanLog } : {}),
+    workouts: reconcileStrongmanQueues(workouts, strongmanLog),
   };
 };
 

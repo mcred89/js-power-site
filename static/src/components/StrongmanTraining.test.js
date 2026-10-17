@@ -109,19 +109,25 @@ it('lets an unknown medley implement be logged on its own without prescribing ta
   expect(onCancel).toHaveBeenCalledTimes(1);
 });
 
-it('preserves a failed attempt with zero reps and adds unprescribed sets', async () => {
-  const onSave = jest.fn().mockResolvedValue(undefined);
-  act(() => root.render(<StrongmanResultEditor competition={competition} onSave={onSave} onCancel={() => {}} />));
+it('logs a failed attempt with zero reps, then adds a fresh successful set from its saved card', async () => {
+  const onSaveLog = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanTraining routine={baseRoutine} workout={workout} onSaveLog={onSaveLog} />));
+  await click('Add exercise');
   change('Exercise', 'custom');
   change('Movement', 'Axle clean');
   change('Weight (lb)', '240');
   change('Reps', '0');
   change('Result', 'failed');
-  await click('Add set');
-  change('Weight (lb)', '220', 1);
-  change('Reps', '1', 1);
   await submit();
-  expect(onSave.mock.calls[0][0].sets).toEqual([
+  expect(container.querySelector('form')).toBeNull();
+  act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: onSaveLog.mock.calls[0][0] }} workout={workout} onSaveLog={onSaveLog} />));
+  await click('Add set');
+  expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
+  expect(container.querySelector('[aria-label="Result"]').value).toBe('completed');
+  change('Weight (lb)', '220');
+  change('Reps', '1');
+  await submit();
+  expect(onSaveLog.mock.calls[1][0][0].sets).toEqual([
     expect.objectContaining({ weight: 240, reps: 0, successful: false }),
     expect.objectContaining({ weight: 220, reps: 1, successful: true }),
   ]);
@@ -158,18 +164,22 @@ it('saves retrospective cycle training with the chosen date and no current worko
   expect(container.textContent).toContain('Past training saved.');
 });
 
-it('retains the actual medley setup and complete/failed runs separately from implement work', async () => {
-  const onSave = jest.fn().mockResolvedValue(undefined);
-  act(() => root.render(<StrongmanResultEditor competition={competition} onSave={onSave} onCancel={() => {}} />));
+it('retains the actual medley setup through the log run then add run flow', async () => {
+  const onSaveLog = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<StrongmanTraining routine={baseRoutine} workout={workout} onSaveLog={onSaveLog} />));
+  await click('Add exercise');
   change('Exercise', 'event:medley');
   change('Weight (lb)', '200', 2);
   change('Distance (ft)', '40', 2);
-  change('Time (s)', '45', 3);
+  change('Time (s)', '45');
   change('Result', 'failed');
-  await click('Add run');
-  change('Time (s)', '42', 4);
   await submit();
-  const result = onSave.mock.calls[0][0];
+  act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: onSaveLog.mock.calls[0][0] }} workout={workout} onSaveLog={onSaveLog} />));
+  await click('Add run');
+  expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
+  change('Time (s)', '42');
+  await submit();
+  const result = onSaveLog.mock.calls[1][0][0];
   expect(result.scope).toBe('medley');
   expect(result.eventSnapshot.components[2]).toEqual(expect.objectContaining({ name: 'Stone', weight: 200, distance: 40 }));
   expect(result.sets).toEqual([
@@ -231,7 +241,7 @@ it('clears hidden movement metrics when switching to a full medley while retaini
   expect(container.querySelector('.strongman-training-set input').value).toBe('42');
   expect(container.querySelector('.strongman-training-set select').value).toBe('failed');
   change('Exercise', 'event:yoke');
-  expect([...container.querySelectorAll('.strongman-training-set input')].map(input => input.value)).toEqual(['', '', '', '42', '']);
+  expect([...container.querySelectorAll('.strongman-training-set input')].map(input => input.value)).toEqual(['', '', '', '42', '', '']);
   change('Exercise', 'event:medley');
   change('Result', 'completed');
   await submit();
@@ -288,19 +298,19 @@ it('adds a saved medley run as a new entry so changing its setup cannot rewrite 
   const onSaveLog = jest.fn().mockResolvedValue(undefined);
   act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: [entry] }} workout={workout} onSaveLog={onSaveLog} />));
   await click('Add run');
-  expect(container.querySelector('form h3').textContent).toBe('Add run');
+  expect(container.querySelector('form h3').textContent).toBe('Carry medley · Run 3');
   expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
-  expect(container.querySelector('.strongman-training-set input').value).toBe('');
+  expect(container.querySelector('.strongman-training-set input').value).toBe('45');
   expect(container.querySelector('input[type="date"]').value).toBe(entry.date);
   expect(container.textContent).toContain('Every run in this entry shares this setup.');
   change('Weight (lb)', '275', 0);
-  change('Time (s)', '42', 3);
+  change('Time (s)', '42');
   await submit();
   const saved = onSaveLog.mock.calls[0][0];
   expect(saved).toHaveLength(2);
   expect(saved[0]).toBe(entry);
   expect(JSON.stringify(entry)).toBe(original);
-  expect(saved[1]).toMatchObject({ date: entry.date, workoutId: workout.id, eventId: 'medley', notes: '',
+  expect(saved[1]).toMatchObject({ date: entry.date, workoutId: workout.id, eventId: 'medley', notes: entry.notes,
     sets: [expect.objectContaining({ seconds: 42, successful: true })] });
   expect(saved[1].id).not.toBe(entry.id);
   expect(saved[1].sets[0].id).not.toBe(entry.sets[0].id);
@@ -456,7 +466,7 @@ it('adds a scored set as a new entry so changing rules preserves the earlier sco
   act(() => root.render(<StrongmanTraining routine={{ ...baseRoutine, strongmanLog: [entry] }} workout={workout} onSaveLog={onSaveLog} />));
   expect(container.querySelector('.strongman-training-results').textContent).toContain('12 points');
   await click('Add set');
-  expect(container.querySelector('form h3').textContent).toBe('Add set');
+  expect(container.querySelector('form h3').textContent).toBe('Stone challenge · Set 2');
   expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
   change('Scoring rules', 'Light = 1; heavy = 3');
   change('Points', '15');

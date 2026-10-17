@@ -31,6 +31,7 @@ export const duplicateRoutine = (routine, profileId, name) => {
       id: makeId(),
       completedAt: null,
       session: null,
+      ...(workout.strongmanQueue !== undefined ? { strongmanQueue: [] } : {}),
       effectiveMaxes: workout.effectiveMaxes ? { ...workout.effectiveMaxes } : workout.effectiveMaxes,
       exercises: workout.exercises.map(exercise => ({
         ...exercise,

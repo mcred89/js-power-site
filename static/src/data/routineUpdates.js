@@ -193,12 +193,12 @@ export const getPlanUpdateSummary = (routine, updatedRoutine) => {
       return summary;
     }
     if (isRemovedByShortening(workout, routine.inputs, updatedRoutine.inputs, updatedRoutine.cycleWeekGroups) &&
-        (workout.completedAt || workout.skippedAt || workout.session || loggedIds.has(workout.id))) {
+        (workout.completedAt || workout.skippedAt || workout.session || workout.strongmanQueue?.length || loggedIds.has(workout.id))) {
       summary.preservedExtraWorkouts += 1;
     }
     if (workout.completedAt || workout.skippedAt) {
       summary.completedWorkouts += 1;
-    } else if (workout.session) {
+    } else if (workout.session || workout.strongmanQueue?.length) {
       summary.startedWorkouts += 1;
     } else {
       if (updated && JSON.stringify(workout) !== JSON.stringify(updated)) summary.changedWorkouts += 1;

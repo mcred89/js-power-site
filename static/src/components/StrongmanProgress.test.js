@@ -1,5 +1,6 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { Simulate } from 'react-dom/test-utils';
 import { StrongmanProgress } from './StrongmanProgress';
 
 let container;
@@ -11,6 +12,77 @@ beforeEach(() => {
 });
 afterEach(() => act(() => root.unmount()));
 const makeRecord = (id, date, weight, distance) => ({ id, date, movement: 'Zercher yoke carry', scope: 'movement', sets: [{ id: `set-${id}`, weight, distance, reps: '', seconds: '', successful: true }] });
+const changeField = (label, value) => {
+  const wrapper = [...container.querySelectorAll('.strongman-result-editor label')].find(item => item.querySelector('.field-label')?.textContent === label);
+  if (!wrapper) throw new Error(`Missing field ${label}`);
+  act(() => Simulate.change(wrapper.querySelector('input,select,textarea'), { target: { value } }));
+};
+const submitEditor = async () => act(async () => Simulate.submit(container.querySelector('.strongman-result-editor')));
+
+it.each(['movement', 'medley'])('adds another historical %s result with its original date, context, and sibling sets intact', async scope => {
+  const source = { ...makeRecord('source', '2025-09-01', 600, 50), scope, movement: scope === 'medley' ? 'Carry medley' : 'Zercher yoke carry',
+    competitionId: 'past-meet', eventId: 'old-event', componentId: null, workoutId: 'old-workout', notes: 'Training for last year',
+    eventSnapshot: scope === 'medley' ? { id: 'old-event', name: 'Carry medley', type: 'medley', components: [{ id: 'bag', name: 'Sandbag', weight: 250, distance: 50 }] }
+      : { id: 'old-event', name: 'Zercher yoke carry', type: 'single', timeGoal: 'distance', scoringRules: 'No drops' },
+    sets: scope === 'medley' ? [{ id: 'old-run', seconds: 45, successful: true }] : makeRecord('source', '2025-09-01', 600, 50).sets,
+  };
+  const original = JSON.stringify(source);
+  const onSaveLog = jest.fn().mockResolvedValue(undefined);
+  const routines = [{ id: 'past-plan', name: 'Past plan', strongmanLog: [source] }];
+  act(() => root.render(<StrongmanProgress routines={routines} onSaveLog={onSaveLog} />));
+  act(() => [...container.querySelectorAll('button')].find(button => button.textContent === (scope === 'medley' ? 'Add run' : 'Add set')).click());
+  expect(container.querySelector('input[type="date"]').value).toBe(source.date);
+  expect(container.querySelector('input[type="date"]').closest('details')).toBeNull();
+  expect(container.querySelectorAll('.strongman-training-set')).toHaveLength(1);
+  expect(container.querySelector('button[type="submit"]').textContent).toBe(scope === 'medley' ? 'Log run' : 'Log set');
+  changeField(scope === 'medley' ? 'Time (s)' : 'Distance (ft)', scope === 'medley' ? '42' : '60');
+  await submitEditor();
+  const [routineId, entries] = onSaveLog.mock.calls[0];
+  expect(routineId).toBe('past-plan');
+  expect(entries).toHaveLength(1);
+  expect(entries[0]).toMatchObject({ id: source.id, date: source.date, workoutId: source.workoutId,
+    competitionId: source.competitionId, eventId: source.eventId, componentId: source.componentId, notes: source.notes });
+  expect(entries[0].eventSnapshot).toBe(source.eventSnapshot);
+  expect(entries[0].sets).toHaveLength(2);
+  expect(entries[0].sets[0]).toBe(source.sets[0]);
+  expect(entries[0].sets[1]).toMatchObject(scope === 'medley' ? { seconds: 42 } : { distance: 60 });
+  expect(entries[0].sets[1].id).not.toBe(source.sets[0].id);
+  expect(JSON.stringify(source)).toBe(original);
+});
+
+it('persists a historical run correction and its untouched sibling atomically after a setup change', async () => {
+  const source = { id: 'medley-entry', date: '2025-09-01', movement: 'Carry medley', scope: 'medley', notes: 'Old course',
+    eventSnapshot: { id: 'medley', name: 'Carry medley', type: 'medley', components: [{ id: 'bag', name: 'Sandbag', weight: 250, distance: 50 }] },
+    sets: [{ id: 'first', seconds: 50, successful: true }, { id: 'second', seconds: 45, successful: true }],
+  };
+  const unrelated = makeRecord('unrelated', '2025-08-01', 600, 50);
+  const original = JSON.stringify(source);
+  const onSaveLog = jest.fn().mockRejectedValueOnce(new Error('Storage failed')).mockResolvedValue(undefined);
+  const routines = [{ id: 'past-plan', name: 'Past plan', strongmanLog: [source, unrelated] }];
+  act(() => root.render(<StrongmanProgress routines={routines} onSaveLog={onSaveLog} />));
+  act(() => container.querySelector('[aria-label^="Edit Carry medley run 2"]').click());
+  expect(container.querySelector('.strongman-training-set h4').textContent).toBe('Run 2 of 2');
+  expect(container.querySelector('.strongman-result-editor .strongman-training-saved-set button')).toBeNull();
+  changeField('Weight (lb)', '275');
+  changeField('Time (s)', '42');
+  await submitEditor();
+  expect(container.querySelector('[role="alert"]').textContent).toBe('Storage failed');
+  expect(container.querySelector('.strongman-result-editor')).not.toBeNull();
+  expect(JSON.stringify(source)).toBe(original);
+  await submitEditor();
+  expect(onSaveLog).toHaveBeenCalledTimes(2);
+  const [routineId, entries] = onSaveLog.mock.calls[1];
+  expect(routineId).toBe('past-plan');
+  expect(entries).toHaveLength(3);
+  expect(entries[0]).toEqual({ ...source, sets: [source.sets[0]] });
+  expect(entries[0].sets[0]).toBe(source.sets[0]);
+  expect(entries[0].eventSnapshot).toBe(source.eventSnapshot);
+  expect(entries[1]).toBe(unrelated);
+  expect(entries[2].id).not.toBe(source.id);
+  expect(entries[2].eventSnapshot.components[0].weight).toBe(275);
+  expect(entries[2].sets).toEqual([expect.objectContaining({ id: 'second', seconds: 42 })]);
+  expect(container.querySelector('.strongman-result-editor')).toBeNull();
+});
 
 it('keeps a past-result draft when changing its plan is cancelled and resets only after confirmation', () => {
   const meet = id => ({ id, name: `${id} meet`, events: [{ id: `${id}-event`, name: `${id} carry`, type: 'single', weight: 300, distance: 50 }] });

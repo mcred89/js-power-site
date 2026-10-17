@@ -6,7 +6,7 @@ import { migrateStrongmanCompetitions } from './strongmanCompetitions';
 import { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 import { repairShortenedCycles } from './cycleShorteningRepair';
 
-export const DATABASE_VERSION = 22;
+export const DATABASE_VERSION = 23;
 
 export { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 
@@ -338,6 +338,12 @@ export const databaseMigrations = {
   22: ({ transaction, done }) => migrateRecordStores(transaction, 22, {
     routines: repairShortenedCycles,
   }, done),
+  // Pending Strongman prefills are optional and separate from actual results.
+  // Existing workouts need no rewrite when this field is absent.
+  23: ({ transaction, done }) => {
+    transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 23 });
+    done();
+  },
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {

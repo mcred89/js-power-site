@@ -37,7 +37,7 @@ export const isShortenedCycle = (before, after, cycleIndex) => (
 );
 
 export const isRecordedWorkout = (routine, workout) => Boolean(
-  workout.completedAt || workout.skippedAt || workout.session ||
+  workout.completedAt || workout.skippedAt || workout.session || workout.strongmanQueue?.length ||
   (routine.strongmanLog || []).some(entry => entry.workoutId === workout.id)
 );
 

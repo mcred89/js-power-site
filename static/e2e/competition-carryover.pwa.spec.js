@@ -2,7 +2,10 @@ const { expect, test } = require('./fixtures');
 const { createProfile, fillMaxes, selectVolume, selectWeakPoints } = require('./helpers');
 
 const competitionCard = page => page.getByRole('region', { name: 'Next competition', exact: true });
-const openStrongmanDay = page => page.locator('.workout-card').filter({ hasText: 'Strongman' }).first().click();
+const openStrongmanDay = async page => {
+  await page.locator('.workout-card').filter({ hasText: 'Strongman' }).first().click();
+  await page.locator('summary').filter({ hasText: /^Competition targets/ }).click();
+};
 const openPlans = async page => {
   const back = page.getByRole('button', { name: '← Back', exact: true });
   if (await back.count()) await back.click();
@@ -54,7 +57,7 @@ test('competition preparation continues across new plans and ends without losing
   await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Zercher yoke carry' });
   await editor.getByLabel('Weight (lb)', { exact: true }).fill('580');
   await editor.getByLabel('Distance (ft)', { exact: true }).fill('50');
-  await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
+  await editor.getByRole('button', { name: 'Log set', exact: true }).click();
   await expect(preparationBest(page)).toContainText('580 lb · 50 ft');
   await page.getByRole('button', { name: 'Finish strongman day', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Your next workout', exact: true })).toBeVisible();
@@ -191,7 +194,7 @@ test.describe('dated competition completion', () => {
     await editor.getByLabel('Exercise', { exact: true }).selectOption({ label: 'Zercher yoke carry' });
     await editor.getByLabel('Weight (lb)', { exact: true }).fill('580');
     await editor.getByLabel('Distance (ft)', { exact: true }).fill('50');
-    await editor.getByRole('button', { name: 'Save exercise', exact: true }).click();
+    await editor.getByRole('button', { name: 'Log set', exact: true }).click();
     await expect(preparationBest(page)).toContainText('580 lb · 50 ft');
     await openPlans(page);
     const before = await storedTracking();

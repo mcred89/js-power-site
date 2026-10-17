@@ -1,8 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { createStrongmanLogEntry, normalizeMovementName, STRONGMAN_RECORD_GOALS } from '../data/strongman';
+import React, { useEffect, useRef, useState } from 'react';
+import { StrongmanResultEditor } from './StrongmanResultEditor';
+import { previousStrongmanWorkouts, copyStrongmanWorkout } from '../data/strongmanWorkoutCopy';
 import './StrongmanTraining.css';
 import { useUnsavedChanges } from './useUnsavedChanges';
 import { competitionChoicesForTraining, competitionForPastTraining } from '../data/strongmanCompetitionContext';
+
+export { StrongmanResultEditor } from './StrongmanResultEditor';
 
 const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
   ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -12,12 +15,11 @@ const localDate = value => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const today = () => localDate();
+const EMPTY_QUEUE = [];
 
-const present = value => value !== '' && value !== undefined && value !== null;
 const emptySet = () => ({ id: makeId(), weight: '', reps: '', distance: '', seconds: '', height: '', points: '', successful: true });
-const medleySet = set => ({ ...set, weight: '', reps: '', distance: '', height: '', points: '' });
-const newSetupEntry = entry => {
-  const next = { ...entry, id: makeId(), sets: [emptySet()], notes: '' };
+export const newStrongmanSetEntry = entry => {
+  const next = { ...entry, id: makeId(), sets: [{ ...emptySet(), ...entry.sets[entry.sets.length - 1], id: makeId(), successful: true }] };
   delete next.createdAt;
   delete next.updatedAt;
   return next;
@@ -32,269 +34,26 @@ const setLabel = set => [
   set.points !== '' && set.points != null ? `${set.points} points` : '',
 ].filter(Boolean).join(' · ');
 
-const competitionChoices = competition => (competition?.events || []).flatMap(event => (
-  event.type === 'medley' ? [
-    { key: `event:${event.id}`, label: `${event.name} — full event`, movement: event.name, event, scope: 'medley' },
-    ...(event.components || []).map((component, index) => ({
-      key: `component:${event.id}:${component.id}`, label: `${component.name || `Implement ${index + 1} (to be announced)`} · ${event.name}`,
-      movement: component.name || '', event, component, scope: 'movement',
-    })),
-  ] : [{ key: `event:${event.id}`, label: event.name, movement: event.name, event, scope: 'movement' }]
-));
-
-const MetricInput = ({ label, value, onChange, whole = false }) => <label>
-  <span className="field-label">{label}</span>
-  <input className="number-input" type="number" inputMode={whole ? 'numeric' : 'decimal'}
-    min="0" step={whole ? '1' : 'any'} value={value ?? ''} onChange={event => onChange(event.target.value)} />
-</label>;
-
-/** A dated result editor shared by the day logger and Progress backfill. */
-export const StrongmanResultEditor = ({
-  entry = null, appendToEntry = null, competition, competitionOptions, knownMovements = [], workoutId = null, initialDate, focusLastSet = false, newRun = false, newSet = false, onSave, onCancel,
-}) => {
-  const [draft, setDraft] = useState(() => entry ? {
-    ...entry, sets: entry.sets.map(set => entry.scope === 'medley' ? medleySet(set) : { ...set }),
-    eventSnapshot: entry.eventSnapshot ? JSON.parse(JSON.stringify(entry.eventSnapshot)) : null,
-  } : {
-    id: makeId(), date: initialDate || today(), workoutId, competitionId: competition?.id || null, movement: '', eventId: null, componentId: null,
-    scope: 'movement', eventSnapshot: null, sets: [emptySet()], notes: '',
-  });
-  const [selected, setSelected] = useState(() => entry ? 'custom' : '');
-  const [saving, setSaving] = useState(false);
-  useUnsavedChanges(true, saving);
-  const [error, setError] = useState('');
-  const savingRef = useRef(false);
-  const headingRef = useRef(null);
-  const setsRef = useRef(null);
-  const focusSetRef = useRef(focusLastSet ? draft.sets[draft.sets.length - 1]?.id : null);
-  const selectedCompetition = competitionOptions ? competitionOptions.find(item => item.id === draft.competitionId) : competition;
-  const choices = useMemo(() => competitionChoices(selectedCompetition), [selectedCompetition]);
-  const movements = [...new Set(knownMovements)].filter(name => name && !choices.some(choice => (
-    choice.scope === 'movement' && normalizeMovementName(choice.movement) === normalizeMovementName(name)
-  ))).sort((a, b) => a.localeCompare(b));
-  const goal = draft.eventSnapshot?.timeGoal || 'fastest';
-  const timeWindow = draft.scope !== 'medley' && ['reps', 'distance', 'height', 'points'].includes(goal);
-
-  useEffect(() => { headingRef.current?.focus(); }, []);
-  useEffect(() => {
-    if (!focusSetRef.current) return;
-    [...(setsRef.current?.children || [])].find(element => element.dataset.setId === focusSetRef.current)?.querySelector('input')?.focus();
-    focusSetRef.current = null;
-  }, [draft.sets]);
-
-  const update = values => { setDraft(current => ({ ...current, ...values })); setError(''); };
-  const updateSnapshot = values => update({ eventSnapshot: {
-    ...(draft.eventSnapshot || { id: makeId(), name: draft.movement, type: 'single', components: [] }), ...values,
-  } });
-  const updateSet = (index, values) => setDraft(current => ({
-    ...current, sets: current.sets.map((set, setIndex) => setIndex === index ? { ...set, ...values } : set),
-  }));
-  const selectExercise = value => {
-    setSelected(value);
-    const choice = choices.find(item => item.key === value);
-    update({
-      movement: choice?.movement || (value.startsWith('past:') ? value.slice(5) : ''),
-      eventId: choice?.event.id || null, componentId: choice?.component?.id || null,
-      scope: choice?.scope || 'movement',
-      ...(choice?.scope === 'medley' ? { sets: draft.sets.map(medleySet) } : {}),
-      eventSnapshot: choice ? JSON.parse(JSON.stringify(choice.component
-        ? { ...choice.component, type: 'single', components: [] } : choice.event)) : null,
-    });
-  };
-  const addSet = () => {
-    const set = emptySet();
-    focusSetRef.current = set.id;
-    update({ sets: [...draft.sets, set] });
-  };
-  const updateComponent = (index, key, value) => setDraft(current => ({
-    ...current, eventSnapshot: {
-      ...current.eventSnapshot,
-      components: current.eventSnapshot.components.map((component, componentIndex) => (
-        componentIndex === index ? { ...component, [key]: value } : component
-      )),
-    },
-  }));
-  const addComponent = () => update({
-    eventSnapshot: {
-      ...draft.eventSnapshot,
-      name: draft.eventSnapshot?.name || draft.movement,
-      type: 'medley',
-      components: [...(draft.eventSnapshot?.components || []), {
-        id: makeId(), name: '', weight: '', distance: '', reps: '', seconds: '',
-      }],
-    },
-  });
-  const removeComponent = index => update({
-    eventSnapshot: {
-      ...draft.eventSnapshot,
-      components: draft.eventSnapshot.components.filter((_, componentIndex) => componentIndex !== index),
-    },
-  });
-  const save = async event => {
-    event.preventDefault();
-    if (savingRef.current) return;
-    savingRef.current = true;
-    setSaving(true);
-    setError('');
-    try {
-      const normalized = createStrongmanLogEntry(draft);
-      const sameContext = appendToEntry && ['movement', 'date', 'scope', 'competitionId', 'eventId', 'componentId', 'workoutId', 'notes']
-        .every(key => (draft[key] || '') === (appendToEntry[key] || '')) &&
-        JSON.stringify(draft.eventSnapshot || null) === JSON.stringify(appendToEntry.eventSnapshot || null);
-      await onSave(sameContext ? { ...appendToEntry, sets: [...appendToEntry.sets, ...normalized.sets], updatedAt: normalized.updatedAt } : normalized);
-      onCancel();
-    } catch (saveError) {
-      setError(saveError.message || 'Could not save this training. Your entries are still here; try again.');
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
-
-  return <form className="strongman-result-editor" onSubmit={save}>
-    <h3 tabIndex="-1" ref={headingRef}>{newRun ? 'Add run' : newSet ? 'Add set' : entry ? 'Edit training' : 'Add exercise'}</h3>
-    <p className="muted">Record what you actually do. Start with one set and add more as you go.</p>
-    {appendToEntry && <p className="muted">Add your new sets here. Changing the movement, record goal, rules, or notes saves them separately and keeps earlier sets unchanged.</p>}
-    <fieldset disabled={saving}>
-      {!entry && competitionOptions?.length > 0 && <label className="strongman-training-field">
-        <span className="field-label">Competition for this result</span>
-        <select className="select-input" aria-label="Competition for this result" value={draft.competitionId || ''} onChange={event => {
-          setSelected(draft.movement ? 'custom' : '');
-          update({ competitionId: event.target.value || null, eventId: null, componentId: null });
-        }}><option value="">No competition</option>{competitionOptions.map(item => <option key={item.id} value={item.id}>{item.name || 'Unnamed competition'}{item.date ? ` · ${item.date}` : ''}</option>)}</select>
-      </label>}
-      {!entry && <label className="strongman-training-field">
-        <span className="field-label">Exercise</span>
-        <select className="select-input" aria-label="Exercise" value={selected} onChange={event => selectExercise(event.target.value)} required>
-          <option value="" disabled>Choose or add an exercise</option>
-          {choices.length > 0 && <optgroup label="Competition events">
-            {choices.map(choice => <option key={choice.key} value={choice.key}>{choice.label}</option>)}
-          </optgroup>}
-          {movements.length > 0 && <optgroup label="Previous training">
-            {movements.map(name => <option key={name} value={`past:${name}`}>{name}</option>)}
-          </optgroup>}
-          <option value="custom">New exercise</option>
-        </select>
-      </label>}
-      {(entry || selected) && <>
-        <div className="strongman-training-identity">
-          <label>
-            <span className="field-label">Movement</span>
-            <input className="number-input" value={draft.movement} required maxLength="160"
-              onChange={event => update({ movement: event.target.value })} />
-          </label>
-          <label>
-            <span className="field-label">Training date</span>
-            <input className="number-input" type="date" value={draft.date} required max={today()}
-              onChange={event => update({ date: event.target.value })} />
-          </label>
-        </div>
-        {draft.scope === 'medley' && <div className="strongman-training-course">
-          <h4>Actual event setup</h4>
-          <p className="muted">Check the implements you used. Best times compare matching setups; individual implement work is logged separately.</p>
-          <p className="muted">Every run in this entry shares this setup. For a different setup, save this entry, then choose Add run on the saved event.</p>
-          {(draft.eventSnapshot?.components || []).length === 0 && <p>Add the implements you actually used here. Leave details blank if you do not know them yet.</p>}
-          {(draft.eventSnapshot?.components || []).map((component, index) => <div className="strongman-training-implement" key={component.id || index}>
-            <label>
-              <span className="field-label">Implement {index + 1}</span>
-              <input className="number-input" value={component.name || ''} placeholder="Implement not yet known"
-                onChange={event => updateComponent(index, 'name', event.target.value)} />
-            </label>
-            <div className="strongman-training-metrics">
-              <MetricInput label="Weight (lb)" value={component.weight} onChange={value => updateComponent(index, 'weight', value)} />
-              <MetricInput label="Distance (ft)" value={component.distance} onChange={value => updateComponent(index, 'distance', value)} />
-              <MetricInput label="Reps" value={component.reps} whole onChange={value => updateComponent(index, 'reps', value)} />
-              <MetricInput label="Time (s)" value={component.seconds} onChange={value => updateComponent(index, 'seconds', value)} />
-            </div>
-            <details className="strongman-training-extra" open={present(component.height) || present(component.points) || undefined}><summary>Height or points (optional)</summary><div className="strongman-training-metrics"><MetricInput label="Height (in)" value={component.height} onChange={value => updateComponent(index, 'height', value)} /><MetricInput label="Points" value={component.points} onChange={value => updateComponent(index, 'points', value)} /></div></details>
-            <details className="strongman-training-extra" open={present(component.scoringRules) || undefined}><summary>Implement rules (optional)</summary><label><span className="field-label">Implement {index + 1} scoring rules</span><input className="number-input" value={component.scoringRules || ''} maxLength="2000" onChange={event => updateComponent(index, 'scoringRules', event.target.value)} /></label></details>
-            <button type="button" className="text-button" aria-label={`Remove actual implement ${index + 1}`}
-              onClick={() => removeComponent(index)}>Remove implement</button>
-          </div>)}
-          <button type="button" className="secondary-button" onClick={addComponent}>Add actual implement</button>
-        </div>}
-        <p className="strongman-training-hint">{draft.scope === 'medley'
-          ? 'Record your time and whether you completed the full event.'
-          : 'Fill in the measures you used. For a pickup, enter 1 rep. Leave measures you did not track blank.'}</p>
-        {draft.scope !== 'medley' && <label className="strongman-training-field">
-          <span className="field-label">Record goal</span>
-          <select className="select-input" aria-label="Record goal" value={goal} onChange={event => updateSnapshot({ timeGoal: event.target.value })}>
-            {STRONGMAN_RECORD_GOALS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-        </label>}
-        {timeWindow && <p className="strongman-training-hint">Enter the time window you actually used, or leave it blank for untimed work. Records compare matching setups and time windows.</p>}
-        {draft.scope !== 'medley' && goal === 'height' && <p className="strongman-training-hint">Record the height you cleared in inches, separately from horizontal distance. Leave an unmeasured height blank.</p>}
-        {draft.scope !== 'medley' && goal === 'weight' && <p className="strongman-training-hint">Record the weight you lifted and actual reps. Failed attempts remain in history but do not count as records.</p>}
-        {(draft.scope === 'medley' || goal !== 'points') && <details className="strongman-training-extra" open={present(draft.eventSnapshot?.scoringRules) || undefined}>
-          <summary>Setup and scoring rules (optional)</summary>
-          <label className="strongman-training-field"><span className="field-label">Scoring rules</span><textarea className="number-input" rows="2" maxLength="2000" value={draft.eventSnapshot?.scoringRules || ''} placeholder="e.g. Best of 3 throws; no drops; 2-inch deficit" onChange={event => updateSnapshot({ scoringRules: event.target.value })} /></label>
-          <p className="strongman-training-hint">Use the rules you actually trained. Every set in this entry shares these rules; editing them changes the setup for all its sets.</p>
-        </details>}
-        {draft.scope !== 'medley' && goal === 'points' && <div className="strongman-training-course">
-          <h4>Scoring setup</h4>
-          <p className="muted">Enter your actual score manually. Include every implement’s weight, required distance or height, and scoring formula in the rules. For example: 200 lb stone = 1 point; 250 lb stone = 2; both over a 48-inch bar. Update the rules if any load or task changes. Every set in this entry shares these rules and setup.</p>
-          <label className="strongman-training-field"><span className="field-label">Scoring rules</span><textarea className="number-input" rows="2" required maxLength="2000" value={draft.eventSnapshot?.scoringRules || ''} placeholder="e.g. 1 point per light stone, 2 per heavy stone; 60 sec" onChange={event => updateSnapshot({ scoringRules: event.target.value })} /></label>
-          <details className="strongman-training-extra"><summary>Fixed event setup (optional)</summary>
-            <p className="muted">These are the event’s fixed conditions, copied from the competition when available. They are not completed results. Update them if you practiced different conditions.</p>
-            <div className="strongman-training-metrics">
-              {[['weight', 'Setup weight (lb)'], ['distance', 'Setup distance (ft)'], ['reps', 'Setup reps'], ['height', 'Setup height (in)']].map(([key, label]) => <MetricInput key={key} label={label} whole={key === 'reps'} value={draft.eventSnapshot?.[key]} onChange={value => updateSnapshot({ [key]: value })} />)}
-            </div>
-          </details>
-        </div>}
-        <div className="strongman-training-sets" ref={setsRef}>
-          {draft.sets.map((set, index) => <div className="strongman-training-set" key={set.id} data-set-id={set.id}>
-            <div className="strongman-training-set-heading">
-              <h4>{draft.scope === 'medley' ? 'Run' : 'Set'} {index + 1}</h4>
-              {draft.sets.length > 1 && <button type="button" className="text-button"
-                aria-label={`Remove ${draft.scope === 'medley' ? 'run' : 'set'} ${index + 1}`}
-                onClick={() => update({ sets: draft.sets.filter((_, setIndex) => setIndex !== index) })}>Remove</button>}
-            </div>
-            <div className="strongman-training-metrics">
-              {draft.scope !== 'medley' && (goal === 'points' || present(set.points)) && <MetricInput label="Points" value={set.points} onChange={value => updateSet(index, { points: value })} />}
-              {draft.scope !== 'medley' && goal === 'height' && <MetricInput label="Height (in)" value={set.height} onChange={value => updateSet(index, { height: value })} />}
-              {draft.scope !== 'medley' && <MetricInput label="Weight (lb)" value={set.weight} onChange={value => updateSet(index, { weight: value })} />}
-              {draft.scope !== 'medley' && <MetricInput label="Reps" value={set.reps} whole onChange={value => updateSet(index, { reps: value })} />}
-              {draft.scope !== 'medley' && <MetricInput label="Distance (ft)" value={set.distance} onChange={value => updateSet(index, { distance: value })} />}
-              <MetricInput label={timeWindow ? 'Time window (s)' : 'Time (s)'} value={set.seconds} onChange={value => updateSet(index, { seconds: value })} />
-            </div>
-            {draft.scope !== 'medley' && goal !== 'height' && <details className="strongman-training-extra" open={present(set.height) || undefined}><summary>Height or loading platform (optional)</summary><MetricInput label="Height (in)" value={set.height} onChange={value => updateSet(index, { height: value })} /></details>}
-            <label className="strongman-training-outcome">
-              <span className="field-label">Result</span>
-              <select className="select-input" aria-label="Result" value={set.successful === false ? 'failed' : 'completed'}
-                onChange={event => updateSet(index, { successful: event.target.value === 'completed' })}>
-                <option value="completed">{draft.scope === 'medley' ? 'Completed full event' : 'Completed'}</option>
-                <option value="failed">{draft.scope === 'medley' ? 'Did not complete event' : 'Unsuccessful attempt'}</option>
-              </select>
-            </label>
-          </div>)}
-        </div>
-        <button type="button" className="secondary-button" onClick={addSet}>
-          {draft.scope === 'medley' ? 'Add run' : 'Add set'}
-        </button>
-        <label className="strongman-training-field">
-          <span className="field-label">Notes (optional)</span>
-          <textarea className="number-input" rows="2" value={draft.notes || ''} maxLength="2000"
-            placeholder="Technique, implement details, or how it felt"
-            onChange={event => update({ notes: event.target.value })} />
-        </label>
-      </>}
-      {error && <p role="alert" className="strongman-training-error">{error}</p>}
-      <div className="strongman-training-actions">
-        <button type="submit" className="primary-button" disabled={!draft.movement.trim()}>{saving ? 'Saving…' : 'Save exercise'}</button>
-        <button type="button" className="secondary-button" onClick={onCancel}>Cancel</button>
-      </div>
-    </fieldset>
-  </form>;
-};
-
-export const StrongmanTraining = ({ routine, workout, routines = [], competition, competitionHistory = [], onSaveLog, onEditingChange }) => {
+export const StrongmanTraining = ({ routine, workout, routines = [], competition, competitionHistory = [], onSaveLog, onSaveTraining, onEditingChange }) => {
   const [editing, setEditing] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [pastEntryId, setPastEntryId] = useState(null);
+  const [copying, setCopying] = useState(false);
+  const [clearQueue, setClearQueue] = useState(false);
+  const sectionRef = useRef(null);
+  const savingRef = useRef(false);
+  const returnFocus = useRef(null);
+  useUnsavedChanges(saving, saving);
   const entries = routine.strongmanLog || [];
   const dayEntries = entries.filter(entry => entry.workoutId === workout.id);
+  const pastEntry = entries.find(entry => entry.id === pastEntryId && !entry.workoutId);
+  const queue = workout.strongmanQueue || EMPTY_QUEUE;
+  const pendingCount = queue.reduce((count, entry) => count + entry.sets.length, 0);
+  const loggedCount = dayEntries.reduce((count, entry) => count + entry.sets.length, 0);
+  const sources = copying ? previousStrongmanWorkouts(routine, routines, workout, today()) : [];
   const currentCompetition = competition === undefined ? routine.inputs?.strongmanCompetition : competition;
   const historical = editing?.mode === 'past' || Boolean(workout.completedAt);
   const editorCompetition = historical ? competitionForPastTraining(routine, competition, competitionHistory, workout.completedAt ? workout : undefined) : currentCompetition;
@@ -303,13 +62,49 @@ export const StrongmanTraining = ({ routine, workout, routines = [], competition
     (item.strongmanLog || []).filter(entry => entry.scope !== 'medley').map(entry => entry.movement)
   )))];
   useEffect(() => { onEditingChange?.(Boolean(editing) || saving); }, [editing, saving, onEditingChange]);
-  const saveEntry = async entry => {
-    await onSaveLog(entries.some(item => item.id === entry.id)
-      ? entries.map(item => item.id === entry.id ? entry : item) : [...entries, entry]);
-    setNotice(entry.workoutId ? 'Exercise saved.' : 'Past training saved. It is included in your cycle records and Progress.');
+  useEffect(() => {
+    if (editing || saving || !returnFocus.current) return;
+    const buttons = [...(sectionRef.current?.querySelectorAll('[data-continue]') || [])];
+    const target = buttons.find(button => button.dataset.continue === returnFocus.current) || buttons[0];
+    target?.focus();
+    returnFocus.current = null;
+  }, [editing, saving, notice, queue]);
+  const startEditing = value => { setEditing(value); setDeleteId(null); setClearQueue(false); setNotice(''); setCopying(false); };
+  const closeEditor = () => { returnFocus.current = returnFocus.current || editing?.anchorId || 'new'; setEditing(null); };
+  const saveEntry = async (entry, retainedEntry) => {
+    const originals = retainedEntry ? entries.map(item => item.id === retainedEntry.id ? retainedEntry : item) : entries;
+    const nextEntries = originals.some(item => item.id === entry.id)
+      ? originals.map(item => item.id === entry.id ? entry : item) : [...originals, entry];
+    if (editing?.queueId) {
+      const remaining = queue.flatMap(item => item.id !== editing.queueId ? [item] : (
+        item.sets.length > 1 ? [{ ...item, sets: item.sets.slice(1) }] : []
+      ));
+      await onSaveTraining(nextEntries, remaining);
+    } else {
+      await onSaveLog(nextEntries);
+    }
+    returnFocus.current = editing?.queueId || entry.id;
+    if (!entry.workoutId) setPastEntryId(entry.id);
+    setNotice(entry.workoutId ? `${entry.scope === 'medley' ? 'Run' : 'Set'} saved. Add another whenever you’re ready.` : 'Past training saved. It is included in your cycle records and Progress.');
+  };
+  const saveQueue = async (nextQueue, message) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    setError('');
+    try {
+      await onSaveTraining(entries, nextQueue);
+      setCopying(false);
+      setClearQueue(false);
+      setNotice(message);
+      returnFocus.current = nextQueue[0]?.id || 'new';
+    } catch (failure) {
+      setError(failure.message || 'Could not save this workout. Try again.');
+    } finally { savingRef.current = false; setSaving(false); }
   };
   const deleteEntry = async () => {
-    if (saving) return;
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError('');
     try {
@@ -317,15 +112,74 @@ export const StrongmanTraining = ({ routine, workout, routines = [], competition
       setDeleteId(null);
     } catch (saveError) {
       setError(saveError.message || 'Could not delete this exercise. Try again.');
-    } finally { setSaving(false); }
+    } finally { savingRef.current = false; setSaving(false); }
   };
 
-  return <section className="strongman-training card" aria-label="Strongman training log">
+  const renderEditor = () => <StrongmanResultEditor key={`${editing.entry?.id || editing.mode}:${editing.editSetId || ''}`}
+    entry={editing.entry} appendToEntry={editing.appendToEntry} editSetId={editing.editSetId}
+    competition={editorCompetition} competitionOptions={competitionOptions?.length ? competitionOptions : undefined} knownMovements={knownMovements}
+    workoutId={editing.mode === 'past' ? null : workout.id}
+    initialDate={editing.mode !== 'past' && workout.completedAt ? localDate(workout.completedAt) : undefined}
+    showDate={editing.mode === 'past' || Boolean(workout.completedAt)}
+    focusLastSet={editing.focusLastSet} newRun={editing.newRun} newSet={editing.newSet}
+    onSave={saveEntry} onCancel={closeEditor} />;
+
+  return <section className="strongman-training card" aria-label="Strongman training log" ref={sectionRef}>
     <div className="strongman-training-heading"><div>
       <p className="eyebrow">Your training</p>
-      <h2>{workout.completedAt ? 'What you did' : 'What are you working on?'}</h2>
+      <h2>{workout.completedAt ? 'What you did' : 'Today’s training'}</h2>
     </div></div>
-    {!dayEntries.length && !editing && <p className="muted">Choose your work as you go. Log an exercise, a single implement, or a full event.</p>}
+    <p className="strongman-training-progress" aria-live="polite">{loggedCount} {loggedCount === 1 ? 'set' : 'sets'} logged{pendingCount > 0 ? ` · ${pendingCount} to go` : ''}</p>
+    {!dayEntries.length && !queue.length && !editing && <p className="muted">Log one set at a time, or start from a previous workout.</p>}
+    {editing && !editing.anchorId && renderEditor()}
+    {!editing && <div className="strongman-training-actions">
+      <button type="button" className="primary-button" data-continue="new" disabled={saving} onClick={() => startEditing({ mode: 'day' })}>Add exercise</button>
+      {!workout.completedAt && !queue.length && onSaveTraining && <button type="button" className="secondary-button" disabled={saving}
+        aria-expanded={copying} onClick={() => { setCopying(!copying); setError(''); }}>Copy previous workout</button>}
+    </div>}
+    {copying && <div className="strongman-copy-picker" role="group" aria-label="Choose a previous workout">
+      <p className="field-help">Load the sets as a starting point. Log each one as you train; saved results stay unchanged.</p>
+      {sources.length ? <ul>{sources.map(source => <li key={source.id}>
+        <button className="strongman-copy-choice" type="button" disabled={saving}
+          onClick={() => saveQueue(copyStrongmanWorkout(source, workout.id, today(), currentCompetition), 'Workout copied. Log each set as you train.')}>
+          <strong>{source.label} · {dateLabel(source.date)}</strong>
+          <span>{source.preview}</span><small>{source.routineName}</small>
+        </button>
+      </li>)}</ul> : <p className="muted">No earlier training yet. Log past training below to reuse it here.</p>}
+      <button className="text-button" type="button" disabled={saving} onClick={() => setCopying(false)}>Cancel copy</button>
+    </div>}
+    {queue.length > 0 && <div className="strongman-training-queue" aria-label="Copied workout">
+      {queue.map((entry, index) => {
+        const logged = dayEntries.find(item => item.id === entry.id);
+        return <article className="strongman-queue-entry" key={entry.id}>
+          <div className="strongman-training-entry-heading"><div>
+            <p className="eyebrow">{index === 0 ? 'Up next' : 'Coming up'}</p>
+            <h3>{entry.movement}</h3>
+            <p className="muted">{entry.sets.length} {entry.scope === 'medley' ? 'runs' : 'sets'} remaining{logged ? ` · ${logged.sets.length} logged` : ''}</p>
+          </div></div>
+          {editing?.queueId === entry.id ? renderEditor() : <>
+            <p className="strongman-queue-preview">Next: {setLabel(entry.sets[0])}</p>
+            <div className="strongman-training-actions">
+              <button type="button" className="secondary-button" data-continue={entry.id} disabled={Boolean(editing) || saving}
+                onClick={() => startEditing({
+                  anchorId: entry.id, queueId: entry.id,
+                  entry: { ...entry, id: logged ? makeId() : entry.id, date: today(), sets: [{ ...entry.sets[0] }] },
+                  appendToEntry: logged || null, newSet: entry.scope !== 'medley', newRun: entry.scope === 'medley', focusLastSet: true,
+                })}>Log next {entry.scope === 'medley' ? 'run' : 'set'}</button>
+              <button type="button" className="text-button" disabled={Boolean(editing) || saving}
+                onClick={() => saveQueue(queue.flatMap(item => item.id !== entry.id ? [item] : (item.sets.length > 1 ? [{ ...item, sets: item.sets.slice(1) }] : [])), 'Skipped. No result was recorded.')}>
+                Skip {entry.scope === 'medley' ? 'run' : 'set'}</button>
+            </div>
+          </>}
+        </article>;
+      })}
+      {!editing && <button className="text-button" type="button" disabled={saving} onClick={() => setClearQueue(true)}>Clear remaining sets</button>}
+      {clearQueue && !editing && <div role="group" aria-label="Confirm clear remaining sets">
+        <p>Remove the {pendingCount} unlogged sets? Your logged results stay saved.</p>
+        <div className="strongman-training-actions"><button type="button" className="danger-button" disabled={saving} onClick={() => saveQueue([], 'Remaining sets cleared. Your logged results are saved.')}>Clear unlogged sets</button>
+          <button type="button" className="secondary-button" disabled={saving} onClick={() => setClearQueue(false)}>Keep sets</button></div>
+      </div>}
+    </div>}
     <div className="strongman-training-entries">
       {dayEntries.map(entry => <article className="strongman-training-entry" key={entry.id}>
         <div className="strongman-training-entry-heading"><div>
@@ -333,27 +187,31 @@ export const StrongmanTraining = ({ routine, workout, routines = [], competition
           <p className="muted">{dateLabel(entry.date)}{entry.scope === 'medley' ? ' · Full event' : ''}</p>
         </div>
           <button type="button" className="text-button" disabled={Boolean(editing) || saving}
-            aria-label={`Edit ${entry.movement}`} onClick={() => { setEditing({ entry }); setDeleteId(null); }}>Edit</button>
+            aria-label={`Edit ${entry.movement}`} onClick={() => startEditing({ entry, anchorId: entry.id })}>Edit</button>
         </div>
+        {editing?.anchorId === entry.id && !editing.queueId && renderEditor()}
         <ol className="strongman-training-results">
           {entry.sets.map((set, index) => <li key={set.id || index}>
             <span>{setLabel(set)}</span>
             {set.successful === false && <span className="strongman-training-attempt">Unsuccessful</span>}
+            <button type="button" className="text-button" disabled={Boolean(editing) || saving}
+              aria-label={`Edit ${entry.scope === 'medley' ? 'run' : 'set'} ${index + 1} of ${entry.movement}`}
+              onClick={() => startEditing({ entry, anchorId: entry.id, editSetId: set.id })}>Edit</button>
           </li>)}
         </ol>
         {entry.eventSnapshot?.scoringRules && <p className="strongman-training-notes">Scoring: {entry.eventSnapshot.scoringRules}</p>}
         {entry.notes && <p className="strongman-training-notes">{entry.notes}</p>}
         <div className="strongman-training-actions">
-          <button type="button" className="secondary-button" disabled={Boolean(editing) || saving}
+          <button type="button" className="secondary-button" data-continue={entry.id} disabled={Boolean(editing) || saving}
             onClick={() => {
-              setEditing({
-                entry: newSetupEntry(entry),
-                appendToEntry: entry.scope !== 'medley' && entry.eventSnapshot?.timeGoal !== 'points' && !present(entry.eventSnapshot?.scoringRules) ? entry : null,
+              startEditing({
+                anchorId: entry.id,
+                entry: newStrongmanSetEntry(entry),
+                appendToEntry: entry,
                 focusLastSet: true,
                 newRun: entry.scope === 'medley',
                 newSet: entry.scope !== 'medley',
               });
-              setDeleteId(null);
             }}>
             {entry.scope === 'medley' ? 'Add run' : 'Add set'}
           </button>
@@ -371,19 +229,16 @@ export const StrongmanTraining = ({ routine, workout, routines = [], competition
     </div>
     {error && <p className="strongman-training-error" role="alert">{error}</p>}
     {notice && <p className="muted" role="status">{notice}</p>}
-    {editing ? <StrongmanResultEditor key={editing.entry?.id || editing.mode} entry={editing.entry}
-      appendToEntry={editing.appendToEntry}
-      competition={editorCompetition} competitionOptions={competitionOptions?.length ? competitionOptions : undefined} knownMovements={knownMovements}
-      workoutId={editing.mode === 'past' ? null : workout.id}
-      initialDate={editing.mode !== 'past' && workout.completedAt ? localDate(workout.completedAt) : undefined}
-      focusLastSet={editing.focusLastSet}
-      newRun={editing.newRun}
-      newSet={editing.newSet}
-      onSave={saveEntry} onCancel={() => setEditing(null)} />
-      : <div className="strongman-training-actions">
-        <button type="button" className="primary-button" disabled={saving} onClick={() => { setEditing({ mode: 'day' }); setDeleteId(null); }}>Add exercise</button>
-        <button type="button" className="secondary-button" disabled={saving} onClick={() => { setEditing({ mode: 'past' }); setDeleteId(null); }}>Log past training</button>
-      </div>}
+    {pastEntry && !editing && <aside className="strongman-past-entry" aria-label="Recently logged past training">
+      <p className="eyebrow">Past training · {dateLabel(pastEntry.date)}</p>
+      <h3>{pastEntry.movement}</h3>
+      <p className="muted">{pastEntry.sets.length} {pastEntry.scope === 'medley' ? 'runs' : 'sets'} logged · {setLabel(pastEntry.sets[pastEntry.sets.length - 1])}</p>
+      <button type="button" className="secondary-button" data-continue={pastEntry.id} disabled={saving}
+        onClick={() => startEditing({ mode: 'past', entry: newStrongmanSetEntry(pastEntry), appendToEntry: pastEntry,
+          newSet: pastEntry.scope !== 'medley', newRun: pastEntry.scope === 'medley', focusLastSet: true })}>
+        Add {pastEntry.scope === 'medley' ? 'run' : 'set'} to past training</button>
+    </aside>}
+    {!editing && <button type="button" className="text-button strongman-backfill" disabled={saving} onClick={() => startEditing({ mode: 'past' })}>Log past training</button>}
     {editing?.mode === 'past' && <p className="muted">Choose the date you trained. This result counts toward this cycle and appears in Progress.</p>}
   </section>;
 };

@@ -49,3 +49,43 @@ it('rejects another profile, removed workouts, and concurrent-window conflicts',
   applyBatch.mockRejectedValueOnce(Object.assign(new Error('changed'), { name: 'BatchConflictError' }));
   await expect(commitStrongmanChange(routine, 'p1', 'log', [], saveRoutine)).rejects.toThrow('changed in another window');
 });
+
+it('atomically saves actual sets and the remaining prefills while retaining history and other workouts', async () => {
+  const entry = createStrongmanLogEntry({ id: 'entry', movement: 'Yoke', workoutId: 'w1', date: '2026-01-01',
+    sets: [{ id: 'first', weight: 580, distance: 50 }, { id: 'second', weight: 590, distance: 50 }] });
+  const history = { ...entry, id: 'history', workoutId: null };
+  const otherWorkout = { id: 'other', strongmanQueue: [] };
+  const current = { ...routine, strongmanLog: [history], workouts: [{ ...routine.workouts[0], strongmanQueue: [entry] }, otherWorkout] };
+  const actual = { ...entry, sets: [entry.sets[0]] };
+  const pending = { ...entry, sets: [entry.sets[1]] };
+  await commitStrongmanChange(current, 'p1', 'training', { workoutId: 'w1', entries: [history, actual], queue: [pending] }, saveRoutine);
+  const updated = saveRoutine.mock.calls[0][0];
+  expect(updated.strongmanLog).toEqual([history, actual]);
+  expect(updated.workouts[0].strongmanQueue).toEqual([pending]);
+  expect(updated.workouts[1]).toBe(otherWorkout);
+  expect(current.workouts[0].strongmanQueue).toEqual([entry]);
+  expect(applyBatch).toHaveBeenCalledWith({ puts: { routines: [updated] }, conditions: { routines: [{ key: current.id, expected: current }] } });
+});
+
+it('rejects completed or removed targets, malformed queues, and finishing pending work', async () => {
+  const entry = createStrongmanLogEntry({ movement: 'Yoke', workoutId: 'w1', date: '2026-01-01', sets: [{ weight: 580 }] });
+  const current = { ...routine, workouts: [{ ...routine.workouts[0], strongmanQueue: [entry] }] };
+  await expect(commitStrongmanChange(current, 'p1', 'completion', { workoutId: 'w1', complete: true }, saveRoutine)).rejects.toThrow('remaining copied sets');
+  const value = { workoutId: 'w1', entries: [], queue: [] };
+  await expect(commitStrongmanChange({ ...current, workouts: [{ ...current.workouts[0], completedAt: '2026-01-01' }] }, 'p1', 'training', value, saveRoutine)).rejects.toThrow('no longer available');
+  await expect(commitStrongmanChange(current, 'p1', 'training', { ...value, workoutId: 'missing' }, saveRoutine)).rejects.toThrow('no longer available');
+  await expect(commitStrongmanChange(current, 'p1', 'training', { ...value, queue: null }, saveRoutine)).rejects.toThrow('must be lists');
+  await expect(commitStrongmanChange(current, 'p1', 'training', { ...value, queue: [{ ...entry, workoutId: 'other' }] }, saveRoutine)).rejects.toThrow('belong to its workout');
+  expect(saveRoutine).not.toHaveBeenCalled();
+});
+
+it('retains pending work after a write conflict and allows explicit clearing before finishing', async () => {
+  const entry = createStrongmanLogEntry({ movement: 'Yoke', workoutId: 'w1', date: '2026-01-01', sets: [{ weight: 580 }] });
+  const current = { ...routine, workouts: [{ ...routine.workouts[0], strongmanQueue: [entry] }] };
+  applyBatch.mockRejectedValueOnce(Object.assign(new Error('conflict'), { name: 'BatchConflictError' }));
+  await expect(commitStrongmanChange(current, 'p1', 'training', { workoutId: 'w1', entries: [], queue: [] }, saveRoutine)).rejects.toThrow('another window');
+  expect(current.workouts[0].strongmanQueue).toEqual([entry]);
+  await commitStrongmanChange(current, 'p1', 'training', { workoutId: 'w1', entries: [], queue: [] }, saveRoutine);
+  const cleared = saveRoutine.mock.calls[1][0];
+  await expect(commitStrongmanChange(cleared, 'p1', 'completion', { workoutId: 'w1', complete: true }, saveRoutine)).resolves.toContain('complete');
+});

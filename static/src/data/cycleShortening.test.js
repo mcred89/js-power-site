@@ -109,13 +109,14 @@ describe('shortening the untouched remainder of an in-progress cycle', () => {
     expect(stage(updated, 'Deadlift', 4).exercises[0].generated.weight).toBe(340);
   });
 
-  it.each(['session', 'skipped', 'completed', 'strongman log'])('preserves all of an active fourth week with a %s record', activity => {
+  it.each(['session', 'skipped', 'completed', 'strongman log', 'copied strongman work'])('preserves all of an active fourth week with a %s record', activity => {
     const original = completeWeeks(make(), 3);
-    const active = stage(original, activity === 'strongman log' ? 'Strongman' : 'Squat', 3);
+    const active = stage(original, activity.includes('strongman') ? 'Strongman' : 'Squat', 3);
     if (activity === 'session') active.session = { status: 'paused', exercises: [], importedDetail: 'keep' };
     if (activity === 'skipped') active.skippedAt = completedAt;
     if (activity === 'completed') active.completedAt = completedAt;
     if (activity === 'strongman log') original.strongmanLog = [{ id: 'log', workoutId: active.id, note: 'Keep this effort' }];
+    if (activity === 'copied strongman work') active.strongmanQueue = [{ id: 'pending', workoutId: active.id, note: 'Keep these prefills' }];
     const updated = updateRoutinePlan(original, { duration: '3 weeks' });
 
     expect(updated.cycleWeekGroups).toEqual({ 0: [[0], [1], [2], [3], [4]] });

@@ -8,7 +8,7 @@ import {
   strongmanResults,
   summarizeStrongmanResults,
 } from '../data/strongman';
-import { StrongmanResultEditor } from './StrongmanTraining';
+import { StrongmanResultEditor, newStrongmanSetEntry } from './StrongmanTraining';
 import {
   formatStrongmanDate,
   formatStrongmanResult,
@@ -105,10 +105,10 @@ export const StrongmanProgress = ({ routines = [], competition, competitionHisto
     if (removing && !routines.some(item => item.id === removing.routine.id)) setRemoving(null);
   }, [routines, editor, newRoutineId, removing]);
 
-  const saveEntry = async entry => {
+  const saveEntry = async (entry, retainedEntry) => {
     const target = activeEditorRoutine;
     if (!target) throw new Error('Choose a plan for this result.');
-    const logs = target.strongmanLog || [];
+    const logs = (target.strongmanLog || []).map(item => item.id === retainedEntry?.id ? retainedEntry : item);
     const next = logs.some(item => item.id === entry.id) ? logs.map(item => item.id === entry.id ? entry : item) : [...logs, entry];
     setSaving(true);
     try {
@@ -139,7 +139,12 @@ export const StrongmanProgress = ({ routines = [], competition, competitionHisto
         {!editor.entry && <label className="form-field strongman-record-select"><span className="field-label">Plan for this result</span><select className="number-input" aria-label="Plan for past result" disabled={saving} value={activeEditorRoutine.id} onChange={event => {
           if (event.target.value !== activeEditorRoutine.id && confirmNavigation()) setNewRoutineId(event.target.value);
         }}>{routines.map(routine => <option value={routine.id} key={routine.id}>{routine.name}{routine.archived ? ' (archived)' : ''}</option>)}</select></label>}
-        <StrongmanResultEditor key={editor.entry?.id || `new-${activeEditorRoutine.id}`} entry={editor.entry} onSave={saveEntry} onCancel={() => setEditor(null)} competition={competitionForPastTraining(activeEditorRoutine, competition, competitionHistory)} competitionOptions={competition === undefined ? undefined : competitionChoicesForTraining(competition, competitionHistory, activeEditorRoutine)} knownMovements={knownMovements} workoutId={editor.entry?.workoutId || null} />
+        <StrongmanResultEditor key={`${editor.entry?.id || `new-${activeEditorRoutine.id}`}:${editor.editSetId || ''}`}
+          entry={editor.entry} appendToEntry={editor.appendToEntry} editSetId={editor.editSetId}
+          newSet={editor.newSet} newRun={editor.newRun} focusLastSet={editor.focusLastSet} showDate
+          onSave={saveEntry} onCancel={() => setEditor(null)} competition={competitionForPastTraining(activeEditorRoutine, competition, competitionHistory)}
+          competitionOptions={competition === undefined ? undefined : competitionChoicesForTraining(competition, competitionHistory, activeEditorRoutine)}
+          knownMovements={knownMovements} workoutId={editor.entry?.workoutId || null} />
       </div>}
       {movements.length > 0 ? <>
         <div className="strongman-record-filters">
@@ -164,11 +169,25 @@ export const StrongmanProgress = ({ routines = [], competition, competitionHisto
         {entries.length ? <ul className="strongman-result-history">
           {entries.slice(0, visibleCount).map(({ routine, entry }) => <li key={`${routine.id}:${entry.id}`}>
             <div className="strongman-result-history-heading"><strong>{formatStrongmanDate(entry.date)}</strong><small>{routine.name}</small></div>
-            {(entry.sets || []).map((set, index) => <p key={set.id}><strong>Set {index + 1}</strong> · {formatStrongmanResult(set)}{set.successful === false ? ' · Unsuccessful attempt' : ''}</p>)}
+            {(entry.sets || []).map((set, index) => <div className="strongman-training-saved-set" key={set.id}>
+              <p><strong>{entry.scope === 'medley' ? 'Run' : 'Set'} {index + 1}</strong> · {formatStrongmanResult(set)}{set.successful === false ? ' · Unsuccessful attempt' : ''}</p>
+              {onSaveLog && !editor && !removing && <button className="text-button" type="button"
+                aria-label={`Edit ${entry.movement} ${entry.scope === 'medley' ? 'run' : 'set'} ${index + 1} from ${formatStrongmanDate(entry.date)}`}
+                onClick={() => { setEditor({ routineId: routine.id, entry, editSetId: set.id }); setError(''); }}>Edit</button>}
+            </div>)}
             {entry.notes && <p>{entry.notes}</p>}
             {entry.scope === 'medley' && entry.eventSnapshot && <details><summary>Full event setup</summary><p>{setupLabel(entry.eventSnapshot)}</p></details>}
             {entry.scope !== 'medley' && entry.eventSnapshot?.scoringRules && <details><summary>Recorded setup and rules</summary><p>{entry.eventSnapshot.scoringRules}</p>{entry.eventSnapshot.timeGoal === 'points' && ['weight', 'distance', 'reps', 'height'].some(key => present(entry.eventSnapshot[key])) && <p>Fixed setup: {formatStrongmanTarget({ weight: entry.eventSnapshot.weight, distance: entry.eventSnapshot.distance, reps: entry.eventSnapshot.reps, height: entry.eventSnapshot.height })}</p>}</details>}
-            {onSaveLog && !editor && !removing && <div className="strongman-actions"><button className="text-button" type="button" aria-label={`Edit ${entry.movement} result from ${formatStrongmanDate(entry.date)}`} onClick={() => { setEditor({ routineId: routine.id, entry }); setError(''); }}>Edit result</button><button className="text-button" type="button" aria-label={`Remove ${entry.movement} result from ${formatStrongmanDate(entry.date)}`} onClick={() => { setRemoving({ routine, entry }); setError(''); }}>Remove result</button></div>}
+            {onSaveLog && !editor && !removing && <div className="strongman-actions">
+              <button className="secondary-button" type="button" aria-label={`Add ${entry.scope === 'medley' ? 'run' : 'set'} to ${entry.movement} from ${formatStrongmanDate(entry.date)}`}
+                onClick={() => {
+                  setEditor({ routineId: routine.id, entry: newStrongmanSetEntry(entry), appendToEntry: entry,
+                    newSet: entry.scope !== 'medley', newRun: entry.scope === 'medley', focusLastSet: true });
+                  setError('');
+                }}>{entry.scope === 'medley' ? 'Add run' : 'Add set'}</button>
+              <button className="text-button" type="button" aria-label={`Edit ${entry.movement} result from ${formatStrongmanDate(entry.date)}`} onClick={() => { setEditor({ routineId: routine.id, entry }); setError(''); }}>Edit result</button>
+              <button className="text-button" type="button" aria-label={`Remove ${entry.movement} result from ${formatStrongmanDate(entry.date)}`} onClick={() => { setRemoving({ routine, entry }); setError(''); }}>Remove result</button>
+            </div>}
           </li>)}
         </ul> : <p className="strongman-help">No attempts in this plan yet. Your lifetime record is still shown above.</p>}
         {entries.length > visibleCount && <button className="secondary-button" type="button" onClick={() => setVisibleCount(count => count + PAGE_SIZE)}>Show older results</button>}

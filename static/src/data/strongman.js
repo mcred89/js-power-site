@@ -264,32 +264,42 @@ export const validateStrongmanRecord = record => {
   if (!isObject(record) || record.kind === 'strongman') return;
   try {
     if (record.inputs?.strongmanCompetition != null) validateStoredCompetition(record.inputs.strongmanCompetition);
-    if (record.strongmanLog === undefined) return;
-    if (!Array.isArray(record.strongmanLog)) throw new Error('Training history must be a list.');
-    const ids = new Set();
-    record.strongmanLog.forEach(entry => {
-      if (!isObject(entry) || typeof entry.id !== 'string' || !entry.id || ids.has(entry.id) ||
-          typeof entry.movement !== 'string' || !entry.movement.trim() || !validDate(entry.date) ||
-          !Array.isArray(entry.sets) || !entry.sets.length ||
-          (entry.scope !== undefined && !['movement', 'medley'].includes(entry.scope))) {
-        throw new Error('Check each dated exercise and its sets.');
+    const lists = record.strongmanLog === undefined ? [] : [record.strongmanLog];
+    (Array.isArray(record.workouts) ? record.workouts : []).forEach(workout => {
+      if (workout.strongmanQueue === undefined) return;
+      if (!Array.isArray(workout.strongmanQueue)) throw new Error('Copied training must be a list.');
+      if (workout.strongmanQueue.some(entry => !isObject(entry) || entry.workoutId !== workout.id)) {
+        throw new Error('Copied training must belong to its workout.');
       }
-      ids.add(entry.id);
-      if (entry.competitionId != null && (typeof entry.competitionId !== 'string' || !entry.competitionId.trim())) {
-        throw new Error('A competition reference must be a nonempty text ID.');
-      }
-      if (entry.notes !== undefined && typeof entry.notes !== 'string') throw new Error('Training notes must be text.');
-      if (entry.scope === 'medley' && entry.eventSnapshot?.type !== 'medley') throw new Error('A full medley needs its recorded setup.');
-      if (entry.eventSnapshot) validateStoredCompetition({ events: [entry.eventSnapshot] });
-      const setIds = new Set();
-      entry.sets.forEach(set => {
-        if (!isObject(set) || typeof set.id !== 'string' || !set.id || setIds.has(set.id) ||
-            (set.successful !== undefined && typeof set.successful !== 'boolean')) throw new Error('Check each training set.');
-        setIds.add(set.id);
-        // Older versions could save a medley with only hidden movement fields.
-        // Keep that history importable; new saves require an actual run time.
-        const normalized = normalizeMetrics(set);
-        if (!metrics.some(key => normalized[key] !== '')) throw new Error('Each set needs an actual result.');
+      lists.push(workout.strongmanQueue);
+    });
+    lists.forEach(entries => {
+      if (!Array.isArray(entries)) throw new Error('Training history must be a list.');
+      const ids = new Set();
+      entries.forEach(entry => {
+        if (!isObject(entry) || typeof entry.id !== 'string' || !entry.id || ids.has(entry.id) ||
+            typeof entry.movement !== 'string' || !entry.movement.trim() || !validDate(entry.date) ||
+            !Array.isArray(entry.sets) || !entry.sets.length ||
+            (entry.scope !== undefined && !['movement', 'medley'].includes(entry.scope))) {
+          throw new Error('Check each dated exercise and its sets.');
+        }
+        ids.add(entry.id);
+        if (entry.competitionId != null && (typeof entry.competitionId !== 'string' || !entry.competitionId.trim())) {
+          throw new Error('A competition reference must be a nonempty text ID.');
+        }
+        if (entry.notes !== undefined && typeof entry.notes !== 'string') throw new Error('Training notes must be text.');
+        if (entry.scope === 'medley' && entry.eventSnapshot?.type !== 'medley') throw new Error('A full medley needs its recorded setup.');
+        if (entry.eventSnapshot) validateStoredCompetition({ events: [entry.eventSnapshot] });
+        const setIds = new Set();
+        entry.sets.forEach(set => {
+          if (!isObject(set) || typeof set.id !== 'string' || !set.id || setIds.has(set.id) ||
+              (set.successful !== undefined && typeof set.successful !== 'boolean')) throw new Error('Check each training set.');
+          setIds.add(set.id);
+          // Older versions could save a medley with only hidden movement fields.
+          // Keep that history importable; new saves require an actual run time.
+          const normalized = normalizeMetrics(set);
+          if (!metrics.some(key => normalized[key] !== '')) throw new Error('Each set needs an actual result.');
+        });
       });
     });
   } catch (error) {
