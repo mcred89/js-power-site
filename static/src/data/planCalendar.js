@@ -1,4 +1,4 @@
-import { getSavedWorkoutWeekIndex } from './cycleShortening';
+import { getCycleWeekGroups, getSavedWorkoutWeekIndex } from './cycleShortening';
 
 const validDate = value => {
   if (value === null || value === undefined || value === '') return null;
@@ -84,7 +84,10 @@ export const buildPlanCalendar = (routine, today = new Date()) => {
   if (!workouts.length) return null;
   const configuredCycles = routine.inputs?.mesoMode ? routine.inputs.microCycles : [routine.inputs || {}];
   const cycles = Array.isArray(configuredCycles) ? configuredCycles.slice(0, MAX_CYCLE_INDEX + 1) : [];
-  const lengths = new Map(cycles.map((cycle, index) => [index, cycle?.duration === '3 weeks' ? 3 : cycle?.duration === '5 weeks' ? 5 : 0]));
+  const lengths = new Map(cycles.map((cycle, index) => [index,
+    ['3 weeks', '5 weeks'].includes(cycle?.duration)
+      ? getCycleWeekGroups(routine.inputs, index, routine.cycleWeekGroups).length : 0,
+  ]));
   const workoutIds = new Set(workouts.map(workout => workout.id));
   const loggedActivity = new Map();
   // Strongman days record efforts directly instead of opening a timed session.

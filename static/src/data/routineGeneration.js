@@ -52,14 +52,14 @@ export const getEffectiveMaxes = (props, cycleIndex) => {
   }, {});
 };
 
-const getSessions = (weekIndexes, includeStrongmanDay, duration) => {
+const getSessions = (weekIndexes, includeStrongmanDay) => {
   const sessions = weekIndexes.flatMap((sourceWeek, cycleIndex) => days.map(day => ({ ...day, sourceWeek, cycleIndex })));
   if (!includeStrongmanDay) return sessions;
-  if (duration === '3 weeks') {
+  if (weekIndexes.length > 1) {
     const scheduled = sessions.map(session => session.cycleIndex === 1 && session.lift === 'Deadlift'
       ? { lift: 'Strongman', isStrongman: true, sourceWeek: session.sourceWeek }
       : session);
-    return weekIndexes.length > 1 ? scheduled : [...scheduled, { lift: 'Strongman', isStrongman: true, sourceWeek: weekIndexes[0] }];
+    return scheduled;
   }
   return [...sessions, { lift: 'Strongman', isStrongman: true, sourceWeek: weekIndexes[0] }];
 };
@@ -105,7 +105,7 @@ export const buildRoutinePlan = (props, resolvedCycleMaxes = [], cycleWeekGroups
     const effectiveMaxes = resolvedCycleMaxes[cycleIndex] || getEffectiveMaxes(props, cycleIndex);
     const routineProps = { ...props, ...effectiveMaxes, mainLiftChoice: cycle.volume, duration: cycle.duration };
     const weeks = getCycleWeekGroups(props, cycleIndex, cycleWeekGroups).map(weekIndexes => (
-      getSessions(weekIndexes, props.includeStrongmanDay, cycle.duration).map((day, dayIndex) => ({
+      getSessions(weekIndexes, props.includeStrongmanDay).map((day, dayIndex) => ({
         name: day.lift,
         sourceWeek: day.sourceWeek,
         dayNumber: dayIndex + 1,

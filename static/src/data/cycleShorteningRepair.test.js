@@ -4,6 +4,7 @@ import { correctMaxes, refreshAdaptiveProgression } from './routineRecalculation
 import { updateRoutinePlan } from './routineUpdates';
 import { deleteFutureWorkout } from './workoutActions';
 import { repairShortenedCycles } from './cycleShorteningRepair';
+import { addDeletedWorkoutStages } from './deletedWorkoutStages';
 import { DATABASE_VERSION, runDatabaseMigrations } from './storageMigrations';
 import { BACKUP_VERSION, exportBackup, migrateBackup, parseBackup } from './storageBackup';
 
@@ -24,6 +25,7 @@ const pending = (routine, cycleIndex = 0) => routine.workouts.filter(workout => 
 // would accidentally create fixtures with the corrected implementation.
 const brokenRoutine = (completedWeeks = 3, overrides = {}, cycleIndex = 0, beforeShortening = () => {}) => {
   const routine = createRoutine('profile', 'Already shortened', { ...inputs, ...overrides });
+  delete routine.deletedWorkoutStages;
   routine.workouts.forEach(workout => {
     if (workout.cycleIndex < cycleIndex || (workout.cycleIndex === cycleIndex && workout.sourceWeek < completedWeeks)) {
       workout.completedAt = '2026-09-30T12:00:00.000Z';
@@ -329,10 +331,10 @@ describe('version 22 repair migration', () => {
       request.onerror = () => reject(request.error);
     });
     const repaired = await read('routines', original.id);
-    expect(repaired).toEqual(repairShortenedCycles(original));
+    expect(repaired).toEqual(addDeletedWorkoutStages(repairShortenedCycles(original)));
     expect(await read('routines', unknown.id)).toEqual(unknown);
     expect(await read('profiles', profile.id)).toEqual(profile);
-    expect(await read('templates', template.id)).toEqual(template);
+    expect(await read('templates', template.id)).toEqual(addDeletedWorkoutStages(template));
     expect(await read('metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
     const restoredId = find(repaired, 'Deadlift', 3).id;
     const manuallyChanged = updateRoutinePlan(correctMaxes(deleteFutureWorkout(repaired, restoredId), { maxDead: '500' }), {
@@ -371,9 +373,9 @@ describe('version 22 repair migration', () => {
     const before = JSON.stringify(backup);
     const migrated = migrateBackup(backup);
     expect(migrated).toMatchObject({ version: BACKUP_VERSION, dataSchemaVersion: DATABASE_VERSION, extension: true });
-    expect(migrated.routines[0]).toEqual(repairShortenedCycles(original));
+    expect(migrated.routines[0]).toEqual(addDeletedWorkoutStages(repairShortenedCycles(original)));
     expect(migrated.routines[1]).toBe(unknown);
-    expect(migrated.templates[0]).toBe(template);
+    expect(migrated.templates[0]).toEqual(addDeletedWorkoutStages(template));
     const imported = parseBackup(exportBackup(migrated.profiles, migrated.routines, migrated.templates));
     expect(imported.routines[0]).toEqual(migrated.routines[0]);
     expect(JSON.stringify(backup)).toBe(before);

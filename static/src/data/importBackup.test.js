@@ -68,6 +68,18 @@ describe('backup import planning', () => {
     });
   });
 
+  it('merges cycle deletion markers and clears markers for explicitly restored workouts', () => {
+    const local = { ...localRoutines[0], deletedWorkoutStages: ['0:Deadlift:1', '0:Strongman:0'] };
+    const imported = { ...localRoutines[0], deletedWorkoutStages: ['0:Deadlift:3'], workouts: [
+      { id: 'restored', sequence: 5, cycleIndex: 0, sourceWeek: 1, name: 'Deadlift' },
+    ] };
+    const before = JSON.stringify([local, imported]);
+    const plan = createImportPlan({ profiles: [], routines: [imported], templates: [] }, localProfiles, [local]);
+    expect(plan.routines[0].result.deletedWorkoutStages).toEqual(['0:Strongman:0', '0:Deadlift:3']);
+    expect(plan.routines[0].result.workouts).toHaveLength(2);
+    expect(JSON.stringify([local, imported])).toBe(before);
+  });
+
   it('preserves conflicting retired blocks as separate opaque archives', () => {
     const archived = {
       id: 'routines:event-1', store: 'routines', extension: { source: 'backup' },

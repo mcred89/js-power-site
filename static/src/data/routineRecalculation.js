@@ -1,7 +1,7 @@
 import { adaptiveCycleMaxes, createRoutine, visibleExercise } from './routines';
 import { hasAdaptiveProgression } from './routineGeneration';
 import { isTabataExercise } from './tabata';
-import { isShortenedCycle, isRemovedByShortening } from './cycleShortening';
+import { isLengthenedCycle, isRescheduledCycle, isRemovedByShortening } from './cycleShortening';
 
 export { isShortenedCycle, isRemovedByShortening } from './cycleShortening';
 
@@ -58,12 +58,12 @@ const mergeGeneratedExercises = (workout, generatedWorkout) => {
 
 // Reuse this path for plan edits, max corrections, and adaptive recalculation so
 // later refreshes cannot destroy custom work retained by a previous plan edit.
-export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
+export const regenerateFutureWorkouts = (routine, inputs = routine.inputs, cycleWeekGroups = routine.cycleWeekGroups) => {
   const nextRoutine = { ...routine, inputs };
   const cycleMaxes = inputs.mesoMode && hasAdaptiveProgression(inputs)
     ? adaptiveCycleMaxes(nextRoutine)
     : [];
-  const regenerated = createRoutine(routine.profileId, routine.name, inputs, cycleMaxes, routine.cycleWeekGroups);
+  const regenerated = createRoutine(routine.profileId, routine.name, inputs, cycleMaxes, cycleWeekGroups);
   const generatedByStage = new Map(regenerated.workouts.map(workout => [stageKey(workout), workout]));
   const loggedIds = new Set((routine.strongmanLog || []).map(entry => entry.workoutId));
   // Duplicate imported stages are retained as custom records. Only the earliest
@@ -73,7 +73,7 @@ export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
     const key = stageKey(workout);
     if (key && !stageOwners.has(key)) stageOwners.set(key, workout);
   });
-  return routine.workouts.flatMap(workout => {
+  const workouts = routine.workouts.flatMap(workout => {
     const key = stageKey(workout);
     // Every existing session is a snapshot, including imported/unknown statuses.
     if (workout.completedAt || workout.skippedAt || workout.session || workout.strongmanQueue?.length || loggedIds.has(workout.id)) return [workout];
@@ -81,10 +81,10 @@ export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
     // annotate recognized legacy workouts before any schedule can be changed.
     if (!key || stageOwners.get(key) !== workout) return [workout];
     const generatedWorkout = generatedByStage.get(key);
-    if (!generatedWorkout) return isRemovedByShortening(workout, routine.inputs, inputs, routine.cycleWeekGroups) ? [] : [workout];
+    if (!generatedWorkout) return isRemovedByShortening(workout, routine.inputs, inputs, cycleWeekGroups) ? [] : [workout];
     const next = {
       ...workout,
-      ...(key && isShortenedCycle(routine.inputs, inputs, workout.cycleIndex) ? {
+      ...(isRescheduledCycle(routine.inputs, inputs, workout.cycleIndex) ? {
         weekIndex: generatedWorkout.weekIndex,
         weekLabel: generatedWorkout.weekLabel,
       } : {}),
@@ -93,6 +93,40 @@ export const regenerateFutureWorkouts = (routine, inputs = routine.inputs) => {
     };
     return [JSON.stringify(next) === JSON.stringify(workout) ? workout : next];
   });
+
+  if (!regenerated.workouts.some(workout => isLengthenedCycle(routine.inputs, inputs, workout.cycleIndex))) return workouts;
+  // Restore only days omitted by the previous schedule. A missing day that was
+  // already scheduled is a deliberate deletion, not a gap to fill on plan edits.
+  const previous = createRoutine(routine.profileId, routine.name, routine.inputs, [], routine.cycleWeekGroups);
+  const previousStages = new Set(previous.workouts.map(stageKey));
+  const deletedStages = new Set(Array.isArray(routine.deletedWorkoutStages) ? routine.deletedWorkoutStages : []);
+  const additions = regenerated.workouts.filter(workout => (
+    isLengthenedCycle(routine.inputs, inputs, workout.cycleIndex) &&
+    !previousStages.has(stageKey(workout)) && !stageOwners.has(stageKey(workout)) && !deletedStages.has(stageKey(workout))
+  ));
+  const owners = new Set([...stageOwners.values()].map(workout => workout.id));
+  additions.forEach(workout => {
+    // Anchor new days to the retained generated stages, without renumbering any
+    // recorded snapshot or moving custom/imported records relative to each other.
+    const rank = candidate => owners.has(candidate.id) ? generatedByStage.get(stageKey(candidate))?.sequence : undefined;
+    let index = workouts.findIndex(candidate => rank(candidate) > workout.sequence);
+    if (index < 0) {
+      index = workouts.reduce((position, candidate, candidateIndex) => (
+        rank(candidate) < workout.sequence ? candidateIndex + 1 : position
+      ), workouts.length);
+    }
+    const before = index > 0 ? workouts[index - 1].sequence : 0;
+    const after = index < workouts.length ? workouts[index].sequence : before + 2;
+    // Sequence has always been a numeric ordering key. Fractional positions keep
+    // existing IDs, history, and backup records intact when inserting between days.
+    const sequence = before + (after - before) / 2;
+    if (!Number.isFinite(sequence) || sequence <= before || sequence >= after) {
+      throw new Error('This plan has conflicting workout order values. Restore a valid backup before changing its cycle length.');
+    }
+    workouts.splice(index, 0, { ...workout, sequence });
+    owners.add(workout.id);
+  });
+  return workouts;
 };
 
 export const refreshAdaptiveProgression = routine => {

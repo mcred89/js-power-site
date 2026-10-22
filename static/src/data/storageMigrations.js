@@ -5,8 +5,9 @@ import { addStrongmanTracking } from './strongman';
 import { migrateStrongmanCompetitions } from './strongmanCompetitions';
 import { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 import { repairShortenedCycles } from './cycleShorteningRepair';
+import { addDeletedWorkoutStages } from './deletedWorkoutStages';
 
-export const DATABASE_VERSION = 23;
+export const DATABASE_VERSION = 24;
 
 export { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 
@@ -344,6 +345,16 @@ export const databaseMigrations = {
     transaction.objectStore('metadata').put({ key: 'dataSchemaVersion', value: 23 });
     done();
   },
+  // Keep intentional workout deletions distinct from days omitted by a compact
+  // cycle, so later schedule changes cannot restore manually removed workouts.
+  24: ({ transaction, done }) => migrateRecordStores(transaction, 24, {
+    routines: addDeletedWorkoutStages,
+    templates: addDeletedWorkoutStages,
+    archives: archive => {
+      const record = addDeletedWorkoutStages(archive?.record);
+      return record === archive?.record ? archive : { ...archive, record };
+    },
+  }, done),
 };
 
 export const runDatabaseMigrations = (database, transaction, oldVersion, newVersion) => {

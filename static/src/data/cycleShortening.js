@@ -16,7 +16,7 @@ const validGroups = groups => Array.isArray(groups) &&
 export const getCycleWeekGroups = (inputs, cycleIndex, cycleWeekGroups = {}) => {
   const duration = getCycleDuration(inputs, cycleIndex);
   const saved = cycleWeekGroups?.[cycleIndex];
-  if (duration === '3 weeks' && validGroups(saved)) return saved;
+  if (validGroups(saved)) return saved;
   return duration === '3 weeks' ? buildRemainingWeekGroups(0) : buildRemainingWeekGroups(5);
 };
 
@@ -28,7 +28,7 @@ export const getSavedWorkoutWeekIndex = (routine, workout) => {
   if (!Number.isInteger(workout.cycleIndex) || workout.cycleIndex < 0 ||
       !Number.isInteger(workout.sourceWeek) || workout.sourceWeek < 0 || workout.sourceWeek > 4 ||
       !['Squat', 'Press', 'Deadlift', 'Strongman'].includes(workout.name) ||
-      getCycleDuration(routine?.inputs || {}, workout.cycleIndex) !== '3 weeks' || !validGroups(groups)) return null;
+      !validGroups(groups)) return null;
   return groups.findIndex(group => group.includes(workout.sourceWeek));
 };
 
@@ -36,24 +36,40 @@ export const isShortenedCycle = (before, after, cycleIndex) => (
   getCycleDuration(before, cycleIndex) === '5 weeks' && getCycleDuration(after, cycleIndex) === '3 weeks'
 );
 
+export const isLengthenedCycle = (before, after, cycleIndex) => (
+  getCycleDuration(before, cycleIndex) === '3 weeks' && getCycleDuration(after, cycleIndex) === '5 weeks'
+);
+
+export const isRescheduledCycle = (before, after, cycleIndex) => (
+  isShortenedCycle(before, after, cycleIndex) || isLengthenedCycle(before, after, cycleIndex)
+);
+
 export const isRecordedWorkout = (routine, workout) => Boolean(
   workout.completedAt || workout.skippedAt || workout.session || workout.strongmanQueue?.length ||
   (routine.strongmanLog || []).some(entry => entry.workoutId === workout.id)
 );
 
-export const withShortenedWeekGroups = (routine, inputs) => {
+export const withUpdatedWeekGroups = (routine, inputs) => {
   const cycles = inputs.mesoMode ? inputs.microCycles : [inputs];
   let cycleWeekGroups = routine.cycleWeekGroups;
   cycles.forEach((cycle, cycleIndex) => {
-    if (!isShortenedCycle(routine.inputs, inputs, cycleIndex)) return;
+    if (!isRescheduledCycle(routine.inputs, inputs, cycleIndex)) return;
     // Keep the whole active week, and any earlier unfinished holes, in place.
-    // Only wholly untouched weeks beyond the latest activity are combined.
+    // Only wholly untouched weeks beyond the latest activity change length.
+    const groups = getCycleWeekGroups(routine.inputs, cycleIndex, routine.cycleWeekGroups);
     const latestActivity = routine.workouts.reduce((latest, workout) => (
       workout.cycleIndex === cycleIndex && Number.isInteger(workout.sourceWeek) &&
       workout.sourceWeek >= 0 && workout.sourceWeek < 5 && isRecordedWorkout(routine, workout)
-        ? Math.max(latest, workout.sourceWeek) : latest
+        ? Math.max(latest, groups.findIndex(group => group.includes(workout.sourceWeek))) : latest
     ), -1);
-    cycleWeekGroups = { ...cycleWeekGroups, [cycleIndex]: buildRemainingWeekGroups(latestActivity + 1) };
+    const preserved = groups.slice(0, latestActivity + 1);
+    const remaining = groups.slice(latestActivity + 1).flat();
+    const future = [];
+    const stride = cycle.duration === '3 weeks' ? 2 : 1;
+    for (let index = 0; index < remaining.length; index += stride) {
+      future.push(remaining.slice(index, index + stride));
+    }
+    cycleWeekGroups = { ...cycleWeekGroups, [cycleIndex]: [...preserved, ...future] };
   });
   return cycleWeekGroups === routine.cycleWeekGroups ? routine : { ...routine, cycleWeekGroups };
 };

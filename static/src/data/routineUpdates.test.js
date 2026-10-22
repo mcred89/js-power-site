@@ -38,6 +38,7 @@ describe('updating an existing plan', () => {
     expect(JSON.stringify(routine)).toBe(before);
     expect(getPlanUpdateSummary(routine, updated)).toEqual({
       changedWorkouts: 1, completedWorkouts: 1, startedWorkouts: 3, preservedOverrides: 0,
+      addedWorkouts: 0, addedByName: {},
       removedWorkouts: 0, removedByName: {}, removedOverrides: 0, preservedExtraWorkouts: 0,
       futureWeeks: [],
     });

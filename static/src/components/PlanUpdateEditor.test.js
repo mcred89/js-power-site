@@ -165,11 +165,11 @@ it('seeds older optional controls without inventing progression or pending chang
   const durations = [...container.querySelectorAll('[name="duration"]')];
   expect(durations).toHaveLength(2);
   expect(durations[0].value).toBe('3 weeks');
-  expect(durations[0].disabled).toBe(true);
+  expect(durations[0].disabled).toBe(false);
   expect(durations[0].closest('label').textContent).toContain('Cycle 1 duration');
   expect(durations[1].value).toBe('5 weeks');
   expect(durations[1].disabled).toBe(false);
-  expect(container.textContent).toContain('Existing 3-week cycles cannot be lengthened.');
+  expect(button('Set future cycles to 5 weeks').disabled).toBe(false);
   expect(container.querySelector('[name="includeStrongmanDay"]')).toBeNull();
 });
 
@@ -355,11 +355,103 @@ it('previews one six-day week after three completed weeks of a final cycle', () 
   expect(container.textContent).toContain('the total cycle may span more than three calendar weeks');
 });
 
-it('does not offer to expand a single three-week cycle', () => {
-  const routine = createRoutine('profile', 'Three weeks', { ...inputs, duration: '3 weeks' });
-  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={() => {}} onCancel={() => {}} />));
-  expect(container.querySelector('[name="duration"]').disabled).toBe(true);
+it('reviews restored workouts, all five weeks, and the later estimated end before expanding a cycle', async () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(2026, 9, 3, 12));
+  const routine = createRoutine('profile', 'Three weeks', { ...inputs, duration: '3 weeks', includeStrongmanDay: true });
+  routine.workouts[0].exercises[0].overrides = { movement: 'Front squat' };
+  const original = JSON.parse(JSON.stringify(routine));
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
+  expect(container.querySelector('[name="duration"]').disabled).toBe(false);
   expect(container.querySelector('[name="duration"]').value).toBe('3 weeks');
-  expect(container.textContent).toContain('Existing 3-week cycles cannot be lengthened.');
   expect(button('Review changes').disabled).toBe(true);
+  fill('duration', '5 weeks');
+  review();
+
+  expect(container.querySelector('.plan-update-changes').textContent).toBe('Cycle durationFrom3 weeksTo5 weeks');
+  expect(container.textContent).toContain('4 future workouts will be added');
+  expect(container.textContent).toContain('Deadlift: 2');
+  expect(container.textContent).toContain('Strongman: 2');
+  expect(container.textContent).toContain('1 individual exercise customization stays in place on remaining workouts.');
+  expect(container.querySelector('.plan-update-dates dl').textContent).toBe('Before10/18/263 weeks remainingAfter11/01/265 weeks remaining');
+  expect([...container.querySelectorAll('.plan-update-schedule li')].map(item => item.textContent)).toEqual(
+    Array.from({ length: 5 }, (_, index) => `Week ${index + 1} · 4 workoutsSquat → Press → Deadlift → Strongman`)
+  );
+  expect(container.textContent).toContain('Only untouched later weeks are split into separate weeks');
+  expect(container.textContent).not.toContain('no remaining workout prescriptions change');
+  expect(container.textContent).not.toContain('Your workout order and cycle schedule stay the same.');
+  expect(routine).toEqual(original);
+  expect(onSave).not.toHaveBeenCalled();
+  await act(async () => button('Save update').click());
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ duration: '5 weeks', includeStrongmanDay: true }));
+});
+
+it('expands all unfinished cycles together while leaving completed and skipped cycles at their saved duration', async () => {
+  const routine = createRoutine('profile', 'Several short cycles', {
+    ...inputs, mesoMode: true, includeStrongmanDay: true,
+    microCycles: Array.from({ length: 3 }, () => ({ duration: '3 weeks', volume: 'Low' })),
+  });
+  routine.workouts.forEach((workout, index) => {
+    if (workout.cycleIndex === 0) workout[index % 2 ? 'completedAt' : 'skippedAt'] = '2026-10-01T12:00:00Z';
+  });
+  routine.workouts.find(workout => workout.cycleIndex === 1).session = { status: 'inProgress', startedAt: '2026-10-01T12:00:00Z' };
+  const original = JSON.parse(JSON.stringify(routine));
+  const onSave = jest.fn().mockResolvedValue(undefined);
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={onSave} onCancel={() => {}} />));
+  click(button('Set future cycles to 5 weeks'));
+  expect([...container.querySelectorAll('[name="duration"]')].map(element => element.value)).toEqual(['3 weeks', '5 weeks', '5 weeks']);
+  expect(button('Set future cycles to 5 weeks').disabled).toBe(true);
+  review();
+
+  expect(container.querySelector('.plan-update-changes').textContent).toBe('Cycle 2 durationFrom3 weeksTo5 weeksCycle 3 durationFrom3 weeksTo5 weeks');
+  expect(container.textContent).toContain('6 future workouts will be added');
+  expect(container.textContent).toContain('Deadlift: 3');
+  expect(container.textContent).toContain('Strongman: 3');
+  expect(container.textContent).toContain('16 completed · 1 already started — preserved');
+  expect(routine).toEqual(original);
+  await act(async () => button('Save update').click());
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+    microCycles: [
+      { duration: '3 weeks', volume: 'Low' },
+      { duration: '5 weeks', volume: 'Low' },
+      { duration: '5 weeks', volume: 'Low' },
+    ],
+  }));
+});
+
+it('reviews added and removed days when cycles are lengthened and shortened together', () => {
+  const routine = createRoutine('profile', 'Mixed cycle changes', {
+    ...inputs, mesoMode: true, includeStrongmanDay: true,
+    microCycles: [{ duration: '5 weeks', volume: 'Low' }, { duration: '3 weeks', volume: 'Low' }],
+  });
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={() => {}} onCancel={() => {}} />));
+  fill('duration', '3 weeks', 0);
+  fill('duration', '5 weeks', 1);
+  review();
+
+  expect(container.textContent).toContain('4 future workouts will be added');
+  expect(container.textContent).toContain('4 unstarted workouts will be removed');
+  expect(container.querySelectorAll('.plan-update-schedule li')).toHaveLength(8);
+  expect(container.textContent).toContain('Only untouched weeks after your latest recorded or started workout are combined.');
+  expect(container.textContent).toContain('Only untouched later weeks are split into separate weeks');
+  expect(container.querySelector('.plan-update-dates .field-help').textContent).toContain('The estimated end stays the same');
+});
+
+it('keeps the estimate and remaining active week when no untouched weeks remain to expand', () => {
+  jest.useFakeTimers();
+  jest.setSystemTime(new Date(2026, 9, 3, 12));
+  const routine = createRoutine('profile', 'Final week underway', { ...inputs, duration: '3 weeks', includeStrongmanDay: true });
+  routine.workouts.forEach(workout => {
+    if (workout.weekIndex < 2) workout.completedAt = '2026-10-01T12:00:00Z';
+  });
+  routine.workouts.find(workout => workout.weekIndex === 2).session = { status: 'inProgress', startedAt: '2026-10-02T12:00:00Z' };
+  act(() => root.render(<PlanUpdateEditor routine={routine} onSave={() => {}} onCancel={() => {}} />));
+  fill('duration', '5 weeks');
+  review();
+
+  expect(container.querySelector('.plan-update-dates dl').textContent).toBe('Before10/04/261 week remainingAfter10/04/261 week remaining');
+  expect(container.textContent).not.toContain('will be added');
+  expect(container.querySelector('.plan-update-dates .field-help').textContent).toContain('The estimated end stays the same');
+  expect(container.querySelectorAll('.plan-update-schedule li')).toHaveLength(1);
 });

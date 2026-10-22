@@ -1,3 +1,5 @@
+import { workoutStageKey } from './deletedWorkoutStages';
+
 const makeId = () => typeof crypto !== 'undefined' && crypto.randomUUID
   ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
@@ -91,13 +93,22 @@ export const substituteSessionExercise = (
   }),
 });
 
-export const deleteFutureWorkout = (routine, workoutId) => ({
-  ...routine,
-  updatedAt: new Date().toISOString(),
-  workouts: routine.workouts.filter(workout => (
-    workout.id !== workoutId || workout.completedAt
-  )),
-  ...(routine.strongmanLog && routine.workouts.some(workout => workout.id === workoutId && !workout.completedAt) ? {
-    strongmanLog: routine.strongmanLog.map(entry => entry.workoutId === workoutId ? { ...entry, workoutId: null } : entry),
-  } : {}),
-});
+export const deleteFutureWorkout = (routine, workoutId) => {
+  const removed = routine.workouts.find(workout => workout.id === workoutId && !workout.completedAt);
+  const key = workoutStageKey(removed);
+  const workouts = routine.workouts.filter(workout => workout !== removed);
+  return {
+    ...routine,
+    updatedAt: new Date().toISOString(),
+    workouts,
+    // A custom/imported duplicate does not own the whole generated stage.
+    ...(routine.kind !== 'strongman' && key && !workouts.some(workout => workoutStageKey(workout) === key) ? {
+      deletedWorkoutStages: [...new Set([
+        ...(Array.isArray(routine.deletedWorkoutStages) ? routine.deletedWorkoutStages : []), key,
+      ])],
+    } : {}),
+    ...(routine.strongmanLog && removed ? {
+      strongmanLog: routine.strongmanLog.map(entry => entry.workoutId === workoutId ? { ...entry, workoutId: null } : entry),
+    } : {}),
+  };
+};

@@ -1,7 +1,8 @@
 import { getLiftProgressionMode, MAX_PROGRESSION_MODES } from './routineGeneration';
 import { hasExerciseOverrides, isRemovedByShortening, regenerateFutureWorkouts } from './routineRecalculation';
 import { applyBatch } from './storage';
-import { isShortenedCycle, withShortenedWeekGroups } from './cycleShortening';
+import { getSavedWorkoutWeekIndex, isRescheduledCycle, withUpdatedWeekGroups } from './cycleShortening';
+import { addDeletedWorkoutStages } from './deletedWorkoutStages';
 
 const liftKeys = ['squat', 'press', 'deadlift'];
 const editableKeys = [
@@ -17,8 +18,8 @@ const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const isBlank = value => value === undefined || value === null || String(value).trim() === '';
 
 const validateDurationChange = (before, after) => {
-  if (after !== before && !(before === '5 weeks' && after === '3 weeks')) {
-    throw new Error('Cycle duration can only change from 5 weeks to 3 weeks.');
+  if (!['3 weeks', '5 weeks'].includes(after)) {
+    throw new Error('Choose a cycle duration of 3 weeks or 5 weeks.');
   }
 };
 
@@ -148,8 +149,11 @@ export const updateRoutinePlan = (routine, changes) => {
   }
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('Enter the plan settings to update.');
   const inputs = updatedInputs(routine.inputs, changes);
-  const scheduled = withShortenedWeekGroups(routine, inputs);
-  const workouts = regenerateFutureWorkouts(scheduled, inputs);
+  // Migration covers persisted plans; this also protects legacy records supplied
+  // directly by import/preview callers before their first duration change.
+  const tracked = addDeletedWorkoutStages(routine);
+  const scheduled = withUpdatedWeekGroups(tracked, inputs);
+  const workouts = regenerateFutureWorkouts(tracked, inputs, scheduled.cycleWeekGroups);
   if (JSON.stringify(inputs) === JSON.stringify(routine.inputs) &&
       workouts.length === routine.workouts.length &&
       workouts.every((workout, index) => workout === routine.workouts[index])) return routine;
@@ -175,13 +179,16 @@ export const commitPlanUpdate = async (routine, changes, saveRoutine) => {
 };
 
 export const getPlanUpdateSummary = (routine, updatedRoutine) => {
+  const originalIds = new Set(routine.workouts.map(workout => workout.id));
+  const added = updatedRoutine.workouts.filter(workout => !originalIds.has(workout.id));
   const updatedById = new Map(updatedRoutine.workouts.map(workout => [workout.id, workout]));
   const loggedIds = new Set((routine.strongmanLog || []).map(entry => entry.workoutId));
   const futureWeeks = new Map();
   updatedRoutine.workouts.forEach(workout => {
-    if (workout.completedAt || workout.skippedAt || !isShortenedCycle(routine.inputs, updatedRoutine.inputs, workout.cycleIndex)) return;
-    const key = `${workout.cycleIndex}:${workout.weekIndex}`;
-    if (!futureWeeks.has(key)) futureWeeks.set(key, { cycleLabel: workout.cycleLabel, weekLabel: workout.weekLabel, workouts: [] });
+    if (workout.completedAt || workout.skippedAt || !isRescheduledCycle(routine.inputs, updatedRoutine.inputs, workout.cycleIndex)) return;
+    const weekIndex = getSavedWorkoutWeekIndex(updatedRoutine, workout) ?? workout.weekIndex;
+    const key = `${workout.cycleIndex}:${weekIndex}`;
+    if (!futureWeeks.has(key)) futureWeeks.set(key, { cycleLabel: workout.cycleLabel, weekLabel: `Week ${weekIndex + 1}`, workouts: [] });
     futureWeeks.get(key).workouts.push(workout.name);
   });
   return routine.workouts.reduce((summary, workout) => {
@@ -207,6 +214,8 @@ export const getPlanUpdateSummary = (routine, updatedRoutine) => {
     return summary;
   }, {
     changedWorkouts: 0, completedWorkouts: 0, startedWorkouts: 0, preservedOverrides: 0,
+    addedWorkouts: added.length,
+    addedByName: added.reduce((counts, workout) => ({ ...counts, [workout.name]: (counts[workout.name] || 0) + 1 }), {}),
     removedWorkouts: 0, removedByName: {}, removedOverrides: 0, preservedExtraWorkouts: 0,
     futureWeeks: [...futureWeeks.values()],
   });

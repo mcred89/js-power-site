@@ -341,7 +341,7 @@ it('forecasts a started bad Week 2 snapshot together with the repaired six-day W
   expect(JSON.stringify(repaired)).toBe(before);
 });
 
-it('ignores absent, invalid or inapplicable saved groupings and unknown workout identities', () => {
+it('uses saved groupings in both durations and ignores invalid groupings or unknown workout identities', () => {
   const workout = day('future', 0, 1, { name: 'Squat', sourceWeek: 3 });
   const saved = { 0: [[0], [1], [2], [3, 4]] };
   const base = routine([workout], ['3 weeks']);
@@ -349,8 +349,8 @@ it('ignores absent, invalid or inapplicable saved groupings and unknown workout 
   [undefined, null, { 0: [[0], [1], [3, 4]] }, { 0: [[0], [1], [2], [3, 3]] }, { 0: 'unknown' }]
     .forEach(cycleWeekGroups => expect(buildPlanCalendar({ ...base, cycleWeekGroups }, '2026-10-01')).toEqual(expected));
   const fiveWeeks = routine([workout]);
-  expect(buildPlanCalendar({ ...fiveWeeks, cycleWeekGroups: saved }, '2026-10-01'))
-    .toEqual(buildPlanCalendar(fiveWeeks, '2026-10-01'));
+  expect(buildPlanCalendar({ ...fiveWeeks, cycleWeekGroups: saved }, '2026-10-01').byWorkoutId.get('future'))
+    .toMatchObject({ key: '0:3', weekLabel: 'Week 4' });
   [{ ...workout, name: 'Custom' }, { ...workout, sourceWeek: undefined }, { ...workout, cycleIndex: undefined }]
     .forEach(unknown => {
       const plan = { ...base, workouts: [unknown] };

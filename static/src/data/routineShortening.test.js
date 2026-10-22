@@ -150,7 +150,8 @@ it('retains historical Week 4 while forecasting only one future week after four 
   expect(stage(updated, 'Deadlift', 4).weekLabel).toBe('Week 5');
 });
 
-it('does not allow lengthening a shortened cycle or changing the number of cycles', () => {
+it('allows lengthening a shortened cycle while rejecting unsupported lengths', () => {
   const routine = make({ duration: '3 weeks' });
-  expect(() => updateRoutinePlan(routine, { duration: '5 weeks' })).toThrow(/only change from 5 weeks to 3 weeks/);
+  expect(updateRoutinePlan(routine, { duration: '5 weeks' }).workouts).toHaveLength(20);
+  expect(() => updateRoutinePlan(routine, { duration: '4 weeks' })).toThrow(/3 weeks or 5 weeks/);
 });

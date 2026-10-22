@@ -361,6 +361,6 @@ test('repairs an existing version 21 shortened routine on startup and preserves 
   const chunks = [];
   for await (const chunk of stream) chunks.push(chunk);
   const backup = JSON.parse(Buffer.concat(chunks).toString());
-  expect(backup).toMatchObject({ version: 23, dataSchemaVersion: 23 });
+  expect(backup).toMatchObject({ version: 24, dataSchemaVersion: 24 });
   expect(backup.routines.find(routine => routine.id === repaired.id)).toEqual(repaired);
 });

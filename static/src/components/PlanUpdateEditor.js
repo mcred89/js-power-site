@@ -157,9 +157,20 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
     : draft.mainLiftChoice === 'Low';
   const cycles = draft.mesoMode ? draft.microCycles : [{ duration: draft.duration }];
   const originalCycles = original.mesoMode ? original.microCycles : [{ duration: original.duration }];
-  const shortening = cycles.some((cycle, index) => cycle.duration !== originalCycles[index].duration);
-  const calendarBefore = review && shortening ? buildPlanCalendar(routine, calendarDay) : null;
-  const calendarAfter = review && shortening ? buildPlanCalendar(review.routine, calendarDay) : null;
+  const shortening = cycles.some((cycle, index) => cycle.duration === '3 weeks' && originalCycles[index].duration === '5 weeks');
+  const lengthening = cycles.some((cycle, index) => cycle.duration === '5 weeks' && originalCycles[index].duration === '3 weeks');
+  const durationChanged = shortening || lengthening;
+  const unfinishedCycles = new Set(routine.workouts.filter(workout => !workout.completedAt && !workout.skippedAt).map(workout => workout.cycleIndex));
+  const canLengthenFutureCycles = cycles.some((cycle, index) => unfinishedCycles.has(index) && cycle.duration !== '5 weeks');
+  const lengthenFutureCycles = () => {
+    setDraft(current => ({
+      ...current,
+      microCycles: current.microCycles.map((cycle, index) => unfinishedCycles.has(index) ? { ...cycle, duration: '5 weeks' } : cycle),
+    }));
+    setError('');
+  };
+  const calendarBefore = review && durationChanged ? buildPlanCalendar(routine, calendarDay) : null;
+  const calendarAfter = review && durationChanged ? buildPlanCalendar(review.routine, calendarDay) : null;
 
   return (
     <section className="plan-update-editor" aria-labelledby="plan-update-heading" aria-busy={saving}>
@@ -173,12 +184,16 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
           <div className="plan-update-impact" role="status">
             <strong>{review.changedWorkouts} future {review.changedWorkouts === 1 ? 'workout' : 'workouts'} will change</strong>
             <p>{review.completedWorkouts} completed · {review.startedWorkouts} already started — preserved</p>
+            {review.addedWorkouts > 0 && <React.Fragment>
+              <strong>{review.addedWorkouts} future {review.addedWorkouts === 1 ? 'workout' : 'workouts'} will be added</strong>
+              <p>{Object.entries(review.addedByName).map(([name, count]) => `${name}: ${count}`).join(' · ')}</p>
+            </React.Fragment>}
             {review.removedWorkouts > 0 && <React.Fragment>
               <strong>{review.removedWorkouts} unstarted {review.removedWorkouts === 1 ? 'workout' : 'workouts'} will be removed</strong>
               <p>{Object.entries(review.removedByName).map(([name, count]) => `${name}: ${count}`).join(' · ')}</p>
             </React.Fragment>}
             {review.preservedExtraWorkouts > 0 && <p>{review.preservedExtraWorkouts} recorded or started {review.preservedExtraWorkouts === 1 ? 'workout falls' : 'workouts fall'} outside the shorter schedule and will stay in the plan.</p>}
-            {!review.changedWorkouts && !review.removedWorkouts && <p>These settings will be saved, but no remaining workout prescriptions change.</p>}
+            {!review.changedWorkouts && !review.removedWorkouts && !review.addedWorkouts && <p>These settings will be saved, but no remaining workout prescriptions change.</p>}
           </div>
           <h2 className="plan-update-subheading">Your changes</h2>
           <dl className="plan-update-changes">
@@ -201,7 +216,7 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
             {localDateKey(calendarBefore.end) === localDateKey(calendarAfter.end) &&
               calendarBefore.remainingWeeks === calendarAfter.remainingWeeks && <p className="field-help">The estimated end stays the same because the remaining schedule still spans the same number of weeks. Started and recorded weeks are kept.</p>}
           </section>}
-          {shortening && review.futureWeeks?.length > 0 && <section className="plan-update-schedule" aria-label="Remaining workout schedule">
+          {durationChanged && review.futureWeeks?.length > 0 && <section className="plan-update-schedule" aria-label="Remaining workout schedule">
             <h2 className="plan-update-subheading">Remaining workout schedule</h2>
             <ol>
               {review.futureWeeks.map((week, index) => <li key={index}>
@@ -212,7 +227,9 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
           </section>}
           {review.removedOverrides > 0 && <p className="plan-update-warning">The removed workouts include {review.removedOverrides} customized {review.removedOverrides === 1 ? 'exercise' : 'exercises'}. Those exercise edits will be removed with their workouts.</p>}
           <p className="plan-update-note">{review.preservedOverrides > 0 ? `${review.preservedOverrides} individual exercise ${review.preservedOverrides === 1 ? 'customization stays' : 'customizations stay'} in place on remaining workouts. ` : ''}Individual exercise edits on remaining workouts are kept, including customized exercises whose plan option you turn off. Edit those exercises from the workout if needed.</p>
-          <p className="plan-update-note">{shortening ? 'Remaining workouts keep their order. Only untouched weeks after your latest recorded or started workout are combined. Earlier weeks keep their original schedule, so the total cycle may span more than three calendar weeks.' : 'Your workout order and cycle schedule stay the same.'}</p>
+          {shortening && <p className="plan-update-note">Remaining workouts keep their order. Only untouched weeks after your latest recorded or started workout are combined. Earlier weeks keep their original schedule, so the total cycle may span more than three calendar weeks.</p>}
+          {lengthening && <p className="plan-update-note">Lengthened cycles keep recorded or started weeks and all earlier weeks on their existing schedule. Only untouched later weeks are split into separate weeks, restoring omitted Deadlift and dedicated Strongman days. A cycle already underway may span fewer than five calendar weeks.</p>}
+          {!durationChanged && <p className="plan-update-note">Your workout order and cycle schedule stay the same.</p>}
           {error && <p className="plan-update-error" role="alert">{error}</p>}
           <div className="plan-update-actions">
             <button type="button" className="primary-button" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save update'}</button>
@@ -272,18 +289,18 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
           </fieldset>
           <fieldset className="plan-update-group">
             <legend>Cycle length</legend>
-            <p className="field-help" id="plan-update-duration-help">Changing to 3 weeks combines remaining untouched weeks in pairs. Weeks with completed, skipped, started, or logged workouts and all earlier weeks keep their original schedule. With dedicated Strongman days, each combined week is Squat, Press, Deadlift, Squat, Press, Strongman. A final unpaired week keeps its usual days.</p>
+            <p className="field-help" id="plan-update-duration-help">Changing to 5 weeks spreads remaining untouched weeks out and restores omitted Deadlift and dedicated Strongman days. Changing to 3 weeks combines remaining untouched weeks in pairs. In each cycle, weeks with completed, skipped, started, or logged workouts and all earlier weeks keep their original schedule. Your estimated end date follows the updated schedule.</p>
+            {draft.mesoMode && cycles.length > 1 && <p><button type="button" className="secondary-button" disabled={!canLengthenFutureCycles} onClick={lengthenFutureCycles}>Set future cycles to 5 weeks</button></p>}
             <div className="plan-update-volumes">
               {cycles.map((cycle, index) => (
                 <label className="form-field" key={index}>
                   <span className="field-label">{draft.mesoMode ? `Cycle ${index + 1} duration` : 'Cycle duration'}</span>
-                  <select className="select-input" name="duration" data-cycle-index={index} value={cycle.duration} disabled={originalCycles[index].duration === '3 weeks'} aria-describedby="plan-update-duration-help" onChange={event => draft.mesoMode ? changeCycle(index, 'duration', event.target.value) : changeInput(event)}>
+                  <select className="select-input" name="duration" data-cycle-index={index} value={cycle.duration} aria-describedby="plan-update-duration-help" onChange={event => draft.mesoMode ? changeCycle(index, 'duration', event.target.value) : changeInput(event)}>
                     <option>5 weeks</option><option>3 weeks</option>
                   </select>
                 </label>
               ))}
             </div>
-            {originalCycles.some(cycle => cycle.duration === '3 weeks') && <p className="field-help">Existing 3-week cycles cannot be lengthened.</p>}
           </fieldset>
           <fieldset className="plan-update-group">
             <legend>Volume and accessories</legend>
@@ -318,7 +335,7 @@ export const PlanUpdateEditor = ({ routine, onSave, onCancel }) => {
               ))}
             </div>
           </fieldset>
-          <p className="plan-update-note">Individual exercise edits on remaining workouts are kept. Review the exact changes and any workouts that will be removed before saving. Workout order and the dedicated Strongman day setting stay the same.</p>
+          <p className="plan-update-note">Individual exercise edits on remaining workouts are kept. Review the exact changes and any workouts that will be added or removed before saving. Existing workouts keep their order and the dedicated Strongman day setting stays the same.</p>
           {error && <p className="plan-update-error" role="alert">{error}</p>}
           <div className="plan-update-actions">
             <button type="submit" className="primary-button" disabled={!changes.length}>Review changes</button>

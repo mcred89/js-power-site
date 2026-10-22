@@ -11,9 +11,19 @@ import { addStrongmanTracking, validateStrongmanRecord } from './strongman';
 import { migrateStrongmanCompetitions, validateProfileCompetitions } from './strongmanCompetitions';
 import { addWorkoutSourceWeeks } from './workoutScheduleIdentity';
 import { repairShortenedCycles } from './cycleShorteningRepair';
+import { addDeletedWorkoutStages } from './deletedWorkoutStages';
 
 // Backup preparation runs in the on-demand data task worker, outside startup.
-export const BACKUP_VERSION = 23;
+export const BACKUP_VERSION = 24;
+
+const addArchivedDeletedWorkoutStages = archives => {
+  if (!Array.isArray(archives)) return archives;
+  const migrated = archives.map(archive => {
+    const record = addDeletedWorkoutStages(archive?.record);
+    return record === archive?.record ? archive : { ...archive, record };
+  });
+  return migrated.every((archive, index) => archive === archives[index]) ? archives : migrated;
+};
 
 // Backup migrations must be pure: never mutate the object parsed from the
 // user's file. This makes failed imports safe and migrations easy to test.
@@ -151,6 +161,14 @@ export const backupMigrations = {
   }),
   // A missing pending queue means no copied work; retain every saved record.
   23: backup => ({ ...backup, version: 23, dataSchemaVersion: 23 }),
+  24: backup => ({
+    ...backup,
+    version: 24,
+    dataSchemaVersion: 24,
+    routines: Array.isArray(backup.routines) ? backup.routines.map(addDeletedWorkoutStages) : backup.routines,
+    templates: Array.isArray(backup.templates) ? backup.templates.map(addDeletedWorkoutStages) : backup.templates,
+    archives: addArchivedDeletedWorkoutStages(backup.archives),
+  }),
 };
 
 export const migrateBackup = original => {

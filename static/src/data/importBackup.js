@@ -2,6 +2,7 @@ import { serializedRecordsEqual } from './recordComparison';
 import { isSupportedRoutine, retireStrongmanData } from './retiredStrongman';
 import { validateStrongmanRecord } from './strongman';
 import { validateProfileCompetitions } from './strongmanCompetitions';
+import { workoutStageKey } from './deletedWorkoutStages';
 export { importPlanBatch, activateRoutineImport } from './importPersistence';
 
 const mergeRecord = (local, imported) => ({ ...imported, ...local });
@@ -105,8 +106,15 @@ const mergeRoutine = (local, imported) => {
       ? imported.workouts.filter(workout => !localWorkoutIds.has(workout.id))
       : []),
   ].sort((left, right) => (left.sequence || 0) - (right.sequence || 0));
+  const restoredStages = new Set(workouts.map(workoutStageKey).filter(Boolean));
+  const deletions = [local.deletedWorkoutStages, imported.deletedWorkoutStages].filter(Array.isArray);
   return {
     ...mergeRecord(local, imported),
+    // Keep deletion intent from both copies, but an explicitly restored workout
+    // in the reviewed merge takes precedence over its old deletion marker.
+    ...(deletions.length ? {
+      deletedWorkoutStages: [...new Set(deletions.flat())].filter(key => !restoredStages.has(key)),
+    } : {}),
     ...(hasStrongmanLog ? { strongmanLog } : {}),
     workouts: reconcileStrongmanQueues(workouts, strongmanLog),
   };

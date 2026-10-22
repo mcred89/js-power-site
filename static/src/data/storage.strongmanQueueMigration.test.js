@@ -25,9 +25,9 @@ const read = (database, store, id) => new Promise((resolve, reject) => {
   request.onerror = () => reject(request.error);
 });
 
-it('creates a fresh v23 database and persists queued prefills independently from actual history', async () => {
+it('creates a fresh database and persists queued prefills independently from actual history', async () => {
   const database = await open(new IDBFactory(), 'fresh-queue', DATABASE_VERSION);
-  expect(await read(database, 'metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: 23 });
+  expect(await read(database, 'metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
   await new Promise((resolve, reject) => {
     const transaction = database.transaction('routines', 'readwrite');
     transaction.objectStore('routines').put(routine);
@@ -38,7 +38,7 @@ it('creates a fresh v23 database and persists queued prefills independently from
   database.close();
 });
 
-it.each([17, 18, 19, 20, 21, 22])('upgrades v%i to v23 without rewriting saved training or adding queues', async version => {
+it.each([17, 18, 19, 20, 21, 22])('upgrades v%i without rewriting saved training or adding queues', async version => {
   const factory = new IDBFactory();
   let database = await open(factory, `queue-upgrade-${version}`, version);
   const original = { ...routine, workouts: [routine.workouts[0]], inputs: { strongmanCompetition: null } };
@@ -55,7 +55,7 @@ it.each([17, 18, 19, 20, 21, 22])('upgrades v%i to v23 without rewriting saved t
   expect(stored.strongmanLog).toEqual(original.strongmanLog);
   expect(stored.unknown).toEqual(original.unknown);
   expect(stored.workouts[0]).not.toHaveProperty('strongmanQueue');
-  expect(await read(database, 'metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: 23 });
+  expect(await read(database, 'metadata', 'dataSchemaVersion')).toEqual({ key: 'dataSchemaVersion', value: DATABASE_VERSION });
   database.close();
 });
 
